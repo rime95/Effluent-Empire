@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { isLive, useActiveProject, useGame } from '../game/store';
+import { closeGame, exportSave, isLive, saveAsNewSlot, saveNow, useActiveProject, useGame } from '../game/store';
+import { downloadSave } from '../game/saves';
+import { MainMenu } from './screens/MainMenu';
 import { projectSlots } from '../game/staff';
 import { BrandMark, NavIcon } from './components/Symbols';
 import { rm } from './format';
@@ -38,9 +40,28 @@ const LOCKED = [
 const STATUS_PILL: Record<string, string> = { design: 'info', building: 'warn', failed: 'fail', completed: 'pass', abandoned: 'fail' };
 
 export function App() {
+  const [inGame, setInGame] = useState(false);
+  if (!inGame) return <MainMenu onEnter={() => setInGame(true)} />;
+  return <Game onQuit={() => setInGame(false)} />;
+}
+
+function Game({ onQuit }: { onQuit: () => void }) {
   const [screen, setScreen] = useState<Screen>('hq');
+  const [paused, setPaused] = useState(false);
   const g = useGame();
   const p = useActiveProject();
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement)) setPaused((x) => !x);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  const quit = () => {
+    closeGame();
+    onQuit();
+  };
 
   useEffect(() => {
     if (!g.toast) return;
@@ -86,6 +107,9 @@ export function App() {
             <span className={`value ${weeksLeft < 0 ? 'neg' : ''}`}>{weeksLeft >= 0 ? `${weeksLeft} wk left` : `${-weeksLeft} wk late`}</span>
           </div>
         )}
+        <button className="btn sm ghost" onClick={() => setPaused(true)} title="Menu (Esc): save, download save file, quit to main menu">
+          ☰ Menu
+        </button>
         <button className="btn sm" onClick={() => g.advanceWeek(1)} title="Advance one week: payroll, overheads, plant operations, lab results">
           Next week ▸
         </button>
@@ -153,14 +177,53 @@ export function App() {
           {g.toast}
         </div>
       )}
+      {paused && <PauseMenu onResume={() => setPaused(false)} onQuit={quit} />}
       {g.gameOver && (
         <div className="toast" style={{ borderColor: 'var(--alarm)', bottom: 'auto', top: 70 }}>
           <b>Insolvent.</b> Your consultancy ran out of credit after {g.negativeWeeks} weeks in overdraft.{' '}
-          <button className="btn sm danger" onClick={() => g.newGame()}>
-            Start over
+          <button className="btn sm danger" onClick={quit}>
+            Main menu
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function PauseMenu({ onResume, onQuit }: { onResume: () => void; onQuit: () => void }) {
+  const g = useGame();
+  const [msg, setMsg] = useState<string | null>(null);
+  const report = (r: { ok: boolean; error?: string }, okText: string) => setMsg(r.ok ? okText : r.error ?? 'Save failed.');
+  return (
+    <div className="modal-backdrop" onClick={onResume}>
+      <div className="modal pause" onClick={(e) => e.stopPropagation()}>
+        <div className="pause-head">
+          <div className="pause-title">Paused</div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {g.companyName} · week {g.week}
+          </div>
+        </div>
+        <button className="menu-btn primary" onClick={onResume}>
+          <span>Resume</span>
+          <small>Esc</small>
+        </button>
+        <button className="menu-btn" onClick={() => report(saveNow(), 'Saved.')}>
+          <span>Save</span>
+          <small>the game also autosaves</small>
+        </button>
+        <button className="menu-btn" onClick={() => report(saveAsNewSlot(), 'Saved as a new slot — you are now playing in the copy.')}>
+          <span>Save as new slot</span>
+          <small>branch your company</small>
+        </button>
+        <button className="menu-btn" onClick={() => downloadSave(exportSave(), g.companyName, g.week)}>
+          <span>Download save file</span>
+          <small>.json backup you can import later</small>
+        </button>
+        <button className="menu-btn" onClick={onQuit}>
+          <span>Save &amp; quit to main menu</span>
+        </button>
+        {msg && <div className="menu-msg">{msg}</div>}
+      </div>
     </div>
   );
 }

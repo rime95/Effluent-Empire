@@ -1,5 +1,4 @@
-import { useRef } from 'react';
-import { exportSave, useGame, WEEKLY_OVERHEAD } from '../../game/store';
+import { useGame, WEEKLY_OVERHEAD } from '../../game/store';
 import { payroll } from '../../game/staff';
 import type { Screen } from '../App';
 import { INDUSTRY_LABEL, rm } from '../format';
@@ -12,19 +11,10 @@ const MILESTONES = [
 
 export function HQ({ go }: { go: (s: Screen) => void }) {
   const g = useGame();
-  const fileRef = useRef<HTMLInputElement>(null);
   const completed = g.history.filter((h) => h.outcome === 'completed');
   const revenue = completed.reduce((a, h) => a + h.revenue, 0);
   const profit = g.history.reduce((a, h) => a + h.revenue - h.cost, 0);
 
-  const download = () => {
-    const blob = new Blob([exportSave()], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `effluent-empire-week${g.week}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-  };
 
   return (
     <div className="page">
@@ -176,33 +166,9 @@ export function HQ({ go }: { go: (s: Screen) => void }) {
         </div>
       )}
 
-      <div className="row" style={{ marginTop: 18 }}>
-        <button className="btn ghost sm" onClick={download}>
-          Export save
-        </button>
-        <button className="btn ghost sm" onClick={() => fileRef.current?.click()}>
-          Import save
-        </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/json"
-          style={{ display: 'none' }}
-          onChange={async (e) => {
-            const f = e.target.files?.[0];
-            if (f && !g.load(await f.text())) alert('Not a valid Effluent Empire save.');
-          }}
-        />
-        <button
-          className="btn ghost sm"
-          onClick={() => {
-            if (confirm('Start a new company? Your current progress will be overwritten.')) g.newGame();
-          }}
-        >
-          New game
-        </button>
-        <span className="muted" style={{ fontSize: 12 }}>Progress autosaves in this browser.</span>
-      </div>
+      <p className="muted" style={{ fontSize: 12, marginTop: 18 }}>
+        Progress autosaves to this company’s slot. Open <b>☰ Menu</b> (Esc) to save, download a save file or return to the main menu.
+      </p>
     </div>
   );
 }

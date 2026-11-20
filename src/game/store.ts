@@ -8,12 +8,13 @@ import { Enquiry, PAYMENT, generateEnquiry } from './customers';
 import { LAB_TESTS, LabTestId, applyTest } from './lab';
 import { Market, initialMarket, stepMarket } from './market';
 import { ACTIONS, INCIDENT_LABEL, clampSetpoint } from './incidents';
+import { importLegacy, newSlotId, readSlot, summarize, writeSlot } from './saves';
 import { OM, Plant, omFeeOffer, operateWeek, recommendedMaintenance } from './operations';
 import { Project, ABANDON_PENALTY, commission, constructionWeeks, newProject } from './project';
 import { createRng } from './rng';
 import { Employee, founder, generateCandidates, labDiscount, labWeeks, operatorCapacity, payroll, projectSlots, salesBoost } from './staff';
 
-export const SAVE_KEY = 'effluent-empire-save-v1';
+export { LEGACY_KEY as SAVE_KEY } from './saves';
 export const START_CASH = 500_000;
 /** office rent, utilities, insurance — RM per week (staff salaries are separate) */
 export const WEEKLY_OVERHEAD = 3_500;
@@ -182,14 +183,6 @@ export function migrate(raw: unknown): GameState | null {
   };
 }
 
-function loadSaved(): GameState | null {
-  try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    return raw ? migrate(JSON.parse(raw)) : null;
-  } catch {
-    return null;
-  }
-}
 
 const book = (s: GameState, label: string, amount: number, cat: LedgerCat): GameState => ({
   ...s,
@@ -277,7 +270,8 @@ export const useGame = create<GameState & Actions>((set, get) => {
   const active = (s: GameState) => s.projects.find((p) => p.id === s.activeProjectId) ?? null;
 
   return {
-    ...(loadSaved() ?? initial()),
+    // nothing is loaded until the player picks New / Continue / Load on the main menu
+    ...initial(),
     newGame: (name) => set(() => initial(name)),
     advanceWeek: (n = 1) =>
       set((s) => {
@@ -464,16 +458,83 @@ export function useActiveProject(): Project | null {
   return useGame((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
 }
 
-// autosave (debounced: canvas drags fire many updates)
+// ---- save slots (see saves.ts) ----
+let currentSlot: string | null = null;
+export const getCurrentSlot = () => currentSlot;
+
+/** Write the running game to its slot now. */
+export function saveNow(): { ok: boolean; error?: string } {
+  if (!currentSlot) return { ok: false, error: 'No save slot is active.' };
+  try {
+    writeSlot(summarize(currentSlot, useGame.getState()), exportSave());
+    return { ok: true };
+  } catch {
+    return { ok: false, error: 'Browser storage is full — export this save to a file or delete an old slot.' };
+  }
+}
+
+/** Start a new company in a new slot. */
+export function startNewGame(name: string) {
+  currentSlot = newSlotId();
+  useGame.setState({ ...initial(name.trim() || 'Effluent Engineering Sdn Bhd'), toast: null });
+  saveNow();
+}
+
+/** Open a stored slot; false if its data is missing or invalid. */
+export function openSlot(id: string): boolean {
+  const raw = readSlot(id);
+  const s = raw ? migrateJson(raw) : null;
+  if (!s) return false;
+  currentSlot = id;
+  useGame.setState({ ...s, toast: null });
+  return true;
+}
+
+/** Import a save file into a NEW slot and open it. */
+export function importSaveFile(json: string): boolean {
+  const s = migrateJson(json);
+  if (!s) return false;
+  currentSlot = newSlotId();
+  useGame.setState({ ...s, toast: 'Save file imported into a new slot.' });
+  saveNow();
+  return true;
+}
+
+/** Copy the running game into a new slot and continue there ("Save as"). */
+export function saveAsNewSlot(): { ok: boolean; error?: string } {
+  currentSlot = newSlotId();
+  return saveNow();
+}
+
+/** Leave the game (autosave first); the UI returns to the main menu. */
+export function closeGame() {
+  saveNow();
+  currentSlot = null;
+}
+
+export function migrateJson(json: string): GameState | null {
+  try {
+    return migrate(JSON.parse(json));
+  } catch {
+    return null;
+  }
+}
+
+importLegacy(migrateJson);
+
+// autosave to the active slot (debounced: canvas drags fire many updates)
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let warnedFull = false;
 useGame.subscribe(() => {
+  if (!currentSlot) return;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(SAVE_KEY, exportSave());
-    } catch {
-      /* storage unavailable */
+    const r = saveNow();
+    if (!r.ok && r.error && !warnedFull) {
+      warnedFull = true;
+      useGame.setState({ toast: r.error });
     }
+    if (r.ok) warnedFull = false;
   }, 400);
 });
 
