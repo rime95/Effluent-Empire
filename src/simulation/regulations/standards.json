@@ -1,0 +1,78 @@
+{
+  "version": "MY-EQIE-2009/game-2",
+  "jurisdiction": "Malaysia",
+  "source": "Environmental Quality (Industrial Effluent) Regulations 2009, P.U.(A) 434/2009 — Fifth Schedule (Standards A and B), Regulation 11(2) (combined metals), Seventh Schedule (COD by trade). Verified 2026-11-21 against the gazetted text (FAOLEX copy, faolex.fao.org/docs/pdf/mal102817.pdf). Amendments after 2009 not checked.",
+  "parameters": {
+    "T": { "label": "Temperature", "unit": "°C" },
+    "pH": { "label": "pH", "unit": "" },
+    "BOD5": { "label": "BOD₅ at 20 °C", "unit": "mg/L" },
+    "COD": { "label": "COD", "unit": "mg/L" },
+    "TSS": { "label": "Suspended solids", "unit": "mg/L" },
+    "OG": { "label": "Oil & grease", "unit": "mg/L" },
+    "NH3N": { "label": "Ammoniacal nitrogen", "unit": "mg/L" },
+    "Ni": { "label": "Nickel", "unit": "mg/L" },
+    "Cu": { "label": "Copper", "unit": "mg/L" },
+    "Zn": { "label": "Zinc", "unit": "mg/L" },
+    "Al": { "label": "Aluminium", "unit": "mg/L" },
+    "Fe": { "label": "Iron", "unit": "mg/L" },
+    "CrVI": { "label": "Chromium, hexavalent", "unit": "mg/L" },
+    "CrIII": { "label": "Chromium, trivalent", "unit": "mg/L" },
+    "MetalsTotal": { "label": "Cu+Mn+Ni+Sn+Zn total (Reg. 11(2))", "unit": "mg/L" },
+    "MetalsSoluble": { "label": "Cu+Mn+Ni+Sn+Zn soluble (Reg. 11(2))", "unit": "mg/L" }
+  },
+  "standards": {
+    "A": {
+      "label": "Standard A",
+      "description": "Discharge into inland waters within the catchment areas of the Sixth Schedule (upstream of water supply intakes).",
+      "limits": {
+        "T": { "max": 40 },
+        "pH": { "min": 6.0, "max": 9.0 },
+        "BOD5": { "max": 20 },
+        "TSS": { "max": 50 },
+        "OG": { "max": 1.0 },
+        "NH3N": { "max": 10 },
+        "Ni": { "max": 0.2 },
+        "Cu": { "max": 0.2 },
+        "Zn": { "max": 2.0 },
+        "Al": { "max": 10 },
+        "Fe": { "max": 1.0 },
+        "CrVI": { "max": 0.05 },
+        "CrIII": { "max": 0.2 }
+      }
+    },
+    "B": {
+      "label": "Standard B",
+      "description": "Discharge into any other inland waters or Malaysian waters.",
+      "limits": {
+        "T": { "max": 40 },
+        "pH": { "min": 5.5, "max": 9.0 },
+        "BOD5": { "max": 50 },
+        "TSS": { "max": 100 },
+        "OG": { "max": 10 },
+        "NH3N": { "max": 20 },
+        "Ni": { "max": 1.0 },
+        "Cu": { "max": 1.0 },
+        "Zn": { "max": 2.0 },
+        "Al": { "max": 15 },
+        "Fe": { "max": 5.0 },
+        "CrVI": { "max": 0.05 },
+        "CrIII": { "max": 1.0 }
+      }
+    }
+  },
+  "combinedMetals": {
+    "note": "Regulation 11(2): where two or more of parameters (xii)-(xvi) (Cu, Mn, Ni, Sn, Zn) are present, their total shall not exceed these values. Mn and Sn are not modelled in Phase 1.",
+    "metals": ["Cu", "Mn", "Ni", "Sn", "Zn"],
+    "presenceThreshold_mgL": 0.01,
+    "A": { "MetalsTotal": { "max": 0.5 } },
+    "B": { "MetalsTotal": { "max": 3.0 }, "MetalsSoluble": { "max": 1.0 } }
+  },
+  "codByTrade": {
+    "default": { "A": 80, "B": 200 },
+    "textile": { "A": 80, "B": 250 },
+    "pulpMill": { "A": 80, "B": 350 },
+    "recycledPaperMill": { "A": 80, "B": 250 },
+    "pulpAndPaperMill": { "A": 80, "B": 300 },
+    "fermentationDistillery": { "A": 400, "B": 400 }
+  }
+}
