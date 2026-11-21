@@ -82,6 +82,10 @@ export function newProject(e: Enquiry, week: number): Project {
 
 export function makeNode(kind: PNode['kind'], Q: number, existing: PNode[]): PNode {
   if (kind === 'influent' || kind === 'discharge') throw new Error('terminal nodes are fixed');
+  if (kind === 'disposal') {
+    const count = existing.filter((n) => n.kind === 'disposal').length + 1;
+    return { id: `disposal-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`, kind, tag: `SD-${String(count).padStart(2, '0')}`, params: {} };
+  }
   const def = CATALOGUE[kind];
   const count = existing.filter((n) => n.kind === kind).length + 1;
   const id = `${kind}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;

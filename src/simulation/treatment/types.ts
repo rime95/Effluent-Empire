@@ -33,6 +33,8 @@ export interface ProcessResult {
   notes: Note[];
   chemicals: ChemicalUse[];
   energy_kWhd: number;
+  /** solids mass fraction of the sludge leaving the sludge port (thickener / press); default by unit kind otherwise */
+  sludgeSolidsFrac?: number;
 }
 
 export function result(out: Stream, extra: Partial<ProcessResult> = {}): ProcessResult {

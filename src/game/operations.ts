@@ -99,6 +99,10 @@ const BREAKDOWNS: Record<UnitType, { description: string; apply: (p: Params) => 
   activatedSludge: { description: 'Aeration blower failure — DO collapsed', apply: (p) => ({ ...p, do: 0.3 }) },
   sandFilter: { description: 'Filter backwash failure — bed clogged and short-circuiting', apply: (p) => ({ ...p, area: Number(p.area) * 0.35 }) },
   carbon: { description: 'Carbon bed exhausted — replacement delayed', apply: (p) => ({ ...p, ebct: Number(p.ebct) * 0.25 }) },
+  thickener: { description: 'Thickener rake drive tripped — sludge blanket bridging, thin underflow', apply: (p) => ({ ...p, area: Number(p.area) * 0.4 }) },
+  filterPress: { description: 'Filter press hydraulic pack failure — no dewatering', apply: () => 'bypass' },
+  splitter: { description: 'Splitter gate jammed — all flow to one side', apply: (p) => ({ ...p, split: 100 }) },
+  mixer: { description: 'Mixing box blocked with debris', apply: (p) => p },
 };
 
 /** Apply an active breakdown to the built graph (dosing failures bypass the unit; others degrade its parameters). */

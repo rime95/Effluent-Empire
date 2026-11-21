@@ -1,16 +1,22 @@
 /**
- * Process graph solver: nodes are units (plus one influent and one discharge), edges are pipes.
- * Solved in topological order; a node with several inlets is a mixer (flow-weighted blend + re-equilibration);
- * a node with several outlets splits its outflow equally. Cycles are rejected in Phase 1
- * (activated sludge recycle is internal to the reactor model).
+ * Process graph solver: nodes are units (plus one influent, one discharge and any number of sludge disposal points),
+ * edges are pipes leaving a port ('out' main, 'sludge', or splitter 'a'/'b').
+ * - several inlets → flow-weighted blend + re-equilibration (mixer);
+ * - several main outlets → equal split; a splitter splits a/b by its 'split' %;
+ * - sludge ports carry the removed solids as a real stream (knowledge/physical/sludge_thickening_dewatering.md);
+ * - recycle loops are solved by successive substitution on tear streams (knowledge/design/recycle_streams.md).
  */
 import { BalanceCheck, Components, addComponents, checkMassBalance, components, zeroComponents } from '../core/massBalance';
-import { POOLS, Stream, blend, cloneStream, poolMass } from '../core/stream';
+import { POOLS, Stream, blend, cloneStream, codTotal, emptyStream, poolMass, tss } from '../core/stream';
+import { BACKWASH_FRACTION, defaultSludgeFraction, removedDryKgD, splitSludge } from '../physical/sludge';
 import { equilibrate } from '../chemistry/acidBase';
 import { CATALOGUE, PRICES, Params, UnitType } from './catalogue';
 import { Note, ProcessResult } from './types';
 
-export type NodeKind = UnitType | 'influent' | 'discharge';
+export type NodeKind = UnitType | 'influent' | 'discharge' | 'disposal';
+export type PortId = 'out' | 'sludge' | 'a' | 'b';
+/** unit kinds with a sludge draw-off port */
+export const SLUDGE_PORT_KINDS: NodeKind[] = ['clarifier', 'oilSep', 'sandFilter', 'thickener', 'filterPress'];
 
 export interface PNode {
   id: string;
@@ -28,6 +34,8 @@ export interface PEdge {
   id: string;
   from: string;
   to: string;
+  /** outlet port of the source node (default 'out') */
+  fromPort?: PortId;
 }
 
 export interface ProcessGraph {
@@ -62,6 +70,11 @@ export interface SimResult {
   sludgeKgD: number;
   chemicals: { name: string; kgPerDay: number; costRMd: number }[];
   balance: BalanceCheck | null;
+  /** recycle (tear) edges and the iterations needed to converge */
+  tears: string[];
+  iterations: number;
+  /** sludge disposal points: wet and dry mass, cost */
+  disposal: { id: string; wetKgD: number; dryKgD: number; costRMd: number; metal: boolean }[];
 }
 
 function sumPartial(...xs: Partial<Components>[]): Components {
@@ -74,19 +87,60 @@ export function validateGraph(g: ProcessGraph): Note[] {
   const dis = g.nodes.filter((n) => n.kind === 'discharge');
   if (inf.length !== 1) errs.push({ level: 'error', code: 'graph.influent', text: 'The design needs exactly one raw-wastewater inlet.' });
   if (dis.length !== 1) errs.push({ level: 'error', code: 'graph.discharge', text: 'The design needs exactly one final discharge point.' });
-  const ids = new Set(g.nodes.map((n) => n.id));
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
   for (const e of g.edges) {
-    if (!ids.has(e.from) || !ids.has(e.to)) errs.push({ level: 'error', code: 'graph.dangling', text: 'A pipe is connected to a unit that no longer exists.' });
-    if (g.nodes.find((n) => n.id === e.from)?.kind === 'discharge') errs.push({ level: 'error', code: 'graph.dischargeOutlet', text: 'The discharge point cannot have an outlet pipe.' });
-    if (g.nodes.find((n) => n.id === e.to)?.kind === 'influent') errs.push({ level: 'error', code: 'graph.influentInlet', text: 'The raw-wastewater inlet cannot receive a pipe.' });
+    const from = byId.get(e.from);
+    const to = byId.get(e.to);
+    if (!from || !to) {
+      errs.push({ level: 'error', code: 'graph.dangling', text: 'A pipe is connected to a unit that no longer exists.' });
+      continue;
+    }
+    if (from.kind === 'discharge' || from.kind === 'disposal') errs.push({ level: 'error', code: 'graph.dischargeOutlet', text: `${from.tag ?? from.kind} is an end point and cannot have an outlet pipe.` });
+    if (to.kind === 'influent') errs.push({ level: 'error', code: 'graph.influentInlet', text: 'The raw-wastewater inlet cannot receive a pipe.' });
+    if (e.fromPort === 'sludge' && !SLUDGE_PORT_KINDS.includes(from.kind)) errs.push({ level: 'error', code: 'graph.noSludgePort', text: `${from.tag ?? from.kind} has no sludge outlet.` });
+    const sludgeLine = isSludgeEdge(g, e);
+    if (to.kind === 'disposal' && !sludgeLine) errs.push({ level: 'error', code: 'graph.disposalWater', text: `Only sludge lines can go to ${to.tag ?? 'sludge disposal'} — treated water must go to the final discharge.` });
+    if (sludgeLine && to.kind === 'discharge') errs.push({ level: 'error', code: 'graph.sludgeToRiver', text: `Sludge from ${from.tag ?? from.kind} reaches the final discharge — send it to a thickener, filter press or sludge disposal.` });
+    if (sludgeLine && !['thickener', 'filterPress', 'disposal', 'mixer', 'splitter'].includes(to.kind)) errs.push({ level: 'warn', code: 'graph.sludgeIntoProcess', text: `Sludge is piped into ${to.tag ?? to.kind} — treatment units are not designed for 1 % solids feed.` });
+  }
+  for (const n of g.nodes.filter((x) => x.kind === 'splitter')) {
+    const outs = g.edges.filter((e) => e.from === n.id);
+    if (outs.length && (outs.every((e) => e.fromPort !== 'b') || outs.every((e) => e.fromPort === 'b'))) errs.push({ level: 'warn', code: 'graph.splitterOneSide', text: `${n.tag ?? 'Splitter'} has only one outlet connected — its split % is ignored and all flow goes that way.` });
   }
   for (const n of g.nodes) {
     const ins = g.edges.filter((e) => e.to === n.id).length;
-    const outs = g.edges.filter((e) => e.from === n.id).length;
+    const mainOuts = g.edges.filter((e) => e.from === n.id && e.fromPort !== 'sludge').length;
     if (n.kind !== 'influent' && ins === 0) errs.push({ level: 'error', code: 'graph.noInlet', text: `${n.tag ?? n.kind} has no inlet pipe.` });
-    if (n.kind !== 'discharge' && outs === 0) errs.push({ level: 'error', code: 'graph.noOutlet', text: `${n.tag ?? n.kind} has no outlet pipe.` });
+    if (n.kind !== 'discharge' && n.kind !== 'disposal' && mainOuts === 0) errs.push({ level: 'error', code: 'graph.noOutlet', text: `${n.tag ?? n.kind} has no outlet pipe.` });
   }
   return errs;
+}
+
+/** A pipe carries sludge if it leaves a sludge port, or leaves a mixer/splitter fed by sludge. */
+export function isSludgeEdge(g: ProcessGraph, e: PEdge, seen = new Set<string>()): boolean {
+  if (e.fromPort === 'sludge') return true;
+  const from = g.nodes.find((n) => n.id === e.from);
+  if (!from || (from.kind !== 'mixer' && from.kind !== 'splitter') || seen.has(from.id)) return false;
+  seen.add(from.id);
+  return g.edges.filter((x) => x.to === from.id).some((x) => isSludgeEdge(g, x, seen));
+}
+
+/** Back-edges of a depth-first search from the inlet: the tear streams that break recycle loops. */
+export function findTears(g: ProcessGraph): string[] {
+  const state = new Map<string, 0 | 1 | 2>(); // 0 new, 1 on stack, 2 done
+  const tears: string[] = [];
+  const visit = (id: string) => {
+    state.set(id, 1);
+    for (const e of g.edges.filter((x) => x.from === id)) {
+      const st = state.get(e.to) ?? 0;
+      if (st === 1) tears.push(e.id);
+      else if (st === 0) visit(e.to);
+    }
+    state.set(id, 2);
+  };
+  const roots = [...g.nodes.filter((n) => n.kind === 'influent'), ...g.nodes.filter((n) => n.kind !== 'influent')];
+  for (const n of roots) if ((state.get(n.id) ?? 0) === 0) visit(n.id);
+  return tears;
 }
 
 function topoSort(g: ProcessGraph): string[] | null {
@@ -105,27 +159,15 @@ function topoSort(g: ProcessGraph): string[] | null {
   return order.length === g.nodes.length ? order : null;
 }
 
-export function simulate(g: ProcessGraph, influent: Stream): SimResult {
-  const res: SimResult = {
-    ok: false,
-    errors: validateGraph(g),
-    order: [],
-    nodes: {},
-    edges: {},
-    effluent: null,
-    capex: 0,
-    footprint: 0,
-    opexRMd: 0,
-    opexSplit: { chemicals: 0, energy: 0, sludge: 0 },
-    energy_kWhd: 0,
-    sludgeKgD: 0,
-    chemicals: [],
-    balance: null,
-  };
-  if (!(influent.Q > 0)) res.errors.push({ level: 'error', code: 'graph.noFlow', text: 'Influent flow must be greater than zero.' });
-  const order = res.errors.length ? null : topoSort(g);
-  if (!order && !res.errors.length) res.errors.push({ level: 'error', code: 'graph.cycle', text: 'Recycle loops between units are not supported yet.' });
-  if (res.errors.length || !order) return res;
+function emptyResult(errors: Note[]): SimResult {
+  return { ok: false, errors, order: [], nodes: {}, edges: {}, effluent: null, capex: 0, footprint: 0, opexRMd: 0, opexSplit: { chemicals: 0, energy: 0, sludge: 0 }, energy_kWhd: 0, sludgeKgD: 0, chemicals: [], balance: null, tears: [], iterations: 0, disposal: [] };
+}
+
+const isMetalSludge = (s: Stream) => s.precipitated.Ni + s.precipitated.Cu + s.precipitated.Zn + s.precipitated.Cr > 0;
+
+/** One pass over the (tear-broken) flowsheet in topological order. */
+function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Set<string>, tearIn: Map<string, Stream>): SimResult {
+  const res = emptyResult([]);
   res.order = order;
   const byId = new Map(g.nodes.map((n) => [n.id, n]));
   const chem = new Map<string, { kg: number; price: number }>();
@@ -142,18 +184,32 @@ export function simulate(g: ProcessGraph, influent: Stream): SimResult {
       inlet = cloneStream(influent);
       sysIn = components(inlet);
     } else {
-      const ins = inEdges.map((e) => res.edges[e.id]).filter(Boolean);
-      inlet = ins.length === 1 ? cloneStream(ins[0]) : equilibrate(blend(ins));
+      const ins = inEdges.map((e) => (tears.has(e.id) ? tearIn.get(e.id) : res.edges[e.id])).filter((x): x is Stream => !!x && x.Q > 1e-9);
+      inlet = ins.length === 0 ? emptyStream(0) : ins.length === 1 ? cloneStream(ins[0]) : equilibrate(blend(ins));
     }
     if (node.kind === 'discharge') {
       res.effluent = inlet;
-      sysOut = components(inlet);
+      sysOut = addComponents(sysOut, components(inlet));
+      continue;
+    }
+    if (node.kind === 'disposal') {
+      const dryKgD = (inlet.Q * (POOLS.reduce((a, p) => a + poolMass(inlet, p), 0) + inlet.OGfree + inlet.OGemulsified)) / 1000;
+      const wetKgD = inlet.Q * 1000; // ρ ≈ 1000 kg/m³ (cake ≈ 1200: conservative for tankered sludge)
+      const metal = isMetalSludge(inlet);
+      const costRMd = wetKgD * (metal ? PRICES.disposalWet_kg.metal : PRICES.disposalWet_kg.other);
+      res.disposal.push({ id, wetKgD, dryKgD, costRMd, metal });
+      res.opexSplit.sludge += costRMd;
+      res.opexRMd += costRMd;
+      sysOut = addComponents(sysOut, components(inlet));
       continue;
     }
     let outlet = inlet;
-    if (node.kind !== 'influent' && !node.bypass) {
+    let sludgeOut: Stream | null = null;
+    const sludgeEdges = outEdges.filter((e) => e.fromPort === 'sludge');
+    const mainEdges = outEdges.filter((e) => e.fromPort !== 'sludge');
+    if (node.kind !== 'influent' && !node.bypass && inlet.Q > 1e-9) {
       const def = CATALOGUE[node.kind];
-      const clarifierFollows = outEdges.length > 0 && outEdges.every((e) => byId.get(e.to)?.kind === 'clarifier');
+      const clarifierFollows = mainEdges.length > 0 && mainEdges.every((e) => byId.get(e.to)?.kind === 'clarifier');
       const r = def.run(inlet, node.params, { clarifierFollows });
       const sludge = r.removed ? components(r.removed, false) : zeroComponents();
       const balance = checkMassBalance({
@@ -166,11 +222,13 @@ export function simulate(g: ProcessGraph, influent: Stream): SimResult {
       });
       const capex = def.capex(node.params, inlet, r);
       const footprint = def.footprint(node.params);
-      const dry = r.removed ? (r.removed.Q * (POOLS.reduce((acc, p) => acc + poolMass(r.removed!, p), 0) + r.removed.OGfree + r.removed.OGemulsified)) / 1000 : 0;
-      const metalSludge = r.removed ? r.removed.precipitated.Ni + r.removed.precipitated.Cu + r.removed.precipitated.Zn > 0 : false;
+      const dry = r.removed ? removedDryKgD(r.removed) : 0;
+      const routed = sludgeEdges.length > 0 && !!r.removed && dry > 0;
+      const metalSludge = r.removed ? isMetalSludge(r.removed) : false;
       const chemCost = r.chemicals.reduce((a, c) => a + c.kgPerDay * c.priceRMkg, 0);
       const energyCost = r.energy_kWhd * PRICES.electricity_kWh;
-      const sludgeCost = dry * (metalSludge ? PRICES.sludgeDisposal_kg.metal : PRICES.sludgeDisposal_kg.other);
+      // routed sludge is costed where it leaves the system (disposal point); unrouted → contractor at the dry price
+      const sludgeCost = routed ? 0 : dry * (metalSludge ? PRICES.sludgeDisposal_kg.metal : PRICES.sludgeDisposal_kg.other);
       const opex = chemCost + energyCost + sludgeCost;
       res.opexSplit.chemicals += chemCost;
       res.opexSplit.energy += energyCost;
@@ -183,24 +241,154 @@ export function simulate(g: ProcessGraph, influent: Stream): SimResult {
       res.capex += capex;
       res.footprint += footprint;
       res.energy_kWhd += r.energy_kWhd;
-      res.sludgeKgD += dry;
+      res.sludgeKgD += routed ? 0 : dry;
       res.opexRMd += opex;
-      sysTerms.sludge = addComponents(sysTerms.sludge, sludge);
       sysTerms.gas = addComponents(sysTerms.gas, sumPartial(r.gas));
       sysTerms.consumed = addComponents(sysTerms.consumed, sumPartial(r.consumed));
       sysTerms.produced = addComponents(sysTerms.produced, sumPartial(r.produced));
       outlet = r.out;
+      if (routed) {
+        const frac = r.sludgeSolidsFrac ?? defaultSludgeFraction(node.kind, inlet);
+        const Qs = frac === null ? BACKWASH_FRACTION * inlet.Q : dry / (Math.max(frac, 1e-4) * 1000);
+        const split = splitSludge(r.out, r.removed!, inlet.Q, Qs);
+        outlet = split.main;
+        sludgeOut = split.sludge;
+        res.nodes[id].result = { ...r, out: split.main };
+      } else {
+        sysTerms.sludge = addComponents(sysTerms.sludge, sludge);
+      }
+    } else if (node.kind !== 'influent' && !node.bypass) {
+      // no flow reaches this unit (e.g. first pass of a recycle loop): register it with zero duty
+      const def = CATALOGUE[node.kind];
+      // equipment is still built: CAPEX from its parameters, evaluated on the plant influent as a sizing proxy
+      const proxy = def.run(cloneStream(influent), node.params, { clarifierFollows: false });
+      const capex = def.capex(node.params, influent, proxy);
+      res.capex += capex;
+      res.footprint += def.footprint(node.params);
+      res.nodes[id] = { node, inlet, result: { ...proxy, out: emptyStream(0), removed: null, chemicals: [], energy_kWhd: 0, calcs: {}, notes: [{ level: 'warn', code: 'unit.dry', text: 'No flow reaches this unit — it is built but idle.' }] }, capex, footprint: def.footprint(node.params), balance: checkMassBalance({ in: zeroComponents(), out: zeroComponents(), sludge: zeroComponents(), gas: zeroComponents(), consumed: zeroComponents(), produced: zeroComponents() }), sludgeKgD: 0, opexRMd: 0 };
+      outlet = emptyStream(0);
     }
-    const share = outEdges.length > 0 ? 1 / outEdges.length : 1;
-    for (const e of outEdges) {
-      const s = cloneStream(outlet);
-      s.Q = outlet.Q * share;
-      res.edges[e.id] = s;
+    // main outlets: splitter a/b by %, otherwise equal split
+    const isSplitter = node.kind === 'splitter' && !node.bypass;
+    const aFrac = isSplitter ? Math.min(1, Math.max(0, Number(node.params.split ?? 50) / 100)) : 0;
+    const aEdges = mainEdges.filter((e) => e.fromPort === 'a');
+    const bEdges = mainEdges.filter((e) => e.fromPort !== 'a');
+    for (const e of mainEdges) {
+      let share = 1 / mainEdges.length;
+      if (isSplitter && aEdges.length && bEdges.length) share = e.fromPort === 'a' ? aFrac / aEdges.length : (1 - aFrac) / bEdges.length;
+      const st = cloneStream(outlet);
+      st.Q = outlet.Q * share;
+      res.edges[e.id] = st;
+    }
+    for (const e of sludgeEdges) {
+      const st = sludgeOut ? cloneStream(sludgeOut) : emptyStream(0);
+      st.Q = sludgeOut ? sludgeOut.Q / sludgeEdges.length : 0;
+      res.edges[e.id] = st;
     }
   }
   res.chemicals = [...chem.entries()].map(([name, v]) => ({ name, kgPerDay: v.kg, costRMd: v.kg * v.price }));
   res.balance = checkMassBalance({ in: sysIn, out: sysOut, ...sysTerms });
-  res.ok = !!res.effluent;
+  res.ok = !!res.effluent && res.effluent.Q > 0;
+  return res;
+}
+
+/** Loads (mass flows) that must settle before a recycle is converged: water, solids, COD, metals, NH₄, sulfate. */
+function tearLoads(s: Stream | undefined): number[] {
+  if (!s) return [0, 0, 0, 0, 0, 0, 0, 0];
+  const m = (k: 'Ni' | 'Cu' | 'Zn' | 'Cr') => s.Q * (s.dissolved[k] + s.precipitated[k]);
+  return [s.Q, s.Q * tss(s), s.Q * codTotal(s), m('Ni'), m('Cu'), m('Zn'), s.Q * s.NH4N, s.Q * (s.SO4T ?? 0) * 1e5];
+}
+function tearDelta(a: Stream | undefined, b: Stream | undefined): number {
+  const x = tearLoads(a);
+  const y = tearLoads(b);
+  const scale = Math.max(...y.map(Math.abs), 1e-9);
+  return Math.max(...x.map((v, i) => Math.abs(v - y[i]) / Math.max(Math.abs(y[i]), 1e-3 * scale, 1e-6)));
+}
+
+/**
+ * Stream ↔ mass-flow vector, for Wegstein acceleration: Q and Q·c for every concentration field (dissolved and
+ * particulate maps included). Intensive fields (pH, T, peak factor, pKa) and settling data come from the template.
+ */
+const INTENSIVE = new Set(['Q', 'pH', 'T', 'peakFactor', 'weakAcidPKa']);
+function toVec(s: Stream): number[] {
+  const v = [s.Q];
+  for (const [k, val] of Object.entries(s)) if (typeof val === 'number' && !INTENSIVE.has(k)) v.push(s.Q * val);
+  for (const m of ['Ni', 'Cu', 'Zn', 'Cr'] as const) v.push(s.Q * s.dissolved[m], s.Q * s.precipitated[m]);
+  return v;
+}
+function fromVec(template: Stream, v: number[]): Stream {
+  const out = cloneStream(template);
+  const Q = Math.max(v[0], 0);
+  out.Q = Q;
+  let i = 1;
+  const c = (x: number) => (Q > 1e-12 ? Math.max(0, x) / Q : 0);
+  for (const [k, val] of Object.entries(template)) if (typeof val === 'number' && !INTENSIVE.has(k)) (out as unknown as Record<string, number>)[k] = k === 'Cb' ? (Q > 1e-12 ? v[i] / Q : 0) : c(v[i]), i++;
+  for (const m of ['Ni', 'Cu', 'Zn', 'Cr'] as const) {
+    out.dissolved[m] = c(v[i++]);
+    out.precipitated[m] = c(v[i++]);
+  }
+  return out;
+}
+
+export function simulate(g: ProcessGraph, influent: Stream): SimResult {
+  const errors = validateGraph(g);
+  if (!(influent.Q > 0)) errors.push({ level: 'error', code: 'graph.noFlow', text: 'Influent flow must be greater than zero.' });
+  if (errors.some((e) => e.level === 'error')) return emptyResult(errors);
+  const tears = findTears(g);
+  const tearSet = new Set(tears);
+  const order = topoSort({ nodes: g.nodes, edges: g.edges.filter((e) => !tearSet.has(e.id)) });
+  if (!order) return emptyResult([{ level: 'error', code: 'graph.cycle', text: 'The flowsheet could not be ordered.' }]);
+  let x = new Map<string, Stream>(); // tear values fed in
+  let res = solvePass(g, order, influent, tearSet, x);
+  let it = 1;
+  if (tears.length) {
+    // Successive substitution with bounded Wegstein acceleration per tear stream (q ∈ [−20, 0]; q = 0 is plain
+    // substitution). Loops with gain close to 1 (large recycles) then converge in tens rather than hundreds of passes.
+    let converged = false;
+    let prevX: Map<string, number[]> | null = null;
+    let prevF: Map<string, number[]> | null = null;
+    for (; it < 80; it++) {
+      const f = new Map(tears.map((id) => [id, res.edges[id]] as const).filter((p): p is [string, Stream] => !!p[1]));
+      const delta = Math.max(0, ...tears.map((id) => tearDelta(f.get(id), x.get(id))));
+      if (it > 1 && delta < 1e-5) {
+        converged = true;
+        break;
+      }
+      const nextX = new Map<string, Stream>();
+      const curX = new Map<string, number[]>();
+      const curF = new Map<string, number[]>();
+      for (const id of tears) {
+        const fs_ = f.get(id);
+        if (!fs_) continue;
+        const fv = toVec(fs_);
+        const xv = x.get(id) ? toVec(x.get(id)!) : fv.map(() => 0);
+        curX.set(id, xv);
+        curF.set(id, fv);
+        const px = prevX?.get(id);
+        const pf = prevF?.get(id);
+        const nv = fv.map((fi, k) => {
+          if (!px || !pf || it < 3) return fi;
+          const dx = xv[k] - px[k];
+          if (Math.abs(dx) < 1e-12) return fi;
+          const slope = (fi - pf[k]) / dx;
+          const q = Math.min(0, Math.max(-20, slope / (slope - 1)));
+          return q * xv[k] + (1 - q) * fi;
+        });
+        nextX.set(id, fromVec(fs_, nv));
+      }
+      prevX = curX;
+      prevF = curF;
+      x = nextX;
+      res = solvePass(g, order, influent, tearSet, x);
+    }
+    if (!converged) {
+      res.errors.push({ level: 'error', code: 'graph.recycle', text: 'The recycle loop does not converge — what is returned keeps growing. Return less flow, or remove the solids before recycling.' });
+      res.ok = false;
+    }
+  }
+  res.tears = tears;
+  res.iterations = it;
+  res.errors = [...errors, ...res.errors];
   return res;
 }
 

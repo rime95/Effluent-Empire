@@ -256,17 +256,23 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
   const settle = new Map(dist.filter((d) => d.kind === 'bulking').map((d) => [(d as { unitId: string }).unitId, (d as { settleFactor: number }).settleFactor]));
   const dtD = STEP_H / 24;
 
+  let prevEdge = new Map<string, Stream>();
+  let lastEdge = new Map<string, Stream>();
   for (let k = 0; k <= opts.hours / STEP_H; k++) {
     const tH = k * STEP_H;
     const inf = influentAt(base, tH, dist);
+    prevEdge = lastEdge;
     const edge = new Map<string, Stream>();
+    lastEdge = edge;
     const units: Record<string, Record<string, number>> = {};
     let bypass: Stream | null = null;
     let effluent: Stream | null = null;
     for (const id of order) {
       const n = byId.get(id)!;
-      const ins = g.edges.filter((e) => e.to === id).map((e) => edge.get(e.id)!).filter(Boolean);
-      let inlet = n.kind === 'influent' ? inf : ins.length === 1 ? ins[0] : equilibrate(blend(ins));
+      // inlets: this step's value, or the previous step's for recycle (tear) pipes not yet computed this step
+      const ins = g.edges.filter((e) => e.to === id).map((e) => edge.get(e.id) ?? prevEdge.get(e.id)).filter((x): x is Stream => !!x && x.Q > 1e-9);
+      let inlet = n.kind === 'influent' ? inf : ins.length === 0 ? emptyStream(0) : ins.length === 1 ? ins[0] : equilibrate(blend(ins));
+      if (n.kind === 'disposal') continue;
       if (n.kind === 'discharge') {
         effluent = bypass && bypass.Q > 0 ? equilibrate(blend([inlet, bypass])) : inlet;
         continue;
@@ -274,6 +280,8 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
       let outlet = inlet;
       if (n.bypass) {
         units[id] = { bypassed: 1 };
+      } else if (n.kind !== 'influent' && inlet.Q <= 1e-9) {
+        outlet = emptyStream(0); // nothing reaches this unit (e.g. the sludge line, quasi-static in the replay)
       } else if (n.kind !== 'influent') {
         const kind = n.kind as UnitType;
         if (kind === 'eq' && eq[id]) {
@@ -369,10 +377,16 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
           units[id] = { pH: r.out.pH, TSS: tss(r.out), ...(c.sor ? { SOR: c.sor.value } : {}), ...(params.targetPH !== undefined ? { pHmeasured: r.out.pH + (probe.get(id) ?? 0), sp: Number(n.params.targetPH) } : {}) };
         }
       }
-      const outs = g.edges.filter((e) => e.from === id);
+      // GAME MODEL: in the SCADA replay the sludge line is quasi-static — sludge pipes carry no flow (solids leave as in the
+      // steady model) and splitters keep their set split.
+      const outs = g.edges.filter((e) => e.from === id && e.fromPort !== 'sludge');
+      for (const e of g.edges.filter((x) => x.from === id && x.fromPort === 'sludge')) edge.set(e.id, emptyStream(0));
+      const split = n.kind === 'splitter' ? Math.min(1, Math.max(0, Number(n.params.split ?? 50) / 100)) : null;
+      const aN = outs.filter((e) => e.fromPort === 'a').length;
+      const bN = outs.length - aN;
       for (const e of outs) {
         const s = cloneStream(outlet);
-        s.Q = outlet.Q / outs.length;
+        s.Q = split !== null && aN && bN ? (outlet.Q * (e.fromPort === 'a' ? split : 1 - split)) / (e.fromPort === 'a' ? aN : bN) : outlet.Q / outs.length;
         edge.set(e.id, s);
       }
     }

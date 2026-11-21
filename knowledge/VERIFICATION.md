@@ -101,6 +101,10 @@ Effect of the Ni correction: the model's Ni(OH)₂ solubility minimum moves from
 | Unaided hydroxide pin-floc v₅₀ ceiling 0.6 m/h, concentration half-saturation 30 mg/L | 🟡 GAME MODEL; check against unaided metal-hydroxide clarifier SOR ≈ 0.5 m/h |
 | Anionic PAM optimum 1.0 mg/L, gain ×2.5, price RM 14/kg | 🟡 |
 | Lamella η 0.8 at 55°, RM 450/m² plate | 🟡 |
+| Underflow solids (clarifier 1 % / 0.8 % bio, oil sep 5 %, backwash 3 %) | 🟡 M&E ranges |
+| Thickener SLR 20 / 30, HLR max 24 / 8, underflow 3 % / 2.5 % | 🟡 |
+| Filter press cake 25/35 % (chemical), 20/28 % (bio), capture 97 %, polymer 3 kg/t, lime 20 % DS | 🟡 |
+| Disposal RM 0.18 / 0.06 per kg wet (balanced against contractor RM 1.2 / 0.3 per kg DS) | 🟡 both likely low |
 
 ## Still needs a human with the books
 1. Metcalf & Eddy 5th ed. Table 8-14: heterotroph and nitrifier coefficients.

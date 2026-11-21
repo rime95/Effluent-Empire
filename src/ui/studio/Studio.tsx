@@ -17,11 +17,11 @@ import {
 import { useActiveProject, useGame } from '../../game/store';
 import { designBasis } from '../../game/lab';
 import { constructionWeeks, makeNode, RETROFIT_PREMIUM } from '../../game/project';
-import { CATALOGUE, UnitType } from '../../simulation/treatment/catalogue';
-import { PNode, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
+import { CATALOGUE, PRICES, UnitType } from '../../simulation/treatment/catalogue';
+import { PNode, PortId, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
 import { evaluate, measure, STANDARDS } from '../../simulation/treatment/compliance';
 import { Stream } from '../../simulation/core/stream';
-import { UnitSymbol } from '../components/Symbols';
+import { DisposalSymbol, UnitSymbol } from '../components/Symbols';
 import { CATEGORY_COLOR, edgeTypes, nodeTypes, type DosingTag, type UnitNodeData } from './nodes';
 import { NumberField } from './NumberField';
 import { useHistory } from './useHistory';
@@ -29,9 +29,13 @@ import { useSimulation } from './useSimulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
 
-const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'coagulation', 'activatedSludge'];
+const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'coagulation', 'activatedSludge', 'thickener', 'filterPress', 'splitter', 'mixer'];
+/** kinds that may receive a sludge line */
+const SLUDGE_RECEIVERS: PNode['kind'][] = ['thickener', 'filterPress', 'disposal', 'mixer'];
 const GRID = 20;
+/** fixed end points (one inlet, one discharge) — cannot be deleted */
 const isTerminal = (n: PNode) => n.kind === 'influent' || n.kind === 'discharge';
+const isNonUnit = (n: PNode) => isTerminal(n) || n.kind === 'disposal';
 /** Short reagent names for the dosing-package labels on the PFD. */
 function shortChem(name: string): string {
   if (/NaOH/.test(name)) return 'NaOH';
@@ -134,7 +138,11 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       const selected = selNodes.has(n.id);
       let type: string;
       let data: Record<string, unknown>;
-      if (isTerminal(n)) {
+      if (n.kind === 'disposal') {
+        type = 'terminal';
+        const d = sim?.disposal.find((x) => x.id === n.id);
+        data = { kind: 'disposal', tag: n.tag ?? 'SD', label: 'Sludge disposal', sub: d ? `${fmt(d.wetKgD, 0)} kg/d wet · ${rm(d.costRMd)}/d` : 'connect a sludge line' };
+      } else if (isTerminal(n)) {
         type = 'terminal';
         data = { kind: n.kind, label: n.kind === 'influent' ? 'RAW WASTEWATER' : 'FINAL DISCHARGE', sub: n.kind === 'influent' ? `${p.datasheet.Q} m³/d` : `Standard ${p.enquiry.standard}` };
       } else {
@@ -145,12 +153,12 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
         const summary = c?.sor ? `SOR ${fmt(c.sor.value, 2)} m/h` : c?.pH && n.kind !== 'activatedSludge' ? `pH ${fmt(c.pH.value, 1)}` : c?.mlss ? `MLSS ${fmt(c.mlss.value, 0)}` : c?.rate ? `${fmt(c.rate.value, 1)} m/h` : c?.hrt ? `HRT ${fmt(c.hrt.value, 1)} h` : undefined;
         type = 'unit';
         const dosing: DosingTag[] = (ns?.result.chemicals ?? []).filter((c) => c.kgPerDay > 0.01).map((c) => ({ label: shortChem(c.name), kgd: c.kgPerDay }));
-        data = { kind: n.kind, tag: n.tag ?? n.kind, status, summary, dosing, sludgeKgD: ns?.sludgeKgD };
+        data = { kind: n.kind, tag: n.tag ?? n.kind, status, summary, dosing, sludgeKgD: ns?.sludgeKgD, sludgeRouted: draft.edges.some((e) => e.from === n.id && e.fromPort === 'sludge') };
       }
       const prev = cache.current.get(n.id);
       const sameData = prev && JSON.stringify(prev.data) === JSON.stringify(data);
       const node: Node =
-        prev && sameData && prev.selected === selected && prev.position.x === position.x && prev.position.y === position.y && prev.deletable === (editable && !isTerminal(n))
+        prev && sameData && prev.selected === selected && prev.position.x === position.x && prev.position.y === position.y && prev.deletable === (editable && !isTerminal(n)) && prev.type === type
           ? prev
           : { id: n.id, type, position, selected, data: sameData ? prev!.data : data, deletable: editable && !isTerminal(n) };
       next.set(n.id, node);
@@ -168,11 +176,12 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
         id: e.id,
         type: 'pipe',
         source: e.from,
+        sourceHandle: e.fromPort ?? (draft.nodes.find((n) => n.id === e.from)?.kind === 'splitter' ? 'a' : 'out'),
         target: e.to,
         selected: selEdges.has(e.id),
         deletable: editable,
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#00a9c8', width: 14, height: 14 },
-        data: { no: streamNos.get(e.id), q: sim?.edges[e.id] ? `${fmt(sim.edges[e.id].Q, 0)} m³/d` : undefined },
+        markerEnd: { type: MarkerType.ArrowClosed, color: e.fromPort === 'sludge' ? '#8b5a2b' : '#00a9c8', width: 14, height: 14 },
+        data: { no: streamNos.get(e.id), q: sim?.edges[e.id] ? `${fmt(sim.edges[e.id].Q, sim.edges[e.id].Q < 10 ? 2 : 0)} m³/d` : undefined, service: e.fromPort === 'sludge' ? ('sludge' as const) : sim?.tears.includes(e.id) ? ('recycle' as const) : ('process' as const) },
       })),
     [draft.edges, sim, selEdges, editable, streamNos],
   );
@@ -244,17 +253,30 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
   const onConnect = useCallback(
     (c: Connection) => {
       if (!editable || !c.source || !c.target || c.source === c.target) return;
-      setDraft((g) => (g.edges.some((e) => e.from === c.source && e.to === c.target) ? g : { ...g, edges: [...g.edges, { id: newEdgeId(), from: c.source!, to: c.target! }] }));
+      const port = (c.sourceHandle ?? 'out') as PortId;
+      setDraft((g) => (g.edges.some((e) => e.from === c.source && e.to === c.target && (e.fromPort ?? 'out') === port) ? g : { ...g, edges: [...g.edges, { id: newEdgeId(), from: c.source!, to: c.target!, ...(port !== 'out' ? { fromPort: port } : {}) }] }));
     },
     [editable, setDraft],
   );
 
+  const isValidConnection = useCallback(
+    (c: Connection | Edge) => {
+      if (!c.source || !c.target || c.source === c.target) return false;
+      const to = draft.nodes.find((n) => n.id === c.target);
+      if (!to || to.kind === 'influent') return false;
+      const sludge = c.sourceHandle === 'sludge';
+      if (sludge) return SLUDGE_RECEIVERS.includes(to.kind);
+      return to.kind !== 'disposal';
+    },
+    [draft.nodes],
+  );
+
   const addUnit = useCallback(
-    (kind: UnitType, position?: { x: number; y: number }) => {
+    (kind: UnitType | 'disposal', position?: { x: number; y: number }) => {
       if (!p || !editable) return;
       const node = makeNode(kind, p.datasheet.Q, draft.nodes);
-      const units = draft.nodes.filter((n) => !isTerminal(n)).length;
-      const pos = position ?? { x: 180 + units * 190, y: 160 };
+      const units = draft.nodes.filter((n) => !isNonUnit(n)).length;
+      const pos = position ?? (kind === 'disposal' || CATALOGUE[kind as UnitType]?.category === 'sludge' ? { x: 180 + units * 120, y: 420 } : { x: 180 + units * 190, y: 160 });
       node.position = snap ? { x: Math.round(pos.x / GRID) * GRID, y: Math.round(pos.y / GRID) * GRID } : pos;
       setDraft((g) => ({ ...g, nodes: [...g.nodes, node] }));
       setSelNodes(new Set([node.id]));
@@ -324,14 +346,14 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
-    const kind = e.dataTransfer.getData('application/ee-unit') as UnitType;
+    const kind = e.dataTransfer.getData('application/ee-unit') as UnitType | 'disposal';
     if (!kind) return;
     addUnit(kind, rf.screenToFlowPosition({ x: e.clientX - 60, y: e.clientY - 40 }));
   };
 
   const autoConnect = () => {
     setDraft((g) => {
-      const units = g.nodes.filter((n) => !isTerminal(n)).sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0));
+      const units = g.nodes.filter((n) => !isNonUnit(n) && !['thickener', 'filterPress'].includes(n.kind)).sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0));
       const chain = [g.nodes.find((n) => n.kind === 'influent')!, ...units, g.nodes.find((n) => n.kind === 'discharge')!];
       return { ...g, edges: chain.slice(0, -1).map((n, i) => ({ id: `p-auto-${i}-${Date.now().toString(36)}`, from: n.id, to: chain[i + 1].id })) };
     });
@@ -375,7 +397,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       <aside className="palette">
         <h2 style={{ fontSize: 12 }}>Unit processes</h2>
         <p className="muted" style={{ fontSize: 11, marginTop: -4 }}>Drag onto the canvas, or click to add.</p>
-        {(['physical', 'chemical', 'biological'] as const).map((cat) => (
+        {(['physical', 'chemical', 'biological', 'sludge', 'hydraulic'] as const).map((cat) => (
           <div key={cat}>
             <div className="nav-section" style={{ padding: '8px 2px 4px', color: CATEGORY_COLOR[cat] }}>
               {cat}
@@ -383,6 +405,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
             {UNIT_ORDER.filter((t) => CATALOGUE[t].category === cat).map((t) => (
               <PaletteItem key={t} type={t} editable={editable} onAdd={addUnit} />
             ))}
+            {cat === 'sludge' && <DisposalPaletteItem editable={editable} onAdd={() => addUnit('disposal')} />}
           </div>
         ))}
         <div style={{ marginTop: 12 }}>
@@ -418,6 +441,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          isValidConnection={isValidConnection}
           onNodeContextMenu={(e, n) => {
             e.preventDefault();
             if (!editable || n.type === 'terminal') return;
@@ -545,10 +569,12 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       </div>
 
       <aside className="inspector">
-        {single && !isTerminal(single) ? (
+        {single && !isNonUnit(single) ? (
           <UnitInspector node={single} editable={editable} sim={sim} onParam={updateParams} />
         ) : selectedEdgeStream ? (
           <StreamTable title="Pipe stream" s={selectedEdgeStream} />
+        ) : single?.kind === 'disposal' ? (
+          <DisposalInspector id={single.id} tag={single.tag ?? 'SD'} sim={sim} />
         ) : single?.kind === 'influent' ? (
           <StreamTable title="Raw wastewater (design basis)" s={basis.stream} />
         ) : selNodes.size > 1 ? (
@@ -635,9 +661,25 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           <span>{fmt(sim?.energy_kWhd ?? 0, 0)} kWh/d</span>
         </div>
         <div className="calc">
-          <span>Sludge (dry)</span>
+          <span>Sludge to contractor (dry)</span>
           <span>{fmt(sim?.sludgeKgD ?? 0, 0)} kg/d</span>
         </div>
+        {(sim?.disposal.length ?? 0) > 0 && (
+          <div className="calc">
+            <span>Sludge to own disposal</span>
+            <span>
+              {fmt(sim!.disposal.reduce((a, d) => a + d.wetKgD, 0), 0)} kg/d wet · {rm(sim!.disposal.reduce((a, d) => a + d.costRMd, 0))}/d
+            </span>
+          </div>
+        )}
+        {(sim?.tears.length ?? 0) > 0 && (
+          <div className="calc">
+            <span>Recycle loops</span>
+            <span>
+              {sim!.tears.length} · converged in {sim!.iterations} iterations
+            </span>
+          </div>
+        )}
         <div className="calc">
           <span>Footprint</span>
           <span>{fmt(sim?.footprint ?? 0, 0)} m²</span>
@@ -694,6 +736,67 @@ const PaletteItem = memo(function PaletteItem({ type, editable, onAdd }: { type:
     </div>
   );
 });
+
+function DisposalPaletteItem({ editable, onAdd }: { editable: boolean; onAdd: () => void }) {
+  return (
+    <div
+      className="palette-item"
+      draggable={editable}
+      onDragStart={(e) => {
+        e.dataTransfer.setData('application/ee-unit', 'disposal');
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onClick={onAdd}
+      title="Where sludge or cake leaves site — costed per wet tonne (dewatering pays off here)."
+      style={{ background: '#f4f6f8', color: 'var(--ink)', opacity: editable ? 1 : 0.5 }}
+    >
+      <DisposalSymbol />
+      Sludge Disposal
+    </div>
+  );
+}
+
+function DisposalInspector({ id, tag, sim }: { id: string; tag: string; sim: SimResult | null }) {
+  const d = sim?.disposal.find((x) => x.id === id);
+  return (
+    <>
+      <div className="mono" style={{ fontSize: 11, color: 'var(--sludge)', textTransform: 'uppercase' }}>
+        sludge
+      </div>
+      <h2 style={{ marginBottom: 4 }}>Sludge Disposal — {tag}</h2>
+      <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+        Sludge or cake is hauled off site and charged per wet tonne ({rm(PRICES.disposalWet_kg.metal * 1000)}/t for metal sludge — scheduled waste SW 204; {rm(PRICES.disposalWet_kg.other * 1000)}/t otherwise). Every tonne of water you remove upstream saves money here.
+      </p>
+      {!d && <p className="muted">Pipe a sludge outlet (round brown nozzle) here.</p>}
+      {d && (
+        <>
+          <div className="calc">
+            <span>Wet mass</span>
+            <span>{fmt(d.wetKgD, 0)} kg/d</span>
+          </div>
+          <div className="calc">
+            <span>Dry solids</span>
+            <span>{fmt(d.dryKgD, 1)} kg/d</span>
+          </div>
+          <div className="calc">
+            <span>Solids content</span>
+            <span>{fmt((100 * d.dryKgD) / Math.max(d.wetKgD, 1e-9), 1)} %</span>
+          </div>
+          <div className="calc">
+            <span>Classification</span>
+            <span>{d.metal ? 'Scheduled waste (metal)' : 'Non-hazardous'}</span>
+          </div>
+          <div className="calc">
+            <span>Disposal cost</span>
+            <span>
+              {rm(d.costRMd)}/d · {rm(d.costRMd / Math.max(d.dryKgD, 1e-9))}/kg DS
+            </span>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
 
 function UnitInspector({ node, editable, sim, onParam }: { node: PNode; editable: boolean; sim: SimResult | null; onParam: (id: string, key: string, v: number | string) => void }) {
   const def = CATALOGUE[node.kind as UnitType];

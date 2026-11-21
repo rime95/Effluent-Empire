@@ -1,9 +1,9 @@
 import { memo } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, Handle, Position, type EdgeProps, type Node, type NodeProps, type Edge } from '@xyflow/react';
 import { CATALOGUE, UnitType } from '../../simulation/treatment/catalogue';
-import { UnitSymbol } from '../components/Symbols';
+import { DisposalSymbol, UnitSymbol } from '../components/Symbols';
 
-export const CATEGORY_COLOR = { physical: 'var(--phys)', chemical: 'var(--chem)', biological: 'var(--bio)' } as const;
+export const CATEGORY_COLOR = { physical: 'var(--phys)', chemical: 'var(--chem)', biological: 'var(--bio)', sludge: 'var(--sludge)', hydraulic: '#5b6b7c' } as const;
 
 export type DosingTag = { label: string; kgd: number };
 export type UnitNodeData = {
@@ -15,8 +15,10 @@ export type UnitNodeData = {
   dosing?: DosingTag[];
   /** dry solids removed to the sludge line, kg/d (stub until a sludge line is connected) */
   sludgeKgD?: number;
+  /** sludge port is piped to a thickener / press / disposal point */
+  sludgeRouted?: boolean;
 };
-export type TerminalNodeData = { kind: 'influent' | 'discharge'; label: string; sub: string };
+export type TerminalNodeData = { kind: 'influent' | 'discharge' | 'disposal'; label: string; sub: string; tag?: string };
 
 const STATUS_COLOR = { ok: 'var(--ok)', warn: 'var(--warn)', error: 'var(--alarm)', idle: '#9aa7b4' };
 /** symbol is 120×80 drawn below an 18 px tag row; nozzle heights (symbol y) per unit kind */
@@ -24,14 +26,18 @@ const TAG_H = 18;
 const NOZZLE: Partial<Record<UnitType, { in: number; out: number }>> = {
   clarifier: { in: 44, out: 30 },
   sandFilter: { in: 26, out: 44 },
+  thickener: { in: 30, out: 26 },
+  filterPress: { in: 40, out: 40 },
 };
-const SLUDGE_UNITS: UnitType[] = ['clarifier', 'oilSep', 'sandFilter'];
+/** sludge draw-off nozzle x (symbol coordinates) — at the hopper / underdrain */
+export const SLUDGE_UNITS: Partial<Record<UnitType, number>> = { clarifier: 60, oilSep: 94, sandFilter: 100, thickener: 60, filterPress: 60 };
 
 function UnitNodeImpl({ data, selected }: NodeProps<Node<UnitNodeData>>) {
   const def = CATALOGUE[data.kind];
   const accent = CATEGORY_COLOR[def.category];
   const nz = NOZZLE[data.kind] ?? { in: 44, out: 44 };
-  const showSludge = SLUDGE_UNITS.includes(data.kind) && (data.sludgeKgD ?? 0) > 0.05;
+  const sludgeX = SLUDGE_UNITS[data.kind];
+  const showSludge = sludgeX !== undefined && !data.sludgeRouted && (data.sludgeKgD ?? 0) > 0.05;
   return (
     <div className={`pfd-eq ${selected ? 'selected' : ''}`}>
       {data.dosing && data.dosing.length > 0 && (
@@ -60,7 +66,15 @@ function UnitNodeImpl({ data, selected }: NodeProps<Node<UnitNodeData>>) {
       </div>
       <UnitSymbol type={data.kind} accent={accent} />
       <Handle type="target" position={Position.Left} style={{ top: TAG_H + nz.in }} />
-      <Handle type="source" position={Position.Right} style={{ top: TAG_H + nz.out }} />
+      {data.kind === 'splitter' ? (
+        <>
+          <Handle id="a" type="source" position={Position.Right} style={{ top: TAG_H + 30 }} title="Outlet a" />
+          <Handle id="b" type="source" position={Position.Right} style={{ top: TAG_H + 58 }} title="Outlet b" />
+        </>
+      ) : (
+        <Handle id="out" type="source" position={Position.Right} style={{ top: TAG_H + nz.out }} />
+      )}
+      {sludgeX !== undefined && <Handle id="sludge" className="sludge-port" type="source" position={Position.Bottom} style={{ left: sludgeX, top: TAG_H + 78 }} title="Sludge outlet — pipe to a thickener, filter press or sludge disposal" />}
       <div className="pfd-name">{def.name}</div>
       {data.summary && <div className="pfd-duty">{data.summary}</div>}
       {showSludge && (
@@ -79,13 +93,23 @@ function UnitNodeImpl({ data, selected }: NodeProps<Node<UnitNodeData>>) {
 }
 
 function TerminalNodeImpl({ data, selected }: NodeProps<Node<TerminalNodeData>>) {
+  if (data.kind === 'disposal')
+    return (
+      <div className={`pfd-eq ${selected ? 'selected' : ''}`}>
+        <div className="pfd-tag">{data.tag}</div>
+        <DisposalSymbol />
+        <Handle type="target" position={Position.Left} style={{ top: TAG_H + 30 }} />
+        <div className="pfd-name">{data.label}</div>
+        <div className="pfd-duty">{data.sub}</div>
+      </div>
+    );
   const inflow = data.kind === 'influent';
   return (
     <div className={`pfd-terminal-arrow ${inflow ? 'in' : 'out'} ${selected ? 'selected' : ''}`}>
       {!inflow && <Handle type="target" position={Position.Left} />}
       <div className="t-label">{data.label}</div>
       <div className="t-sub">{data.sub}</div>
-      {inflow && <Handle type="source" position={Position.Right} />}
+      {inflow && <Handle id="out" type="source" position={Position.Right} />}
     </div>
   );
 }

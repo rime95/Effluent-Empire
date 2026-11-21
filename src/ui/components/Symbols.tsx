@@ -130,8 +130,74 @@ export function UnitSymbol({ type, accent }: { type: UnitType; accent: string })
           <path d="M0 44 h20 V10 h40 v-4 M60 74 v4 h40 V44 h20" {...L} />
         </svg>
       );
+    case 'thickener':
+      return (
+        <svg viewBox="0 0 120 80">
+          {liquid('M24 22 H96 V46 L66 70 H54 L24 46 Z')}
+          <path d="M24 14 V46 L54 70 H66 L96 46 V14" {...L} />
+          {level(24, 96, 22)}
+          <path d="M60 6 V62" {...L} />
+          {[40, 50, 70, 80].map((x) => (
+            <path key={x} d={`M${x} 34 V50`} {...thin} />
+          ))}
+          <path d="M34 50 L60 60 L86 50" {...thin} />
+          <rect x="54" y="2" width="12" height="6" {...L} />
+          <path d="M54 70 v6 h12 v-6" fill="var(--sludge)" opacity="0.6" stroke={INK} strokeWidth={1.1} />
+          <path d="M0 30 h24 M96 26 h24" {...L} />
+        </svg>
+      );
+    case 'filterPress':
+      return (
+        <svg viewBox="0 0 120 80">
+          <rect x="10" y="20" width="10" height="38" {...L} />
+          <rect x="100" y="20" width="10" height="38" {...L} />
+          <path d="M20 24 H100 M20 54 H100" {...thin} />
+          {Array.from({ length: 13 }).map((_, i) => (
+            <rect key={i} x={24 + i * 5.8} y="26" width="4" height="26" fill="#8b5a2b" opacity={0.25 + (i % 2) * 0.2} stroke={INK} strokeWidth={0.6} />
+          ))}
+          <path d="M14 58 V68 M106 58 V68 M8 68 H112" {...L} />
+          <path d="M44 62 l6 8 h20 l6 -8" fill="var(--sludge)" opacity="0.55" stroke={INK} strokeWidth={1} />
+          <path d="M0 40 h10 M110 40 h10" {...L} />
+        </svg>
+      );
+    case 'splitter':
+      return (
+        <svg viewBox="0 0 120 80">
+          <rect x="34" y="22" width="52" height="44" {...L} />
+          {liquid('M35 34 H85 V65 H35 Z')}
+          <path d="M60 22 V50" {...L} />
+          <path d="M40 34 h16 M64 34 h16" stroke={accent} strokeWidth={1.4} />
+          <path d="M0 44 h34 M86 30 h34 M86 58 h34" {...L} />
+          <text x="112" y="25" fontSize="9" fontFamily="var(--mono)" fill={INK}>a</text>
+          <text x="112" y="70" fontSize="9" fontFamily="var(--mono)" fill={INK}>b</text>
+        </svg>
+      );
+    case 'mixer':
+      return (
+        <svg viewBox="0 0 120 80">
+          <rect x="40" y="24" width="40" height="40" {...L} />
+          {liquid('M41 34 H79 V63 H41 Z')}
+          <path d="M48 44 q12 -10 24 0 q-12 10 -24 0" {...thin} stroke={accent} />
+          <path d="M0 44 h40 M20 70 h20 V58 M80 44 h40" {...L} />
+        </svg>
+      );
   }
   return nozzles;
+}
+
+/** Sludge disposal point: skip / roll-off container (sludge or cake leaves site). */
+export function DisposalSymbol() {
+  const L = { fill: 'none', stroke: INK, strokeWidth: 1.7, strokeLinejoin: 'round' as const };
+  return (
+    <svg viewBox="0 0 120 80" width="120" height="80">
+      <path d="M14 30 L24 64 H96 L106 30 Z" {...L} />
+      <path d="M22 40 H98" stroke="var(--sludge)" strokeWidth="1.2" strokeDasharray="5 3" />
+      <path d="M23 42 L27 62 H93 L97 42 Z" fill="var(--sludge)" opacity="0.45" />
+      <circle cx="34" cy="70" r="5" {...L} />
+      <circle cx="86" cy="70" r="5" {...L} />
+      <path d="M0 30 h14" {...L} />
+    </svg>
+  );
 }
 
 export function NavIcon({ name }: { name: string }) {

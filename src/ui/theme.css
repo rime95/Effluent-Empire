@@ -227,3 +227,6 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 0 4px; border: 1px s
 .stream-table th { cursor: pointer; text-align: center; white-space: nowrap; }
 .stream-table th.hi, .stream-table td.hi { background: rgba(47, 127, 209, 0.18); }
 .stream-table td.num { text-align: right; }
+
+.pfd-eq .react-flow__handle.sludge-port { border-color: var(--sludge); background: #f3e7d8; border-radius: 50%; }
+.pfd-eq .react-flow__handle.sludge-port:hover { background: var(--sludge); }

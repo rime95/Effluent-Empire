@@ -12,9 +12,10 @@ import { reduceChromium } from '../chemistry/chromiumReduction';
 import { adsorb } from '../physical/carbon';
 import { clarify, equalise, filter, separateOil } from '../physical/units';
 import { ProcessResult } from './types';
+import { filterPress, passThrough, thicken } from '../physical/sludge';
 
-export type UnitType = 'eq' | 'oilSep' | 'crReduction' | 'neutralisation' | 'precipitation' | 'coagulation' | 'clarifier' | 'activatedSludge' | 'sandFilter' | 'carbon';
-export type Category = 'physical' | 'chemical' | 'biological';
+export type UnitType = 'eq' | 'oilSep' | 'crReduction' | 'neutralisation' | 'precipitation' | 'coagulation' | 'clarifier' | 'activatedSludge' | 'sandFilter' | 'carbon' | 'thickener' | 'filterPress' | 'splitter' | 'mixer';
+export type Category = 'physical' | 'chemical' | 'biological' | 'sludge' | 'hydraulic';
 export type ParamValue = number | string;
 export type Params = Record<string, ParamValue>;
 
@@ -192,6 +193,54 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     capex: (p, s) => scale(220_000, Math.max((s.Q / 1440) * n(p, 'ebct'), 0.5), 10),
     footprint: (p) => 20 + n(p, 'ebct') * 0.8,
   },
+  thickener: {
+    type: 'thickener',
+    name: 'Sludge Thickener',
+    tagPrefix: 'TH',
+    category: 'sludge',
+    summary: 'Gravity thickening of dilute sludge (≈1 %) to 2.5–3 %. Supernatant returns to the plant; underflow goes on to dewatering.',
+    params: [{ key: 'area', label: 'Surface area', unit: 'm²', min: 1, max: 2000, step: 1, default: () => 10, help: 'Sized on solids loading: ≈20 kg/m²·d for chemical sludge, ≈30 for biological.' }],
+    run: (s, p) => thicken(s, { area_m2: n(p, 'area') }),
+    capex: (p) => scale(120_000, n(p, 'area'), 20),
+    footprint: (p) => n(p, 'area') * 1.3 + 5,
+  },
+  filterPress: {
+    type: 'filterPress',
+    name: 'Filter Press',
+    tagPrefix: 'FP',
+    category: 'sludge',
+    summary: 'Recessed-plate filter press: dewaters sludge to a 20–35 % DS cake for disposal. Filtrate returns to the plant.',
+    params: [
+      { key: 'volume', label: 'Chamber volume', unit: 'm³', min: 0.05, max: 50, step: 0.05, default: () => 0.5, help: 'Total cake chamber volume per batch.' },
+      { key: 'cycles', label: 'Cycles per day', unit: '/d', min: 0.5, max: 6, step: 0.5, default: () => 3, help: '4–6 h per cycle including filling, squeeze and cake discharge.' },
+      { key: 'conditioning', label: 'Conditioning', unit: '', options: [{ value: 'polymer', label: 'Polymer (cationic PAM)' }, { value: 'lime', label: 'Lime (drier, heavier cake)' }], default: () => 'polymer' },
+    ],
+    run: (s, p) => filterPress(s, { chamber_m3: n(p, 'volume'), cycles: n(p, 'cycles'), conditioning: (p.conditioning as 'polymer' | 'lime') ?? 'polymer' }),
+    capex: (p) => scale(250_000, n(p, 'volume'), 1),
+    footprint: (p) => 25 + 30 * n(p, 'volume'),
+  },
+  splitter: {
+    type: 'splitter',
+    name: 'Flow Splitter',
+    tagPrefix: 'SP',
+    category: 'hydraulic',
+    summary: 'Weir box splitting a stream between two outlets (a / b) — for parallel trains or partial bypass.',
+    params: [{ key: 'split', label: 'Flow to outlet a', unit: '%', min: 0, max: 100, step: 1, default: () => 50 }],
+    run: (s) => passThrough(s),
+    capex: () => 8_000,
+    footprint: () => 2,
+  },
+  mixer: {
+    type: 'mixer',
+    name: 'Mixing Box',
+    tagPrefix: 'MX',
+    category: 'hydraulic',
+    summary: 'Combines several streams (e.g. raw wastewater with filtrate return). Any unit with several inlets also mixes them.',
+    params: [],
+    run: (s) => passThrough(s),
+    capex: () => 6_000,
+    footprint: () => 2,
+  },
 };
 
 export function defaultParams(type: UnitType, Q: number): Params {
@@ -204,4 +253,6 @@ export function defaultParams(type: UnitType, Q: number): Params {
 export const PRICES = {
   electricity_kWh: 0.5,
   sludgeDisposal_kg: { metal: 1.2, other: 0.3 },
+  /** verify: disposal gate price per WET kg at a disposal point (metal sludge = scheduled waste SW 204). GAME MODEL */
+  disposalWet_kg: { metal: 0.18, other: 0.06 },
 };
