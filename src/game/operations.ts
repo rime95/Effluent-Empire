@@ -156,6 +156,11 @@ export function operatorFTE(Q: number, graph?: ProcessGraph): number {
   return base + (graph?.nodes.some((n) => n.kind === 'activatedSludge' && piped(n.id)) ? 0.5 : 0);
 }
 
+/** Operator posts an operating plant needs: what its O&M contract bills (staffing matches the fee). */
+export function plantPosts(p: Pick<Plant, 'contract' | 'trueStream' | 'graph'>): number {
+  return p.contract?.quote.operatorFTE ?? operatorFTE(p.trueStream.Q, p.graph);
+}
+
 /** Number of parameters in the weekly compliance sample (everything the standard regulates). */
 export function sampleParams(std: StandardId): number {
   return Object.keys(limitsFor(std)).length;

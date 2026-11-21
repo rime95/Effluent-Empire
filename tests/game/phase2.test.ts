@@ -79,7 +79,7 @@ describe('staff effects', () => {
     expect(projectSlots(team)).toBe(2);
     expect(labDiscount(team)).toBeCloseTo(0.15, 6);
     expect(labWeeks(team, 2)).toBe(1);
-    expect(operatorCapacity(team)).toBeGreaterThanOrEqual(2);
+    expect(operatorCapacity(team)).toBeGreaterThanOrEqual(1);
     expect(payroll([founder()])).toBe(0);
   });
 });

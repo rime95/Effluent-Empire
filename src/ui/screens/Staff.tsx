@@ -1,3 +1,4 @@
+import { plantPosts } from '../../game/operations';
 import { useGame, isLive } from '../../game/store';
 import { LEVEL_LABEL, ROLES, Role, count, labDiscount, operatorCapacity, payroll, projectSlots, salesBoost, weeklySalary } from '../../game/staff';
 import { rm } from '../format';
@@ -6,7 +7,7 @@ const ROLE_COLOR: Record<Role, string> = { engineer: 'var(--flow)', labTech: 'va
 
 export function Staff() {
   const g = useGame();
-  const operating = g.plants.filter((p) => p.status === 'operating').length;
+  const postsNeeded = g.plants.filter((p) => p.status === 'operating').reduce((a, p) => a + plantPosts(p), 0);
   return (
     <div className="page">
       <h1>Employees</h1>
@@ -28,10 +29,10 @@ export function Staff() {
         </div>
         <div className="panel stat">
           <div className="label">Operator coverage</div>
-          <div className="value" style={{ color: operating > operatorCapacity(g.staff) ? 'var(--warn)' : undefined }}>
-            {operating} / {operatorCapacity(g.staff)}
+          <div className="value" style={{ color: postsNeeded > operatorCapacity(g.staff) + 1e-9 ? 'var(--warn)' : undefined }}>
+            {postsNeeded} / {operatorCapacity(g.staff)}
           </div>
-          <div className="hint">operated plants / capacity</div>
+          <div className="hint">operator posts needed / staffed</div>
         </div>
         <div className="panel stat">
           <div className="label">Sales reach</div>

@@ -96,7 +96,7 @@ export function Commissioning({ go }: { go: (s: Screen) => void }) {
             {p.omOffer.quote ? (
               <>
                 <p className="muted" style={{ margin: '6px 0 10px' }}>
-                  {p.enquiry.company} offers a {p.omOffer.weeks / 52}-year O&amp;M contract: a fixed service fee of <b style={{ color: '#fff' }}>{rm(p.omOffer.quote.monthlyFee)}/month</b> plus chemicals, power and sludge re-billed at cost + {Math.round(OM.handling * 100)} %. You staff and maintain the plant (an operator covers 2 plants) and carry repairs and DOE fines.
+                  {p.enquiry.company} offers a {p.omOffer.weeks / 52}-year O&amp;M contract: a fixed service fee of <b style={{ color: '#fff' }}>{rm(p.omOffer.quote.monthlyFee)}/month</b> plus chemicals, power and sludge re-billed at cost + {Math.round(OM.handling * 100)} %. You staff the {p.omOffer.quote.operatorFTE} operator post(s) the fee pays for (1 per operator, 1.5 per senior operator), maintain the plant and carry repairs and DOE fines.
                 </p>
                 <div style={{ maxWidth: 620, marginBottom: 10 }}>
                   <OMFeeTable q={p.omOffer.quote} />

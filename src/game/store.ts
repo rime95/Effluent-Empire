@@ -9,7 +9,7 @@ import { LAB_TESTS, LabTestId, applyTest } from './lab';
 import { Market, initialMarket, stepMarket } from './market';
 import { INCIDENT_LABEL, availableActions, clampSetpoint } from './incidents';
 import { importLegacy, newSlotId, readSlot, summarize, writeSlot } from './saves';
-import { OM, Plant, contractFor, omFeeQuote, operateWeek, recommendedMaintenance } from './operations';
+import { OM, Plant, contractFor, omFeeQuote, operateWeek, plantPosts, recommendedMaintenance } from './operations';
 import { simulate } from '../simulation/treatment/graph';
 import { completeUpgrade, upgradeQuote } from './upgrade';
 import { Project, ABANDON_PENALTY, commission, constructionWeeks, newProject } from './project';
@@ -303,8 +303,10 @@ export function stepWeek(state: GameState): GameState {
       } else plants.push(pl.upgrade ? { ...pl, upgrade: null } : pl);
       continue;
     }
-    const covered = capacity > 0;
-    if (covered) capacity -= 1;
+    // staffing matches the fee: a plant is covered only when all the operator posts its contract bills are staffed
+    const need = plantPosts(pl);
+    const covered = capacity >= need - 1e-9;
+    if (covered) capacity -= need;
     let cur = pl;
     // upgrade works complete → the plant runs the new design from this week; a variation order is paid by the client
     if (cur.upgrade?.phase === 'building' && (cur.upgrade.doneWeek ?? 0) <= week) {

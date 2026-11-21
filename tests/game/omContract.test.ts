@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { generateEnquiry } from '../../src/game/customers';
 import { REFERENCE } from '../../src/game/referenceDesigns';
 import { linearGraph, simulate } from '../../src/simulation/treatment/graph';
-import { OM, Plant, WEEKS_PER_MONTH, contractFor, omFeeQuote, omMargin, operateWeek, recommendedMaintenance } from '../../src/game/operations';
+import { OM, Plant, WEEKS_PER_MONTH, contractFor, omFeeQuote, omMargin, operateWeek, plantPosts, recommendedMaintenance } from '../../src/game/operations';
+import { founder, operatorCapacity } from '../../src/game/staff';
 import { initialMarket } from '../../src/game/market';
-import { migrate, repriceLegacyContract } from '../../src/game/store';
+import { migrate, repriceLegacyContract, useGame } from '../../src/game/store';
 
 function refPlant(industry: 'plating' | 'food', seed0: number) {
   let e = generateEnquiry(seed0, 1, 0);
@@ -116,6 +117,23 @@ describe('O&M contract cash flow', () => {
     expect(b.cash).toBeCloseTo(a.cash, 6);
     expect(b.plant.history[0].cost - a.plant.history[0].cost).toBeCloseTo(1_200, 6);
     expect(b.plant.actionCost).toBe(0);
+  });
+});
+
+describe('operator staffing matches the fee', () => {
+  const op = (id: string, level: 1 | 2 | 3) => ({ id, name: id, role: 'operator' as const, level, salaryMonthly: 3_000, hiredWeek: 1 });
+  it('a plant is covered only when all the operator posts it is billed for are staffed', () => {
+    const { plant } = refPlant('food', 20); // activated sludge → 1.5 posts
+    expect(plantPosts(plant)).toBeGreaterThanOrEqual(1.5);
+    const conditionAfter = (staff: ReturnType<typeof op>[]) => {
+      useGame.setState({ plants: [{ ...plant, condition: 80 }], staff: [founder(), ...staff], cash: 1e6, week: 2, gameOver: false });
+      useGame.getState().advanceWeek(1);
+      return useGame.getState().plants[0].condition;
+    };
+    const one = conditionAfter([op('a', 1)]);
+    const two = conditionAfter([op('a', 1), op('b', 1)]);
+    expect(two - one).toBeCloseTo(OM.uncoveredWear, 6); // one operator is not enough for 1.5 posts
+    expect(operatorCapacity([op('s', 3)])).toBe(1.5);
   });
 });
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useGame } from '../../game/store';
-import { OM, Plant, WEEKS_PER_MONTH, recommendedMaintenance } from '../../game/operations';
+import { OM, Plant, WEEKS_PER_MONTH, plantPosts, recommendedMaintenance } from '../../game/operations';
 import { OMFeeTable } from '../components/OMFee';
 import type { Screen } from '../App';
 import { operatorCapacity } from '../../game/staff';
@@ -23,6 +23,17 @@ export function Plants({ go }: { go: (s: Screen) => void }) {
   const [sel, setSel] = useState<string | null>(null);
   const operating = g.plants.filter((p) => p.status === 'operating');
   const capacity = operatorCapacity(g.staff);
+  const postsNeeded = operating.reduce((a, p) => a + plantPosts(p), 0);
+  // plants are staffed in portfolio order (as in the weekly tick)
+  let left = capacity;
+  const uncovered = operating.filter((p) => {
+    const need = plantPosts(p);
+    if (left >= need - 1e-9) {
+      left -= need;
+      return false;
+    }
+    return true;
+  }).length;
   const plant = g.plants.find((p) => p.id === sel) ?? operating[0] ?? g.plants[0] ?? null;
   const weeklyNet = operating.reduce((a, p) => {
     const last = p.history[p.history.length - 1];
@@ -33,8 +44,8 @@ export function Plants({ go }: { go: (s: Screen) => void }) {
     <div className="page">
       <h1>Plants &amp; O&amp;M contracts</h1>
       <p className="sub">
-        Operated plants earn a fixed monthly service fee, and chemicals, power and sludge are re-billed to the client at cost + {Math.round(OM.handling * 100)} %. You pay maintenance, CePIETSO supervision, compliance sampling, repairs and DOE fines; operators are on your payroll. Operators cover {capacity} plant(s); {operating.length} operating
-        {operating.length > capacity && <b style={{ color: 'var(--warn)' }}> — {operating.length - capacity} uncovered (faster wear, longer breakdowns). Hire operators.</b>}
+        Operated plants earn a fixed monthly service fee, and chemicals, power and sludge are re-billed to the client at cost + {Math.round(OM.handling * 100)} %. You pay maintenance, CePIETSO supervision, compliance sampling, repairs and DOE fines; operators are on your payroll. Operator posts: {capacity} staffed / {postsNeeded} needed by {operating.length} plant(s)
+        {uncovered > 0 && <b style={{ color: 'var(--warn)' }}> — {uncovered} plant(s) uncovered (faster wear, longer breakdowns). Hire operators.</b>}
       </p>
       {g.plants.length === 0 && <div className="panel muted">No plants yet. Commission a plant and accept the O&amp;M contract the customer offers.</div>}
       {g.plants.length > 0 && (

@@ -16,7 +16,7 @@ After a successful commissioning, the customer offers a 3-year (156-week) O&M co
 | Management & insurance | 10 % of the above | Head-office overhead recovery: the company already pays office overheads, so this is **not** charged to the plant again. `verify:` |
 
 - **Margin:** 100–150 % on the cost base. It is 125 % at reputation 0, ±25 points per 50 reputation, clamped. This range was set by the player (2026-11-22) and is **game balance**; real O&M margins are about 10–30 % on cost.
-- **Realised margin is higher (known, 2026-11-22).** The fee bills operators per plant (1–2.5 FTE), but one hired operator covers 2–3 plants (`staff.ts`). The player's true staffing cost per plant is therefore lower than the billed staffing line. Making operator coverage consume FTE is an open option.
+- **Staffing matches the fee (2026-11-22, player decision).** Each hired operator staffs 1 post, or 1.5 when senior. Each operating plant needs the posts its contract bills (`plantPosts` = `quote.operatorFTE`, 0.5–2.5). Plants are staffed in portfolio order; a plant is covered only when all its posts are staffed, otherwise it wears faster and breakdowns last longer. The billed staffing line is therefore a real cost. Before this, one operator covered 2–3 plants, which pushed the realised margin to about 200–250 %.
 - **Reimbursables:** chemicals, electricity and sludge disposal at **market prices** and actual flow, re-billed to the client at cost + 10 % handling. The client carries price and flow risk.
 - **Escalation:** the fixed fee and the plant's service costs (CePIETSO, sampling) rise 4 % each contract year, applied as `contract.indexation`. Not applied in the contract's final week. `verify:`
 - **Performance deduction:** each failed weekly sample deducts 5 % of the monthly fee. DOE fines remain the operator's.
@@ -104,7 +104,7 @@ A staffed, maintained reference plant is more than 85 % compliant and profitable
 |---|---|---|
 | Engineer | 1 concurrent project each (the founder counts) | 5,500–11,500 |
 | Lab technician | −15 % lab cost each (max −45 %); 2-week tests take 1 week | 3,000–4,800 |
-| Plant operator | covers 2 plants (3 when senior) | 2,800–4,200 |
+| Plant operator | staffs 1 operator post (1.5 when senior); a plant needs 0.5–2.5 posts | 2,800–4,200 |
 | Sales engineer | +1 enquiry each (max +3), larger and better-paid jobs | 5,000–9,500 |
 
 Salaries are indicative Malaysian ranges (🔴 not verified).
