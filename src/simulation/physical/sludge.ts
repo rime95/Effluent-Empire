@@ -91,7 +91,8 @@ export const THICKENER = {
   // verify: WAS gravity thickening is poor in practice; 30 kg/m²·d is the top of the M&E range
   chemical: { slr: 20, solids: 0.03, hlrMax: 24 },
   biological: { slr: 30, solids: 0.025, hlrMax: 8 },
-  capture: 0.95,
+  // a correctly loaded thickener returns a clear supernatant (practitioner input 2026-11-21; verify, polymer-aided)
+  capture: 0.9995,
   /** limiting solids flux the underflow can carry, as a multiple of the design SLR (verify: M&E solids-flux analysis) */
   fluxMax: 1.5,
 };
@@ -156,7 +157,7 @@ export function thicken(s: Stream, p: { area_m2: number; mode?: 'thicken' | 'hol
     notes.push({ level: 'warn', code: 'thick.noThickening', text: `Feed is already ${(feedFrac * 100).toFixed(1)} % solids — the thickener adds almost nothing at this loading.` });
   }
   const { out, removed } = captureAll(s, capture);
-  if (r > 1.2) notes.push({ level: dry * THICKENER.capture > capKgD ? 'error' : 'warn', code: 'thick.overload', text: `Solids loading ${slr.toFixed(0)} kg/m²·d is ${r.toFixed(1)}× the ${type} design value (${d.slr}): thin underflow (${(w * 100).toFixed(1)} %)${dry * THICKENER.capture > capKgD ? `, and ${(dry * THICKENER.capture - capKgD).toFixed(0)} kg/d of solids spill over the weir — if the supernatant returns to the plant they circulate and build up` : ' and solids in the supernatant'}. Needs ≈${Math.ceil(dry / d.slr)} m².` });
+  if (r > 1.2) notes.push({ level: dry * THICKENER.capture > capKgD ? 'error' : 'warn', code: 'thick.overload', text: `Solids loading ${slr.toFixed(0)} kg/m²·d is ${r.toFixed(1)}× the ${type} design value (${d.slr}): thin underflow (${(w * 100).toFixed(1)} %)${dry * THICKENER.capture > capKgD ? `, and ${(dry * THICKENER.capture - capKgD).toFixed(0)} kg/d of solids spill over the weir — if the supernatant returns to the plant they circulate and build up` : ' (supernatant still clear — the underflow carries everything up to the solids-flux limit)'}. Needs ≈${Math.ceil(dry / d.slr)} m².` });
   if (s.Q > 0 && tss(s) < 2000) notes.push({ level: 'info', code: 'thick.dilute', text: `Feed is dilute (${(tss(s) / 10000).toFixed(2)} % solids) — a thickener is the right first step before dewatering.` });
   return result(out, {
     removed,
@@ -176,9 +177,9 @@ export function thicken(s: Stream, p: { area_m2: number; mode?: 'thicken' | 'hol
 
 export const PRESS = {
   cake: { chemical: { polymer: 0.25, lime: 0.35 }, biological: { polymer: 0.2, lime: 0.28 } },
-  // normal operation with conditioned sludge and cloths in good order: filtrate is near solids-free (≈ 50–150 mg/L);
+  // normal operation with conditioned sludge and cloths in good order: filtrate is practically solids-free (0.1 % of a 1–3 % feed ≈ 10–35 mg/L);
   // overload (short cycles, cloth blinding) lets solids through. GAME MODEL, verify; practitioner input 2026-11-21.
-  capture: 0.995,
+  capture: 0.999,
   overloadCapture: 0.9,
   polymer_kgPerT: 3,
   lime_fracDS: 0.2,

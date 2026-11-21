@@ -120,7 +120,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
   useEffect(() => () => flush(), [flush]);
 
   const basis = useMemo(() => (p ? designBasis(p.datasheet) : null), [p?.datasheet]); // eslint-disable-line react-hooks/exhaustive-deps
-  const { sim, busy } = useSimulation(p ? draft : null, basis?.stream ?? null);
+  const { sim, busy, error: simError } = useSimulation(p ? draft : null, basis?.stream ?? null);
   const report = useMemo(() => (sim?.effluent && p ? evaluate(sim.effluent, p.enquiry.standard, sim) : null), [sim, p?.enquiry.standard]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------- selection & live drag positions (local; positions are written to the draft on drag stop)
@@ -280,8 +280,11 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
     (kind: UnitType | 'disposal', position?: { x: number; y: number }) => {
       if (!p || !editable) return;
       const node = makeNode(kind, p.datasheet.Q, draft.nodes);
-      const units = draft.nodes.filter((n) => !isNonUnit(n)).length;
-      const pos = position ?? (kind === 'disposal' || CATALOGUE[kind as UnitType]?.category === 'sludge' ? { x: 180 + units * 120, y: 420 } : { x: 180 + units * 190, y: 160 });
+      const isSludgeKind = (k: string) => k === 'disposal' || CATALOGUE[k as UnitType]?.category === 'sludge';
+      // process units go along the main line, sludge units along a second row; each row spaced so nozzles never overlap
+      const units = draft.nodes.filter((n) => !isNonUnit(n) && !isSludgeKind(n.kind)).length;
+      const sludgeUnits = draft.nodes.filter((n) => isSludgeKind(n.kind)).length;
+      const pos = position ?? (isSludgeKind(kind) ? { x: 360 + sludgeUnits * 190, y: 420 } : { x: 180 + units * 190, y: 160 });
       node.position = snap ? { x: Math.round(pos.x / GRID) * GRID, y: Math.round(pos.y / GRID) * GRID } : pos;
       setDraft((g) => ({ ...g, nodes: [...g.nodes, node] }));
       setSelNodes(new Set([node.id]));
@@ -311,7 +314,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
         map.set(n.id, added.id);
         nodes.push(added);
       }
-      const edges = [...g.edges, ...src.edges.map((e) => ({ id: newEdgeId(), from: map.get(e.from)!, to: map.get(e.to)! }))];
+      const edges = [...g.edges, ...src.edges.map((e) => ({ id: newEdgeId(), from: map.get(e.from)!, to: map.get(e.to)!, ...(e.fromPort ? { fromPort: e.fromPort } : {}) }))];
       setSelNodes(new Set(map.values()));
       clip.current = { nodes: src.nodes.map((n) => ({ ...n, position: n.position ? { x: n.position.x + 40, y: n.position.y + 40 } : n.position })), edges: src.edges };
       return { nodes, edges };
@@ -520,7 +523,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
             ⤢ Fit
           </button>
           <span className="tb-sep" />
-          <span className={`tb-status ${busy ? 'busy' : ''}`}>{busy ? 'calculating…' : sim?.ok ? 'balance OK' : 'incomplete'}</span>
+          <span className={`tb-status ${busy ? 'busy' : ''}`} title={simError ?? undefined} style={simError && !busy ? { color: 'var(--alarm)' } : undefined}>{busy ? 'calculating…' : simError ? 'calculation failed — showing last result' : sim?.ok ? 'balance OK' : 'incomplete'}</span>
         </div>
 
         {menu && menuNode && (

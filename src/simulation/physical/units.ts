@@ -68,10 +68,13 @@ const POOL_LABEL: Record<Pool, string> = { grit: 'grit', inert: 'mineral solids'
 
 const FINES: Record<Pool, number> = { grit: 0, inert: 0.01, colloid: 0, floc: 0.01, organic: 0.05, precipitate: 0.02, alFloc: 0.01, feFloc: 0.01, biomass: 0.01 };
 
-/** Non-settleable fines of the precipitate pool: 2 % for pin floc, falling to 0.3 % for well-flocculated precipitate (GAME MODEL). */
+/**
+ * Non-settleable fines of the precipitate pool: 2 % for pin floc, falling to 0.3 % once the hydroxide is enmeshed in
+ * well-coagulated floc (v₅₀ ≥ 2 m/h) — the same curve as every other pool (process review 2026-11-21: the hydroxide
+ * carries the metals, so it must not keep more fines than the floc it settles in). GAME MODEL.
+ */
 export function precipitateFines(v50: number): number {
-  const t = Math.min(1, Math.max(0, Math.log(Math.max(v50, 0.5) / 0.5) / Math.log(10)));
-  return 0.02 + (0.003 - 0.02) * t;
+  return flocFines(v50, 0.02);
 }
 
 /**
@@ -83,13 +86,31 @@ export function effectiveSettlingArea(plan_m2: number, plate_m2: number): number
   return Math.max(plan_m2, LAMELLA.efficiency * Math.max(0, plate_m2) * Math.cos((LAMELLA.angleDeg * Math.PI) / 180));
 }
 
-export function clarify(s: Stream, p: { area_m2: number; depth_m?: number; plateArea_m2?: number }): ProcessResult {
+/**
+ * Non-settleable fines of a pool: the dispersed fraction (FINES) applies to poorly flocculated solids; solids enmeshed
+ * in well-coagulated floc (v₅₀ ≥ 2 m/h) are captured with the floc and only 0.3 % escape (GAME MODEL, verify: a
+ * well-run chemical clarifier gives ≈ 5–20 mg/L effluent TSS; practitioner input 2026-11-21).
+ */
+export function flocFines(v50: number, base: number): number {
+  if (base <= 0.003) return base;
+  const t = Math.min(1, Math.max(0, Math.log(Math.max(v50, 0.5) / 0.5) / Math.log(4)));
+  return base + (0.003 - base) * t;
+}
+
+/** Sludge blanket compaction limit: a slower desludge pump lets the blanket thicken to ≈ 1.5× the typical underflow (GAME MODEL, verify). */
+export const BLANKET_MAX_FACTOR = 1.5;
+/** …but never beyond what a desludge pump can move (≈ 10 % solids). */
+export const BLANKET_MAX_SOLIDS = 0.1;
+/** Order in which solids leave over the weir when the blanket rises: lightest first, grit and mineral last. */
+const BLANKET_LOSS_ORDER: Pool[] = ['colloid', 'biomass', 'alFloc', 'feFloc', 'floc', 'precipitate', 'organic', 'inert', 'grit'];
+
+export function clarify(s: Stream, p: { area_m2: number; depth_m?: number; plateArea_m2?: number; desludge_m3d?: number }): ProcessResult {
   const depth = p.depth_m ?? 3.5;
   const Qpeak = s.Q * s.peakFactor;
   const plates = !s.ml ? Math.max(0, p.plateArea_m2 ?? 0) : 0; // lamella packs do not help zone-settling mixed liquor
   const SOR = surfaceOverflowRate_mh(Qpeak, effectiveSettlingArea(p.area_m2, plates));
   const removal: Partial<Record<Pool, number>> = {};
-  for (const pool of POOLS) removal[pool] = (1 - (pool === 'precipitate' ? precipitateFines(s.v50.precipitate) : FINES[pool])) * hazenRemoval(s.v50[pool], SOR);
+  for (const pool of POOLS) removal[pool] = (1 - flocFines(s.v50[pool], FINES[pool])) * hazenRemoval(s.v50[pool], SOR);
   const notes: Note[] = [];
   const calcs: ProcessResult['calcs'] = {
     sor: { label: plates > 0 ? 'Surface overflow rate (peak, on effective lamella area)' : 'Surface overflow rate (peak)', value: SOR, unit: 'm/h', digits: 2 },
@@ -126,25 +147,64 @@ export function clarify(s: Stream, p: { area_m2: number; depth_m?: number; plate
   const precMass = poolMass(s, 'precipitate');
   if (!s.ml && precMass > 1 && (removal.precipitate ?? 0) < 0.8)
     notes.push({ level: 'warn', code: 'clar.pinfloc', text: `Metal-hydroxide pin floc (v₅₀ ${s.v50.precipitate.toFixed(2)} m/h) settles far slower than the peak overflow rate ${SOR.toFixed(2)} m/h: only ${(100 * (removal.precipitate ?? 0)).toFixed(0)} % is captured. Add coagulant + polymer flocculant upstream, enlarge the clarifier, or add lamella plates.` });
-  const { out, removed } = splitPools(s, removal);
+  // scum skimming: free oil rises (Stokes) and is skimmed; emulsified oil enmeshed in floc settles with it
+  const rOilC = hazenRemoval(-stokesVelocity_mh(FREE_OIL_D50_M, OIL_DENSITY, s.T), SOR, 1.0);
+  calcs.rOil = { label: 'Free-oil skimming', value: rOilC * 100, unit: '%', digits: 0 };
+  const separate = () => {
+    const r = splitPools(s, removal);
+    r.removed.OGfree = s.OGfree * rOilC;
+    r.out.OGfree = s.OGfree * (1 - rOilC);
+    return r;
+  };
+  let { out, removed } = separate();
+  // desludge pump (primary / chemical clarifier): auto draws exactly what settles at the typical underflow concentration.
+  // A set pump flow fixes the underflow: more water → thinner sludge; too little → the blanket rises and the excess
+  // solids (lightest first) leave over the weir (steady state). Skimmed oil is pumped with the sludge.
+  let wUnder: number | undefined;
+  const qSet = Math.max(0, p.desludge_m3d ?? 0);
+  if (qSet > 0 && s.ml) notes.push({ level: 'info', code: 'clar.desludgeML', text: 'Desludge pump setting ignored: after activated sludge the RAS/WAS system sets the underflow.' });
+  let qp = !s.ml ? qSet : 0;
+  if (qp > 0.95 * s.Q && s.Q > 0) {
+    notes.push({ level: 'error', code: 'clar.desludgeDrain', text: `Desludge pump ${qp.toFixed(1)} m³/d is more than the clarifier receives (${s.Q.toFixed(1)} m³/d) — it would drain the tank. Limited to 95 % of the inflow.` });
+    qp = 0.95 * s.Q;
+  }
+  if (qp > 0) {
+    const dry = removedDryKgD(removed);
+    const wNat = clarifierUnderflowFraction(removed);
+    const wMax = Math.min(BLANKET_MAX_FACTOR * wNat, Math.max(wNat, BLANKET_MAX_SOLIDS));
+    const canCarry = qp * wMax * 1000; // kg/d
+    if (dry > canCarry && dry > 0) {
+      // the blanket rises: shed the lightest solids first until the underflow carries only what the pump can move
+      let excess = dry - canCarry; // kg/d
+      for (const pool of BLANKET_LOSS_ORDER) {
+        if (excess <= 0) break;
+        const kg = (s.Q * poolMass(s, pool) * (removal[pool] ?? 0)) / 1000;
+        if (kg <= 0) continue;
+        const shed = Math.min(kg, excess);
+        removal[pool] = (removal[pool] ?? 0) * (1 - shed / kg);
+        excess -= shed;
+      }
+      ({ out, removed } = separate());
+      wUnder = wMax;
+      notes.push({ level: 'error', code: 'clar.desludge', text: `Desludge pump ${qp.toFixed(2)} m³/d can only carry ${canCarry.toFixed(1)} kg/d of sludge (blanket at ${(wMax * 100).toFixed(1)} %): the blanket rises and ${(dry - canCarry).toFixed(1)} kg/d of the lightest floc goes over the weir. Pump at least ${(dry / (wMax * 1000)).toFixed(2)} m³/d (${(dry / (wNat * 1000)).toFixed(2)} m³/d for a normal blanket).` });
+    } else if (dry > 0) {
+      wUnder = dry / (qp * 1000);
+      if (wUnder < wNat / 3) notes.push({ level: 'info', code: 'clar.desludgeThin', text: `Desludge pump draws ${qp.toFixed(2)} m³/d for ${dry.toFixed(1)} kg/d — the sludge is only ${(wUnder * 100).toFixed(2)} % solids, so the thickener/press handles extra water. About ${(dry / (wNat * 1000)).toFixed(2)} m³/d is enough.` });
+    }
+  }
   out.ml = undefined;
   const carried = (['Ni', 'Cu', 'Zn', 'Cr'] as const).filter((m) => out.precipitated[m] > 0.05);
   if (carried.length) calcs.metalCarry = { label: `Particulate metal carried over (${carried.join(', ')})`, value: carried.reduce((a, m) => a + out.precipitated[m], 0), unit: 'mg/L', digits: 2 };
-  // scum skimming: free oil rises (Stokes) and is skimmed; emulsified oil enmeshed in floc settles with it
-  const rOilC = hazenRemoval(-stokesVelocity_mh(FREE_OIL_D50_M, OIL_DENSITY, s.T), SOR, 1.0);
-  removed.OGfree = s.OGfree * rOilC;
-  out.OGfree = s.OGfree * (1 - rOilC);
-  calcs.rOil = { label: 'Free-oil skimming', value: rOilC * 100, unit: '%', digits: 0 };
   if (SOR > 2.0) notes.push({ level: 'warn', code: 'clar.sor', text: `Peak SOR ${SOR.toFixed(2)} m/h is high for chemical floc (typical ≤ 1.5 m/h).` });
   const sludgeKg = (s.Q * POOLS.reduce((a, pl) => a + poolMass(removed, pl), 0)) / 1000;
   calcs.sludge = { label: 'Sludge produced (dry)', value: sludgeKg, unit: 'kg/d', digits: 1 };
-  const w = s.ml?.xr ? s.ml.xr / 1e6 : clarifierUnderflowFraction(removed);
+  const w = s.ml?.xr ? s.ml.xr / 1e6 : wUnder ?? clarifierUnderflowFraction(removed);
   if (sludgeKg > 0) {
-    calcs.uSolids = { label: s.ml?.xr ? 'Underflow solids (= RAS/WAS conc. Xr)' : 'Underflow solids (by sludge make-up)', value: w * 100, unit: '%', digits: 2 };
+    calcs.uSolids = { label: s.ml?.xr ? 'Underflow solids (= RAS/WAS conc. Xr)' : qp > 0 ? 'Underflow solids (set by desludge pump)' : 'Underflow solids (auto desludge, by sludge make-up)', value: w * 100, unit: '%', digits: 2 };
     calcs.uFlow = { label: 'Underflow (sludge) flow = dry solids ÷ underflow solids', value: removedDryKgD(removed) / (w * 1000), unit: 'm³/d', digits: 2 };
   }
   // secondary clarifier: the sludge port carries WAS at the RAS/WAS underflow concentration Xr
-  return result(out, { removed, notes, calcs, energy_kWhd: 0.5 * 24, ...(s.ml?.xr ? { sludgeSolidsFrac: s.ml.xr / 1e6 } : {}) });
+  return result(out, { removed, notes, calcs, energy_kWhd: 0.5 * 24, ...(s.ml?.xr ? { sludgeSolidsFrac: s.ml.xr / 1e6 } : wUnder !== undefined ? { sludgeSolidsFrac: wUnder } : {}) });
 }
 
 // ---------------------------------------------------------------- Rapid sand filter

@@ -22,8 +22,32 @@ Check (tested): for a narrow distribution, R = v/SOR when SOR > v, and R = 1 whe
 | colloid | 0.005 (does not settle) | — |
 | coagulated floc | 0.3–3.0 (grows with flocculation time) | 1 % |
 | particulate organics | 0.8 (3.0 after bioflocculation) | 5 % |
-| metal hydroxide pin floc | 0.05–0.6 (time × concentration, see `precipitation.md`); floc / polymer floc after coagulation | 2 % → 0.3 % as v₅₀ rises 0.5 → 5 m/h |
+| metal hydroxide pin floc | 0.05–0.6 (time × concentration, see `precipitation.md`); floc / polymer floc after coagulation | 2 % → 0.3 % as v₅₀ rises 0.5 → 2 m/h (same curve as the other pools; process review 2026-11-21) |
 | Al(OH)₃ / Fe(OH)₃ floc | floc / 1.15 × floc | 1 % |
+
+**Enmeshment in coagulated floc (2026-11-21, practitioner input).** The fines fractions above apply to poorly flocculated solids. A well-run chemical clarifier gives about 5–20 mg/L effluent TSS: solids enmeshed in well-coagulated floc settle with it. For every pool, including the metal hydroxide (which carries the metals and must not keep more fines than the floc it settles in), the fines fraction falls from the table value to 0.3 % as that pool's v₅₀ rises from 0.5 to 2 m/h (`flocFines`, log-linear). Unflocculated colloids still pass. Their capture depends on the coagulant dose (destabilisation), so an under-dosed train still shows high effluent TSS, and the compliance trace says so.
+
+The curve keys on v₅₀ alone, so any fast-settling solid gets the low floor, including raw mineral solids at v₅₀ 2 m/h. At those velocities the Hazen tail dominates anyway.
+
+**Size versus polymer (Hazen tail, σ = 0.8).** Even with the low fines floor, the distribution's slow tail escapes:
+
+| Floc v₅₀ | Peak SOR 1.5 m/h | Peak SOR 1.0 m/h |
+|---|---|---|
+| 2.5 m/h (no polymer) | ≈ 9 % escapes | ≈ 4 % |
+| 4.2 m/h (polymer) | ≈ 2.8 % | ≈ 0.9 % |
+
+So "no sludge in the overflow" needs polymer and a peak SOR of about 1 m/h or less. That matches practice: chemical clarifiers without polymer typically give 20–50 mg/L.
+
+Reference check (tests): the plating train with ferric + polymer leaves < 15 mg/L. The food train goes from 103 mg/L at 75 mg/L ferric (under-dosed) to 14 mg/L near the optimum dose.
+
+## Desludge pump (primary / chemical clarifier)
+Parameter `desludge` (m³/d; 0 = auto):
+- **Auto:** the underflow is drawn at the sludge make-up concentration (see `sludge_thickening_dewatering.md`).
+- **Set flow Q_p:** underflow solids w = M_DS / (Q_p·ρ). More pumping gives thinner sludge, and an info note is shown when w < ⅓ of the typical underflow.
+- **Pump too small:** the blanket can compact to at most min(1.5 × the typical underflow, 10 %), the upper limit being what desludge pumps move (GAME MODEL, 🟡 verify). If the pump cannot carry M_DS at that concentration, the blanket rises and the excess leaves over the weir in steady state, lightest solids first: colloids, biomass, Al/Fe floc, floc, hydroxide, organics, then mineral solids and grit. This is flagged as an error.
+- **Pump larger than the inflow:** limited to 0.95·Q and flagged as an error, since it would drain the tank.
+- **Skimmed oil** is pumped with the sludge and counts in M_DS.
+- **After activated sludge:** not used; an info note says the setting is ignored. WAS is set by the RAS/WAS balance (`activated_sludge.md`).
 
 ## Lamella (inclined-plate) clarifier
 The effective settling area is A_eff = max(A_plan, η·A_plates·cos θ), with θ = 55° and η = 0.8. The plates fill the settling zone, so the plan area is not added on top; the first draft double-counted it until chemistry review.

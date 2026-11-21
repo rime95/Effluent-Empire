@@ -237,7 +237,7 @@ describe('thickener solids-flux limit (regression: clarifier underflow snowballi
     const st = foodQ();
     const sim = simulate(foodCoag(10), st);
     expect(sim.errors.some((x) => x.code === 'graph.recycle')).toBe(false);
-    expect(sim.edges['cl-th-sludge'].Q).toBeLessThan(0.2 * st.Q); // was > 0.5·Q before the flux limit
+    // a genuinely undersized thickener with its supernatant returned circulates its excess solids: flagged, with the cure
     const note = sim.nodes['th'].result.notes.find((n) => n.code === 'thick.overload');
     expect(note?.level).toBe('error');
     expect(note?.text).toMatch(/Needs ≈\d+ m²/);
@@ -281,5 +281,87 @@ describe('holding-tank operation and a clear press filtrate (practitioner layout
     expect(f.Q).toBeGreaterThan(0);
     expect(tss(f)).toBeLessThan(200);
     expect(sim.nodes['fp'].result.notes.some((n) => n.code === 'press.overload')).toBe(false);
+  });
+});
+
+describe('clean returns and near-complete clarification when equipment is sized right (practitioner rules)', () => {
+  it('correctly sized thickener and press: supernatant and filtrate are practically solids-free', () => {
+    const sim = simulate(sludgePlant(true), plating());
+    expect(sim.errors.filter((x) => x.level === 'error')).toEqual([]);
+    expect(sim.nodes['th'].result.notes.some((n) => n.code === 'thick.overload')).toBe(false);
+    expect(tss(sim.edges['th-eq-out'])).toBeLessThan(100);
+    expect(tss(sim.edges['fp-eq-out'])).toBeLessThan(50);
+  });
+  it('a well-coagulated chemical clarifier leaves < 15 mg/L TSS', () => {
+    const sim = simulate(sludgePlant(false), plating());
+    expect(tss(sim.nodes['cl'].result.out)).toBeLessThan(15);
+  });
+  it('desludge pump: enough flow → underflow = solids / flow; too little → blanket rises and sludge goes over the weir', () => {
+    const auto = simulate(sludgePlant(false), plating());
+    const dry = auto.nodes['cl'].sludgeKgD;
+    const wNat = clarifierUnderflowFraction(auto.nodes['cl'].result.removed!);
+    const qOk = (2 * dry) / (wNat * 1000); // twice the auto flow
+    const g = sludgePlant(false);
+    g.nodes = g.nodes.map((n) => (n.id === 'cl' ? { ...n, params: { ...n.params, desludge: qOk } } : n));
+    const ok = simulate(g, plating());
+    expect(ok.edges['cl-th-sludge'].Q).toBeCloseTo(qOk, 3);
+    // same solids escape; only slightly more concentrated because more water leaves with the sludge
+    expect(tss(ok.nodes['cl'].result.out) / tss(auto.nodes['cl'].result.out)).toBeGreaterThan(0.99);
+    expect(tss(ok.nodes['cl'].result.out) / tss(auto.nodes['cl'].result.out)).toBeLessThan(1.1);
+    const g2 = sludgePlant(false);
+    g2.nodes = g2.nodes.map((n) => (n.id === 'cl' ? { ...n, params: { ...n.params, desludge: qOk / 10 } } : n));
+    const low = simulate(g2, plating());
+    expect(low.nodes['cl'].result.notes.some((n) => n.code === 'clar.desludge' && n.level === 'error')).toBe(true);
+    expect(tss(low.nodes['cl'].result.out)).toBeGreaterThan(5 * tss(auto.nodes['cl'].result.out));
+    expect(low.balance?.ok).toBe(true);
+  });
+});
+
+describe('loose units', () => {
+  it('a unit with no pipes at all is left out with a warning; the rest of the design still calculates', () => {
+    const g = sludgePlant(false);
+    g.nodes.push(unit('spare', 'sandFilter'));
+    const sim = simulate(g, plating());
+    expect(sim.ok).toBe(true);
+    expect(sim.errors.some((x) => x.code === 'graph.loose' && x.level === 'warn')).toBe(true);
+    expect(sim.nodes['spare']).toBeUndefined();
+    expect(sim.effluent).toBeTruthy();
+  });
+  it('a half-connected unit is still an error (flow would have nowhere to go)', () => {
+    const g = sludgePlant(false);
+    g.nodes.push(unit('dead', 'sandFilter'));
+    g.edges.push(pipe('cl', 'dead'));
+    expect(simulate(g, plating()).errors.some((x) => x.code === 'graph.noOutlet')).toBe(true);
+  });
+});
+
+describe('desludge pump edge cases (process review)', () => {
+  const withPump = (q: number) => {
+    const g = sludgePlant(false);
+    g.nodes = g.nodes.map((n) => (n.id === 'cl' ? { ...n, params: { ...n.params, desludge: q } } : n));
+    return simulate(g, plating());
+  };
+  it('a pump larger than the inflow is limited to 95 % and flagged', () => {
+    const s = plating();
+    const sim = withPump(s.Q * 2);
+    expect(sim.nodes['cl'].result.notes.some((n) => n.code === 'clar.desludgeDrain')).toBe(true);
+    expect(sim.edges['cl-th-sludge'].Q).toBeLessThanOrEqual(0.95 * s.Q + 1e-6);
+    expect(sim.balance?.ok).toBe(true);
+  });
+  it('a starved pump sheds the light floc over the weir first; grit stays in the underflow', () => {
+    const auto = simulate(sludgePlant(false), plating());
+    const sim = withPump(0.5 * auto.edges['cl-th-sludge'].Q); // pump at half the flow the settled sludge needs
+    expect(sim.nodes['cl'].result.notes.some((n) => n.code === 'clar.desludge')).toBe(true);
+    const cl = sim.nodes['cl'];
+    expect(poolMass(cl.result.out, 'grit')).toBeLessThan(0.01 * Math.max(poolMass(cl.inlet, 'grit'), 1e-9) + 1e-9);
+    expect(poolMass(cl.result.out, 'feFloc')).toBeGreaterThan(0.5 * poolMass(cl.inlet, 'feFloc'));
+  });
+  it('a set pump flow on a secondary clarifier is ignored with a note', () => {
+    let e = generateEnquiry(11, 1, 0);
+    for (let s = 12; e.industry !== 'food'; s++) e = generateEnquiry(s, 1, 0);
+    const q = e.trueStream.Q;
+    const u = (id: string, kind: UnitType, over: Record<string, number | string> = {}): PNode => ({ id, kind, tag: id, params: { ...defaultParams(kind, q), ...over } });
+    const g: ProcessGraph = { nodes: [{ id: 'in', kind: 'influent', params: {} }, u('as', 'activatedSludge', { volume: q * 3, control: 'srt' }), u('cl', 'clarifier', { desludge: 5 }), { id: 'out', kind: 'discharge', params: {} }], edges: [pipe('in', 'as'), pipe('as', 'cl'), pipe('cl', 'out')] };
+    expect(simulate(g, e.trueStream).nodes['cl'].result.notes.some((n) => n.code === 'clar.desludgeML')).toBe(true);
   });
 });

@@ -114,6 +114,10 @@ export function validateGraph(g: ProcessGraph): Note[] {
     const fedByAS = g.edges.some((e) => e.to === c.id && g.nodes.find((n) => n.id === e.from)?.kind === 'activatedSludge');
     if (fedByAS && !g.edges.some((e) => e.from === c.id && e.fromPort === 'ras')) errs.push({ level: 'info', code: 'graph.noRAS', text: `${c.tag ?? 'Clarifier'}: draw the RAS line (round brown RAS nozzle → aeration basin). The model assumes the return; draw it so the PFD, P&ID and stream table show it.` });
   }
+  // holding mode decants nothing only if its sludge actually goes on; without a sludge pipe everything leaves via the outlet
+  for (const n of g.nodes.filter((x) => x.kind === 'thickener' && x.params.mode === 'holding')) {
+    if (!g.edges.some((e) => e.from === n.id && e.fromPort === 'sludge')) errs.push({ level: 'warn', code: 'graph.holdingNoSludge', text: `${n.tag ?? 'Thickener'} is a holding tank but its sludge outlet is not piped — connect it to the filter press, or everything overflows to the outlet.` });
+  }
   for (const n of g.nodes.filter((x) => x.kind === 'splitter')) {
     const outs = g.edges.filter((e) => e.from === n.id);
     if (outs.length && (outs.every((e) => e.fromPort !== 'b') || outs.every((e) => e.fromPort === 'b'))) errs.push({ level: 'warn', code: 'graph.splitterOneSide', text: `${n.tag ?? 'Splitter'} has only one outlet connected — its split % is ignored and all flow goes that way.` });
@@ -358,8 +362,12 @@ function fromVec(template: Stream, v: number[]): Stream {
   return out;
 }
 
-export function simulate(g: ProcessGraph, influent: Stream): SimResult {
+export function simulate(gIn: ProcessGraph, influent: Stream): SimResult {
+  // a unit with no pipes at all (just dropped on the sheet) is left out with a warning instead of blocking the whole design
+  const loose = gIn.nodes.filter((n) => n.kind !== 'influent' && n.kind !== 'discharge' && !gIn.edges.some((e) => e.from === n.id || e.to === n.id));
+  const g: ProcessGraph = loose.length ? { nodes: gIn.nodes.filter((n) => !loose.includes(n)), edges: gIn.edges } : gIn;
   const errors = validateGraph(g);
+  for (const n of loose) errors.push({ level: 'warn', code: 'graph.loose', text: `${n.tag ?? n.kind} is not connected — it is left out of the calculation (and the build) until you pipe it in.` });
   if (!(influent.Q > 0)) errors.push({ level: 'error', code: 'graph.noFlow', text: 'Influent flow must be greater than zero.' });
   if (errors.some((e) => e.level === 'error')) return emptyResult(errors);
   const flowG: ProcessGraph = { nodes: g.nodes, edges: g.edges.filter((e) => e.fromPort !== 'ras') };

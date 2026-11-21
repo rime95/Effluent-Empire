@@ -146,9 +146,10 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     params: [
       { key: 'area', label: 'Surface area', unit: 'm²', min: 1, max: 5000, step: 1, default: (Q) => round(Q / 24 / 0.5, 1), help: 'Chemical floc: ≤ 1.0–1.5 m/h; activated sludge: ≤ 0.7–1.2 m/h at peak.' },
       { key: 'depth', label: 'Side-water depth', unit: 'm', min: 2, max: 6, step: 0.5, default: () => 3.5 },
+      { key: 'desludge', label: 'Desludge pump flow (0 = auto)', unit: 'm³/d', min: 0, max: 5000, step: 0.1, default: () => 0, help: 'Auto draws exactly the settled sludge at its typical underflow concentration. Set a flow to fix the pump: too little → the blanket rises and sludge goes over the weir; too much → thin sludge. Not used after activated sludge (WAS is set by the RAS system).' },
       { key: 'plateArea', label: 'Lamella plate area (0 = conventional)', unit: 'm²', min: 0, max: 20000, step: 5, default: () => 0, help: 'Inclined plates at 55° multiply the settling area in the same footprint (chemical floc only). ≈ 8–12 m² of plate per m² of tank.' },
     ],
-    run: (s, p) => clarify(s, { area_m2: n(p, 'area'), depth_m: n(p, 'depth'), plateArea_m2: Number(p.plateArea ?? 0) || 0 }),
+    run: (s, p) => clarify(s, { area_m2: n(p, 'area'), depth_m: n(p, 'depth'), plateArea_m2: Number(p.plateArea ?? 0) || 0, desludge_m3d: Number(p.desludge ?? 0) || 0 }),
     // verify: lamella plate packs ≈ RM 450 per m² projected plate area installed (GAME MODEL)
     capex: (p) => scale(200_000, n(p, 'area') * (n(p, 'depth') / 3.5), 40) + 450 * (Number(p.plateArea ?? 0) || 0),
     footprint: (p) => n(p, 'area') * 1.2,

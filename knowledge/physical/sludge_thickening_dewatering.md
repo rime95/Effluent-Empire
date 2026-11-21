@@ -38,6 +38,10 @@ Underflow solids fractions (GAME MODEL, 🟡 verify against M&E 5th ed. Ch. 13�
 | Biomass (no RAS) | 0.8 % | 0.5–1.5 % |
 | Skimmed oil | 5 % | |
 
+Caveats (process review):
+- The metal hydroxide value assumes NaOH precipitation. Lime precipitation co-precipitates CaSO₄/CaCO₃, which sit in the mineral (`inert`) pool at 6 %, so a lime sludge correctly comes out thicker (3–5 %).
+- Additive volumes are conservative: dense solids actually help compact hydroxide floc a little.
+
 🟡 verify against M&E 5th ed. Ch. 13 and WEF MOP 8. The clarifier inspector shows the underflow solids and flow (Q_s = M_DS / w).
 
 Q_s is still a real slurry flow, not just the precipitate mass: the clarifier collects *every* settled solid (influent grit and mineral solids, natural floc, organics, coagulant floc and the precipitate), and that sludge is 94–99 % water.
@@ -61,13 +65,15 @@ A thickener cannot make sludge thinner than its feed. If the computed underflow 
 
 GAME MODEL response to overload, with r = SLR / SLR_design:
 - underflow w = w_design · min(1, 1/r)^0.4 (an overloaded thickener produces a thinner underflow);
-- solids capture = 0.95 for r ≤ 1, otherwise 0.95 / (1 + 0.6·(r − 1)²).
+- solids capture: superseded by the solids-flux limit below.
 
 Supernatant leaves on the main outlet and underflow on the sludge port.
 
 **Solids-flux limit (2026-11-21, player report: clarifier underflow approaching half of Q).** The earlier capture law 0.95/(1+0.6(r−1)²) collapsed steeply under overload. With the supernatant returned to EQ, the escaping solids came back to the clarifier, raised the load further and snowballed until the clarifier underflow was 50–120 % of Q. A gravity thickener actually behaves as a flux-limited device: the underflow carries solids up to the limiting flux G_L·A and only the excess rises over the weir:
 
-    capture = min(0.95, G_L·A / M_in)      G_L = 1.5 × design SLR   (GAME MODEL, 🟡 verify against an M&E solids-flux analysis)
+    capture = min(0.9995, G_L·A / M_in)      G_L = 1.5 × design SLR   (GAME MODEL, 🟡 verify against an M&E solids-flux analysis)
+
+Normal capture was raised from 0.95 to 0.9995 (2026-11-21, practitioner rule: a correctly loaded thickener returns a clear supernatant, ≈ 40 mg/L in the plating reference). This assumes good operation and polymer aid where needed; 🟡 verify. Solids pass only when the thickener is over its flux limit or its hydraulic loading.
 
 A supernatant recycle can therefore only run away when the fresh solids alone exceed G_L·A, which is genuinely unworkable. When solids spill, the overload note is an error and gives the area needed, M/SLR. The default thickener area is now max(4, Q/8) m² rather than a fixed 10 m².
 
@@ -88,14 +94,13 @@ Conditioning is either polymer or lime.
 
 🟡 verify. Recessed-plate presses typically reach 20–40 % DS.
 
-- **Capture:** 97 %.
 - **Conditioning:**
   - polymer 3 kg/t DS (🟡 2–5 kg/t);
   - lime 20 % of DS (🟡 10–30 %), which adds to the cake mass.
 - **Capacity:**
   - cake volume V_c = M_cake / (w_cake · 1200 kg/m³);
   - required chamber volume = V_c / cycles per day;
-  - normal solids capture is 99.5 %, so the filtrate is near solids-free (≈ 50–150 mg/L for a 1–3 % feed). This was raised from 97 % on practitioner input: a conditioned feed on cloths in good order gives a clear filtrate. 🟡 verify against M&E Table 18 (filter press capture 90–98 %+).
+  - normal solids capture is 99.9 %, so the filtrate is practically solids-free (≈ 10–30 mg/L for a 1–3 % feed). This was raised from 97 % on practitioner input: a conditioned feed on cloths in good order gives a clear filtrate. 🟡 verify against M&E Table 18 (filter press capture 90–98 %+).
 - if the installed chamber volume is short, the press is overloaded: cake solids fall in proportion and capture falls to 90 %.
 - **Energy:** 0.5 kWh per m³ of feed (🟡).
 - **Dilute feed** lengthens filling, since there is more filtrate per batch. Effective cycles = cycles·min(1, √(feed solids / 3 %)) (GAME MODEL). Thicken first.
@@ -127,7 +132,13 @@ The draw-off is limited to between 10⁻⁶·Q and 0.95·Q, so solids always tra
 A pipe carries sludge if it leaves a sludge port, or a mixer or splitter fed by sludge:
 - sludge reaching the final discharge is rejected;
 - treated water reaching a disposal point is rejected;
-- sludge entering a treatment unit is warned.
+- sludge entering a treatment unit is warned;
+- a thickener in holding mode with no sludge pipe is warned (`graph.holdingNoSludge`): without one, everything leaves through its outlet;
+- a unit with no pipes at all is left out of the calculation and of CAPEX and construction time, with a warning (`graph.loose`), so one spare unit on the sheet does not blank the whole design. A half-connected unit is still an error, because its flow would have nowhere to go.
+
+The thickener overload note mentions spilled solids only when the load exceeds the solids-flux limit; between 1.2× and 1.5× the design SLR the supernatant is still clear and only the underflow gets thinner.
+
+Filter-press chamber utilisation uses the cake volume at normal capture, even when overloaded (a small simplification).
 
 ## Mass balance
 A connected sludge stream is a normal pipe. Only disposal points (and unconnected sludge ports) take mass out of the system, so the system balance is: in = effluent + disposal + unconnected sludge + gas/consumed − produced.

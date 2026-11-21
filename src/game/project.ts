@@ -118,7 +118,8 @@ export const ABANDON_PENALTY = 0.15;
 export const RETROFIT_PREMIUM = 1.2;
 
 export function constructionWeeks(p: Project): number {
-  const units = p.graph.nodes.filter((n) => n.kind !== 'influent' && n.kind !== 'discharge');
+  // units with no pipes are left out of the design (see simulate) and are not built
+  const units = p.graph.nodes.filter((n) => n.kind !== 'influent' && n.kind !== 'discharge' && p.graph.edges.some((e) => e.from === n.id || e.to === n.id));
   if (!p.built) return 2 + Math.ceil(units.length * 0.8);
   const builtNodes = p.built.nodes;
   const changed = units.filter((u) => !builtNodes.some((b) => b.id === u.id && sameNode(b, u))).length;
