@@ -4,8 +4,8 @@ import { describe, it, expect } from 'vitest';
 import { generateEnquiry } from '../../src/game/customers';
 import { PEdge, PNode, ProcessGraph, simulate, findTears } from '../../src/simulation/treatment/graph';
 import { defaultParams, UnitType } from '../../src/simulation/treatment/catalogue';
-import { filterPress, thicken, THICKENER } from '../../src/simulation/physical/sludge';
-import { emptyStream } from '../../src/simulation/core/stream';
+import { clarifierUnderflowFraction, filterPress, thicken, THICKENER } from '../../src/simulation/physical/sludge';
+import { emptyStream, poolMass } from '../../src/simulation/core/stream';
 
 function plating() {
   let e = generateEnquiry(11, 1, 0);
@@ -35,6 +35,19 @@ function sludgePlant(recycle: boolean): ProcessGraph {
   return { nodes, edges };
 }
 
+describe('clarifier underflow concentration', () => {
+  it('depends on what settled: Fe/Al floc is dilute, mineral and primary solids compact (mass-weighted harmonic mean)', () => {
+    const fe = emptyStream(100); fe.feSolid = 30;
+    const prim = emptyStream(100); prim.inert = 50;
+    const mix = emptyStream(100); mix.feSolid = 30; mix.inert = 50;
+    const wFe = clarifierUnderflowFraction(fe), wP = clarifierUnderflowFraction(prim), wM = clarifierUnderflowFraction(mix);
+    expect(wFe).toBeLessThan(0.015);
+    expect(wP).toBeGreaterThan(0.04);
+    const mFe = poolMass(mix, 'feFloc'), mP = poolMass(mix, 'inert');
+    expect(wM).toBeCloseTo((mFe + mP) / (mFe / wFe + mP / wP), 6);
+  });
+});
+
 describe('sludge line', () => {
   it('water is conserved: influent = effluent + sludge to disposal (with recycle loops)', () => {
     const s = plating();
@@ -53,8 +66,12 @@ describe('sludge line', () => {
     const clSludge = sim.edges['cl-th-sludge'];
     const ds = sim.nodes['cl'].sludgeKgD;
     expect(ds).toBeGreaterThan(0);
-    // chemical clarifier underflow at 1 % solids: Q_s = M_DS / (0.01 · 1000 kg/m³)
-    expect(clSludge.Q).toBeCloseTo(ds / (0.01 * 1000), 6);
+    // clarifier underflow: Q_s = M_DS / (w_s · 1000 kg/m³), w_s from the make-up of the settled solids
+    const ws = clarifierUnderflowFraction(sim.nodes['cl'].result.removed!);
+    expect(ws).toBeGreaterThan(0.005);
+    expect(ws).toBeLessThan(0.06);
+    expect(clSludge.Q).toBeCloseTo(ds / (ws * 1000), 6);
+    expect(sim.nodes['cl'].result.calcs.uFlow.value).toBeCloseTo(clSludge.Q, 6);
     const d = sim.disposal[0];
     expect(d.dryKgD / d.wetKgD).toBeGreaterThan(0.18);
     expect(d.dryKgD / d.wetKgD).toBeLessThan(0.4);
@@ -69,7 +86,7 @@ describe('sludge line', () => {
     g.edges = [...g.edges.filter((e) => !['th', 'fp'].includes(e.from) && !['th', 'fp'].includes(e.to)), pipe('cl', 'sd', 'sludge')];
     const liquid = simulate(g, plating());
     expect(liquid.errors).toEqual([]);
-    expect(liquid.disposal[0].costRMd / liquid.disposal[0].dryKgD).toBeGreaterThan(10);
+    expect(liquid.disposal[0].costRMd / liquid.disposal[0].dryKgD).toBeGreaterThan(4); // vs < 1.2 for cake
   });
   it('an unconnected sludge port behaves exactly as before (contractor price, effluent unchanged)', () => {
     const s = plating();

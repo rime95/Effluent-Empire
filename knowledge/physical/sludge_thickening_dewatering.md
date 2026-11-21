@@ -16,12 +16,31 @@ Underflow solids fractions (GAME MODEL, 🟡 verify against M&E 5th ed. Ch. 13�
 
 | Unit | w_s | Note |
 |---|---|---|
-| Clarifier (chemical / metal hydroxide) | 1.0 % | M&E chemical sludge 0.5–2 % |
-| Clarifier after activated sludge | 0.8 % | RAS/WAS 0.5–1.5 % |
+| Clarifier (chemical / primary) | from the sludge make-up (below) | |
+| Clarifier after activated sludge | Xr (RAS/WAS concentration) | RAS/WAS 0.5–1.5 % |
 | Oil separator | 5 % | oily sludge and skimmed oil |
 | Sand filter | backwash volume = 3 % of throughput | backwash 2–5 % |
 | Thickener underflow | from the thickener model | |
 | Filter press cake | from the press model | |
+
+**Clarifier underflow by sludge make-up (2026-11-21).** A fixed 1 % made the underflow 2–5× too large whenever dense solids settled with the hydroxide (player report: "underflow flow is very high"). Each kind of settled solid now has a typical underflow concentration, and volumes add, so the mixture is the mass-weighted harmonic mean 1/w = Σ(mᵢ/M)/wᵢ:
+
+| Settled solid | wᵢ | Typical range |
+|---|---|---|
+| Grit | 10 % | |
+| Mineral (inert) solids | 6 % | |
+| Natural floc | 3 % | |
+| Colloids | 2 % | |
+| Primary organic solids | 5 % | primary sludge 4–6 % |
+| Metal hydroxide (NaOH precipitation) | 2 % | 1–3 % |
+| Ferric floc | 1 % | 0.5–2 % |
+| Alum/PAC floc | 0.8 % | 0.5–1.5 % |
+| Biomass (no RAS) | 0.8 % | 0.5–1.5 % |
+| Skimmed oil | 5 % | |
+
+🟡 verify against M&E 5th ed. Ch. 13 and WEF MOP 8. The clarifier inspector shows the underflow solids and flow (Q_s = M_DS / w).
+
+Q_s is still a real slurry flow, not just the precipitate mass: the clarifier collects *every* settled solid (influent grit and mineral solids, natural floc, organics, coagulant floc and the precipitate), and that sludge is 94–99 % water.
 
 **Unconnected port (legacy):** the removed solids are hauled by a contractor at the old dry-solids price (metal RM 1.2/kg DS, other RM 0.3/kg DS). The water in the sludge is neglected. This keeps older designs and saves unchanged.
 

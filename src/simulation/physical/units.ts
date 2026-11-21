@@ -1,3 +1,4 @@
+import { clarifierUnderflowFraction, removedDryKgD } from './sludge';
 /**
  * Physical separation units: equalisation, gravity oil separator, clarifier, rapid sand filter.
  * Ref: knowledge/physical/sedimentation.md, knowledge/physical/filtration.md, knowledge/design/design_parameters.md
@@ -137,6 +138,11 @@ export function clarify(s: Stream, p: { area_m2: number; depth_m?: number; plate
   if (SOR > 2.0) notes.push({ level: 'warn', code: 'clar.sor', text: `Peak SOR ${SOR.toFixed(2)} m/h is high for chemical floc (typical ≤ 1.5 m/h).` });
   const sludgeKg = (s.Q * POOLS.reduce((a, pl) => a + poolMass(removed, pl), 0)) / 1000;
   calcs.sludge = { label: 'Sludge produced (dry)', value: sludgeKg, unit: 'kg/d', digits: 1 };
+  const w = s.ml?.xr ? s.ml.xr / 1e6 : clarifierUnderflowFraction(removed);
+  if (sludgeKg > 0) {
+    calcs.uSolids = { label: s.ml?.xr ? 'Underflow solids (= RAS/WAS conc. Xr)' : 'Underflow solids (by sludge make-up)', value: w * 100, unit: '%', digits: 2 };
+    calcs.uFlow = { label: 'Underflow (sludge) flow = dry solids ÷ underflow solids', value: removedDryKgD(removed) / (w * 1000), unit: 'm³/d', digits: 2 };
+  }
   // secondary clarifier: the sludge port carries WAS at the RAS/WAS underflow concentration Xr
   return result(out, { removed, notes, calcs, energy_kWhd: 0.5 * 24, ...(s.ml?.xr ? { sludgeSolidsFrac: s.ml.xr / 1e6 } : {}) });
 }

@@ -38,9 +38,43 @@ export function splitSludge(out: Stream, removed: Stream, inletQ: number, Qs: nu
   return { main, sludge };
 }
 
+/**
+ * Typical gravity-clarifier underflow solids by kind of solid (mass fraction, GAME MODEL, verify: M&E 5th ed. Table 13-x,
+ * WEF MOP 8). Dense mineral and primary solids compact far better than gelatinous Fe/Al hydroxide floc.
+ */
+export const UNDERFLOW_SOLIDS: Record<(typeof POOLS)[number], number> = {
+  grit: 0.1,
+  inert: 0.06,
+  colloid: 0.02,
+  floc: 0.03,
+  organic: 0.05, // primary sludge 4–6 %
+  precipitate: 0.02, // metal hydroxide (NaOH) 1–3 %
+  alFloc: 0.008, // alum/PAC sludge 0.5–1.5 %
+  feFloc: 0.01, // ferric sludge 0.5–2 %
+  biomass: 0.008, // activated sludge 0.5–1.5 %
+};
+
+/**
+ * Underflow solids of a mixed clarifier sludge: volumes are additive, so the mixture fraction is the mass-weighted
+ * harmonic mean 1/w = Σ (mᵢ/M)/wᵢ. Free oil skimmed with the sludge is counted at 5 %.
+ */
+export function clarifierUnderflowFraction(removed: Stream): number {
+  let m = 0;
+  let v = 0;
+  for (const p of POOLS) {
+    const x = poolMass(removed, p);
+    m += x;
+    v += x / UNDERFLOW_SOLIDS[p];
+  }
+  const oil = removed.OGfree + removed.OGemulsified;
+  m += oil;
+  v += oil / 0.05;
+  return m > 0 && v > 0 ? m / v : 0.01;
+}
+
 /** Default underflow solids mass fraction by unit kind (GAME MODEL). null → use a volume rule (filter backwash). */
-export function defaultSludgeFraction(kind: string, inlet: Stream): number | null {
-  if (kind === 'clarifier') return inlet.ml || inlet.biomass > 0.5 * Math.max(tss(inlet), 1e-9) ? 0.008 : 0.01;
+export function defaultSludgeFraction(kind: string, inlet: Stream, removed?: Stream | null): number | null {
+  if (kind === 'clarifier') return removed ? clarifierUnderflowFraction(removed) : inlet.ml || inlet.biomass > 0.5 * Math.max(tss(inlet), 1e-9) ? 0.008 : 0.01;
   if (kind === 'oilSep') return 0.05;
   if (kind === 'sandFilter') return null;
   return 0.01;
