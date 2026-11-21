@@ -6,6 +6,7 @@
  */
 import { Stream } from '../core/stream';
 import { activatedSludgeControlled } from '../biological/activatedSludge';
+import { isAlkReagent } from '../biological/aeration';
 import { Coagulant, COAGULANTS, coagulate } from '../chemistry/coagulation';
 import { neutralise } from '../chemistry/neutralisation';
 import { reduceChromium } from '../chemistry/chromiumReduction';
@@ -167,10 +168,12 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
       { key: 'srt', label: 'Sludge age (SRT)', unit: 'd', min: 1, max: 40, step: 0.5, default: () => 12, help: 'Used in SRT control.' },
       { key: 'ras', label: 'RAS ratio (Qr/Q)', unit: '', min: 0.1, max: 2, step: 0.05, default: () => 0.75, help: 'Return activated sludge from the clarifier underflow; sets the underflow (WAS) concentration Xr = X(1+R)/R.' },
       { key: 'do', label: 'DO set-point', unit: 'mg/L', min: 0.2, max: 4, step: 0.1, default: () => 2.0 },
+      { key: 'alkPH', label: 'Alkalinity dosing: hold pH ≥', unit: '', min: 0, max: 8.5, step: 0.1, default: () => 0, help: '0 = off. A pH controller doses alkali into the tank so it never runs below this pH. Nitrification consumes 7.1 mg CaCO₃ per mg N and slows below pH ≈ 7.' },
+      { key: 'alkReagent', label: 'Alkali reagent', unit: '', options: [{ value: 'NaOH', label: 'Caustic soda (NaOH)' }, { value: 'Na2CO3', label: 'Soda ash (Na₂CO₃)' }, { value: 'NaHCO3', label: 'Sodium bicarbonate (NaHCO₃)' }, { value: 'lime', label: 'Hydrated lime (Ca(OH)₂)' }], default: () => 'NaOH' },
     ],
     run: (s, p, ctx) =>
-      activatedSludgeControlled(s, { volume_m3: n(p, 'volume'), srt_d: n(p, 'srt'), do_mgL: n(p, 'do'), control: p.control === 'mlss' ? 'mlss' : 'srt', mlssTarget_mgL: Number(p.mlss ?? 3000) || 3000, ras: Number(p.ras ?? 0.75) || 0.75 }, ctx),
-    capex: (p, _s, r) => scale(450_000, n(p, 'volume'), 500) + scale(150_000, Math.max(r.calcs.o2?.value ?? 1, 1), 500) * (0.8 + 0.1 * n(p, 'do')),
+      activatedSludgeControlled(s, { volume_m3: n(p, 'volume'), srt_d: n(p, 'srt'), do_mgL: n(p, 'do'), alkPH: Number(p.alkPH ?? 0) || 0, alkReagent: isAlkReagent(p.alkReagent) ? p.alkReagent : 'NaOH', control: p.control === 'mlss' ? 'mlss' : 'srt', mlssTarget_mgL: Number(p.mlss ?? 3000) || 3000, ras: Number(p.ras ?? 0.75) || 0.75 }, ctx),
+    capex: (p, _s, r) => scale(450_000, n(p, 'volume'), 500) + scale(150_000, Math.max(r.calcs.o2?.value ?? 1, 1), 500) * (0.8 + 0.1 * n(p, 'do')) + ((Number(p.alkPH ?? 0) || 0) > 0 ? 35_000 : 0), // alkali day tank, metering pump, pH probe
     footprint: (p) => (n(p, 'volume') / 5) * 1.2 + 30,
   },
   sandFilter: {

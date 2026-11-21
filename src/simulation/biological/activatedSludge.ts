@@ -12,9 +12,9 @@
  * Inhibition factors multiply μ (GAME MODEL, documented thresholds; see knowledge doc).
  */
 import { METALS, Metal, Stream, cloneStream, emptyStream, poolMass } from '../core/stream';
-import { COD_PER_VSS, MW, N_PER_VSS, hrtDays, tempCorrect } from '../core/units';
+import { COD_PER_VSS, MW, N_PER_VSS, eqL_to_mgCaCO3, hrtDays, tempCorrect } from '../core/units';
 import { aerationCarbonate, equilibrate } from '../chemistry/acidBase';
-import { airFlow_mold, co2Produced_mold, gasMolPerM3 } from './aeration';
+import { ALK_REAGENTS, AlkReagent, airFlow_mold, co2Produced_mold, gasMolPerM3 } from './aeration';
 import { Note, ProcessResult, result } from '../treatment/types';
 import { KH_CO2, pK1, pK2 } from '../chemistry/constants';
 
@@ -41,6 +41,9 @@ export interface ActivatedSludgeInput {
   volume_m3: number;
   srt_d: number;
   do_mgL: number;
+  /** alkalinity dosing: the tank pH controller doses alkali to hold at least this pH (0/undefined = off) */
+  alkPH?: number;
+  alkReagent?: AlkReagent;
 }
 
 /** GAME MODEL: heterotrophs — full activity at pH 6.5–8.5, linear decline to zero at 5.0 and 10.0. */
@@ -137,7 +140,9 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
   // sludge, so we take the HIGHEST root: scan downward from pH 10 and refine by bisection.
   const OGin = s.OGfree + s.OGemulsified;
   const ogFracAt = (mlss: number) => (KINETICS.K_OG_ads * mlss) / (1 + KINETICS.K_OG_ads * mlss);
-  const atPH = (reactorPH: number) => {
+  const alk = ALK_REAGENTS[p.alkReagent ?? 'NaOH'];
+  /** reactorPH: assumed pH for the biology; dose: alkali dosed, mol/L of feed */
+  const atPH = (reactorPH: number, dose = 0) => {
     // O&G: sorbed onto floc (partition), 80 % biodegraded -> its COD (2.9 g/g) joins the substrate (O2 + biomass)
     const pre = solveBiology(s, p, srt, pHInhibition(reactorPH) * metalInhibition(s));
     const ogFrac = ogFracAt(ratio * (s.biomass + pre.PxH + pre.Pxd + s.XI / COD_PER_VSS));
@@ -173,7 +178,7 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
     // change is the NO3− formed (−1 eq/mol N). At pH < 8.5 this reproduces 2 H+ per N nitrified (7.14 mg CaCO3/mg N) and
     // 1 per N assimilated; from NH3 at high pH, nitrification releases only 1 H+ per N and assimilation none.
     void uptakeN;
-    out.Cb = s.Cb - bio.NOx / 1000 / MW.N;
+    out.Cb = s.Cb - bio.NOx / 1000 / MW.N + alk.eqPerMol * dose;
 
     out.OGfree = s.OGfree * (1 - ogFrac);
     out.OGemulsified = s.OGemulsified * (1 - ogFrac);
@@ -183,7 +188,7 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
     const o2T = heteroO2 + 4.57 * bio.NOx - COD_PER_VSS * bio.PxN;
     const air = airFlow_mold(o2T * s.Q, p.volume_m3, s.T);
     const co2P = co2Produced_mold(heteroO2 * s.Q, bio.PxN * s.Q);
-    out = equilibrate(out, aerationCarbonate({ Q_m3d: s.Q, CTin: s.CT, T: s.T, co2Produced_mold: co2P, air_mold: air.air_mold }));
+    out = equilibrate(out, aerationCarbonate({ Q_m3d: s.Q, CTin: s.CT + alk.cPerMol * dose, T: s.T, co2Produced_mold: co2P, air_mold: air.air_mold }));
     return { out, bio, inhib, inhibN, ogFrac, ogDeg, S0, air, co2P, g: out.pH - reactorPH };
   };
   let hi = 10;
@@ -205,7 +210,33 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
       else hi = mid;
     }
   }
-  const state = atPH((lo + hi) / 2);
+  let state = atPH((lo + hi) / 2);
+  // alkalinity dosing: if the tank would run below the set-point, the controller doses just enough alkali to hold it
+  // (the biology then runs at the set-point pH). g(dose) = pH computed at the set-point − set-point rises with dose.
+  let doseMol = 0;
+  let doseCapped = false;
+  const sp = p.alkPH ?? 0;
+  if (sp > 0 && state.out.pH < sp - 1e-6) {
+    let dHi = 1e-4;
+    let dLo = 0;
+    while (atPH(sp, dHi).g < 0 && dHi < 0.5) {
+      dLo = dHi;
+      dHi *= 2;
+    }
+    if (atPH(sp, dHi).g < 0) doseCapped = true; // > 0.5 mol/L needed: leave the tank undosed and report it
+    else {
+      for (let i = 0; i < 25; i++) {
+        const mid = (dLo + dHi) / 2;
+        if (atPH(sp, mid).g >= 0) dHi = mid;
+        else dLo = mid;
+      }
+      doseMol = dHi;
+      state = atPH(sp, doseMol);
+    }
+  }
+  // lime impurities (10 %) end up as mineral solids, as in the neutraliser
+  const limeInert = p.alkReagent === 'lime' && doseMol > 0 ? doseMol * alk.mw * 1000 * (1 / alk.purity - 1) : 0;
+  if (limeInert > 0) state.out.inert += limeInert;
   const { bio, inhib, inhibN, ogFrac, ogDeg, S0, air } = state;
   const out = state.out;
   if (!rootFound) notes.push({ level: 'warn', code: 'as.pHroot', text: `Reactor pH could not be resolved self-consistently (≈ ${out.pH.toFixed(1)}): extreme alkalinity or acidity in the feed.` });
@@ -231,6 +262,11 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
   if (bio.fN < 0.95) notes.push({ level: 'warn', code: 'as.nutrient', text: `Nitrogen-limited growth: heterotroph rate reduced to ${(bio.fN * 100).toFixed(0)} % — add a nutrient source.` });
   if (mlss > 5000) notes.push({ level: 'warn', code: 'as.mlss', text: `MLSS ${mlss.toFixed(0)} mg/L is high for gravity clarification (typical 2,000–4,500).` });
   if (fm > 1.0) notes.push({ level: 'warn', code: 'as.fm', text: `F/M ${fm.toFixed(2)} kg bCOD/kg VSS·d is high: poor settling likely.` });
+  if (doseCapped) notes.push({ level: 'error', code: 'as.alkCap', text: `Alkalinity dosing cannot reach pH ${sp.toFixed(1)} (more than 0.5 mol/L of alkali needed) — the tank is shown undosed; neutralise the feed upstream.` });
+  if (doseMol > 0 && p.alkReagent === 'lime' && sp > 7.5)
+    notes.push({ level: 'warn', code: 'as.limeScale', text: `Lime at pH ${sp.toFixed(1)}: calcium carbonate is supersaturated in an aerated tank — expect CaCO₃ scaling and some of the dosed alkalinity lost to it (not modelled). Hold ≤ 7.5 or use caustic / soda ash.` });
+  if (doseMol > 0 && (p.alkReagent === 'NaHCO3' || p.alkReagent === 'Na2CO3') && sp > 8)
+    notes.push({ level: 'info', code: 'as.carbonateHighPH', text: `Above pH 8 the aeration air must strip the carbonate reagent's CO₂ as well — ${p.alkReagent} needs far more equivalents than caustic here.` });
   if (out.pH < 6.8 && bio.NOx > 0) notes.push({ level: 'warn', code: 'as.alk', text: `Reactor pH ${out.pH.toFixed(2)}: insufficient alkalinity for nitrification (7.1 mg CaCO₃ per mg N nitrified).` });
   if (inhibN < 0.5 && inhib >= 0.7) notes.push({ level: 'warn', code: 'as.nitInhib', text: `Nitrifiers inhibited to ${(inhibN * 100).toFixed(0)} % (they are far more sensitive to metals and low pH than heterotrophs).` });
 
@@ -240,9 +276,10 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
   return result(out, {
     consumed: { COD: kg(codConsumed), OG: kg(ogDeg) },
     // degraded oil enters the COD balance as substrate; nitrifiers fix COD from CO2
-    produced: { COD: kg(COD_PER_VSS * bio.PxN + KINETICS.COD_PER_OG * ogDeg) },
+    produced: { COD: kg(COD_PER_VSS * bio.PxN + KINETICS.COD_PER_OG * ogDeg), ...(limeInert > 0 ? { mineral: kg(limeInert) } : {}) },
     removed,
     energy_kWhd: o2 / KINETICS.aerationEfficiency + p.volume_m3 * 0.003 * 24,
+    ...(doseMol > 0 ? { chemicals: [{ name: alk.label, kgPerDay: (Q * doseMol * alk.mw) / alk.purity, priceRMkg: alk.priceRMkg }] } : {}),
     notes,
     calcs: {
       hrt: { label: 'HRT', value: hrt * 24, unit: 'h', digits: 1 },
@@ -255,6 +292,12 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
       sludge: { label: 'Net solids production', value: kg(solidsNet), unit: 'kg/d', digits: 0 },
       nitrified: { label: 'NH₄-N nitrified', value: bio.NOx, unit: 'mg/L', digits: 1 },
       pH: { label: 'Reactor pH', value: out.pH, unit: '', digits: 2 },
+      ...(sp > 0
+        ? {
+            alkDose: { label: `${p.alkReagent ?? 'NaOH'} dose (to hold pH ${sp.toFixed(1)})`, value: (doseMol * alk.mw * 1000) / alk.purity, unit: 'mg/L', digits: 0 },
+            alkAdded: { label: 'Alkalinity added', value: eqL_to_mgCaCO3(doseMol * alk.eqPerMol), unit: 'mg/L CaCO₃', digits: 0 },
+          }
+        : {}),
       air: { label: air.mixingLimited ? 'Air flow (mixing minimum)' : 'Air flow (O₂ demand)', value: air.air_mold / gasMolPerM3(s.T) / 1440, unit: 'm³/min', digits: 1 },
       offgas: { label: 'Off-gas CO₂', value: (100 * (out.CT / (1 + Math.pow(10, out.pH - pK1(s.T)) + Math.pow(10, 2 * out.pH - pK1(s.T) - pK2(s.T))))) / KH_CO2(s.T), unit: '% v/v', digits: 2 },
       co2: { label: 'Dissolved CO₂', value: (out.CT / (1 + Math.pow(10, out.pH - pK1(s.T)) + Math.pow(10, 2 * out.pH - pK1(s.T) - pK2(s.T)))) * 44010, unit: 'mg/L', digits: 1 },

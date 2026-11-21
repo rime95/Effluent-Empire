@@ -95,3 +95,42 @@ The MLSS search uses the Illinois method (smooth, tight), so recycle loops conta
 🟡 **Limitation:** biomass is counted as TSS with VSS/TSS = 1, whereas M&E uses Px,bio/0.85. For a given MLSS set-point the solved SRT is therefore about 10–15 % long.
 
 In the SCADA replay, MLSS control is a proportional wasting trim: waste rate = (1 + 2·(MLSS − SP)/SP)/SRT_design (GAME MODEL gain). It is capped at 3 × design wasting, standing in for WAS pump capacity; being proportional-only, it leaves a small offset.
+
+## Alkalinity dosing (added 2026-11-22)
+Parameters: `alkPH` (hold pH ≥, 0 = off) and `alkReagent`. Code: `activatedSludge.ts`, with the reagents in `aeration.ts` `ALK_REAGENTS`.
+
+The tank's pH controller doses alkali only when the tank would otherwise run below the set-point. It doses just enough to hold that pH. The biology is then evaluated at the set-point, so nitrification recovers and the dose follows the demand.
+
+The dose is found by bisection on g(dose) = pH_computed(set-point, dose) − set-point. This rises with dose, because each reagent adds Cb and, for carbonates, C_T to the CO₂ balance.
+
+| Reagent | eq/mol (Cb) | mol C/mol (C_T) | Purity | Price RM/kg 🟡 |
+|---|---|---|---|---|
+| NaOH | 1 | 0 | 100 % | 2.0 |
+| Na₂CO₃ (soda ash) | 2 | 1 | 99 % | 1.6 |
+| NaHCO₃ | 1 | 1 | 99 % | 2.4 |
+| Ca(OH)₂ (hydrated lime) | 2 | 0 | 90 % | 0.8 |
+
+- In an aerated tank, hydroxide absorbs respiration CO₂ and ends up as bicarbonate, so per equivalent all four reagents add the same alkalinity.
+- Carbonate reagents also bring carbon that the air must strip, so they need more equivalents than caustic to hold the same pH. The penalty grows steeply with the set-point:
+
+  | Set-point | Na₂CO₃ | NaHCO₃ |
+  |---|---|---|
+  | 7.2 | +5 % | +11 % |
+  | 7.8 | +17 % | +42 % |
+  | 8.3 | +41 % | +138 % |
+
+  Above pH 8 an info note says so.
+- NaHCO₃ is self-limiting in practice: pushing an aerated tank above ≈ 8 with it takes very large doses. That makes it forgiving, and popular for nitrification at pH 7–7.5. Soda ash and caustic are cheaper per equivalent.
+- **Lime:** its 10 % impurities become mineral solids, as in the neutraliser.
+  - Above pH 7.5, CaCO₃ is supersaturated in the aerated tank (ion product ≈ 1e-7 against calcite K_sp ≈ 3e-9 at pH 8.3), so a scaling warning fires.
+  - The alkalinity lost to CaCO₃ precipitation is not modelled.
+- **Capped dose:** if more than 0.5 mol/L of alkali would be needed, the tank is shown undosed with an error.
+- **Check:** a feed with 31 mg/L alkalinity and 40 mg/L NH₄-N, held at pH 7.2 with NaOH, nitrifies 33 mg N.
+  - It needs 7.14 × 33 (238) plus 3.57 × uptake N (≈ 24) less the feed alkalinity, plus the 38 mg/L residual at pH 7.2.
+  - That is ≈ 269 mg/L CaCO₃, which is what the model doses (215 mg/L NaOH, 108 kg/d at 500 m³/d).
+- **CAPEX:** + RM 35,000 for the day tank, metering pump and pH probe (GAME MODEL).
+- **Not modelled:** CaCO₃ precipitation and scaling (only warned about).
+- **Dynamic replay:**
+  - The dose is paced to flow at the design ratio (feed-forward, no pH trim; GAME MODEL), so load swings still move the pH.
+  - The reagent is counted in the SCADA reagent total.
+- Tests: `tests/simulation/aerationAlkDose.test.ts`.

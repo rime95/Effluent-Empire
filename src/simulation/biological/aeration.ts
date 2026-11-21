@@ -1,3 +1,4 @@
+import { MW } from '../core/units';
 /**
  * Aeration air flow and respiration CO2 — feeds the aeration-tank CO2 balance (acidBase.ts aerationCarbonate).
  * Ref: knowledge/chemistry/acid_base_chemistry.md "Aeration CO2 balance", knowledge/biological/activated_sludge.md
@@ -41,4 +42,23 @@ export function airForO2_mold(o2Transferred_gd: number): number {
  */
 export function co2Produced_mold(heteroO2_gd: number, nitrifierVSS_gd = 0): number {
   return (AERATION.RQ * Math.max(0, heteroO2_gd)) / 32 - (5 * Math.max(0, nitrifierVSS_gd)) / 113;
+}
+
+/**
+ * Alkalinity reagents dosed into the aeration tank (pH controller holding a minimum pH for nitrification).
+ * eqPerMol: strong-base equivalents (Cb); cPerMol: inorganic carbon added (C_T). Ref: knowledge/biological/activated_sludge.md
+ *   NaOH 1 eq, 0 C · Na2CO3 2 eq, 1 C · NaHCO3 1 eq, 1 C · Ca(OH)2 2 eq, 0 C.
+ * In an aerated tank, hydroxide alkalinity absorbs respiration CO2 and becomes bicarbonate, so per equivalent all four
+ * raise the alkalinity equally; carbonate reagents also bring their carbon (more CO2 to strip).
+ * verify: prices RM/kg (GAME MODEL), lime purity 90 %, soda ash 99 %, bicarbonate 99 %.
+ */
+export type AlkReagent = 'NaOH' | 'Na2CO3' | 'NaHCO3' | 'lime';
+export const ALK_REAGENTS: Record<AlkReagent, { label: string; mw: number; eqPerMol: number; cPerMol: number; purity: number; priceRMkg: number }> = {
+  NaOH: { label: 'Caustic soda (NaOH, as 100 %)', mw: MW.NaOH, eqPerMol: 1, cPerMol: 0, purity: 1, priceRMkg: 2.0 },
+  Na2CO3: { label: 'Soda ash (Na₂CO₃, 99 %)', mw: MW.Na2CO3, eqPerMol: 2, cPerMol: 1, purity: 0.99, priceRMkg: 1.6 },
+  NaHCO3: { label: 'Sodium bicarbonate (NaHCO₃, 99 %)', mw: MW.NaHCO3, eqPerMol: 1, cPerMol: 1, purity: 0.99, priceRMkg: 2.4 },
+  lime: { label: 'Hydrated lime (Ca(OH)₂, 90 %)', mw: MW.CaOH2, eqPerMol: 2, cPerMol: 0, purity: 0.9, priceRMkg: 0.8 },
+};
+export function isAlkReagent(x: unknown): x is AlkReagent {
+  return typeof x === 'string' && x in ALK_REAGENTS;
 }

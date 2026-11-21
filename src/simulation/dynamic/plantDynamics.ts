@@ -12,7 +12,7 @@ import { Stream, blend, cloneStream, emptyStream, tss, METALS, MetalMap, poolMas
 import { unaidedPrecipitateV50 } from '../chemistry/neutralisation';
 import { effectiveParams, hasInst } from '../treatment/instrumentation';
 import { equilibrate, aerationCarbonate } from '../chemistry/acidBase';
-import { AERATION, airForO2_mold, mixingAir_mold } from '../biological/aeration';
+import { AERATION, ALK_REAGENTS, AlkReagent, airForO2_mold, isAlkReagent, mixingAir_mold } from '../biological/aeration';
 import { vesilind_mh } from '../physical/settling';
 import { CATALOGUE, UnitType } from '../treatment/catalogue';
 import { ProcessGraph, simulate, PNode } from '../treatment/graph';
@@ -74,6 +74,9 @@ interface ASState {
   kLaMax: number;
   /** aeration air at the design oxygen demand (kLa = kLaMax / 1.6), mol/d */
   airDesign_mold?: number;
+  /** alkalinity dosing at the design ratio (flow-paced feed-forward): mol/L of feed and reagent */
+  alkDose_molL?: number;
+  alkReagent?: AlkReagent;
   clarifierArea: number;
   inert: Stream;
   /** dissolved metals in the mixed liquor (CSTR dilution of slugs), mg/L — drives inhibition */
@@ -133,6 +136,13 @@ function nextIsClarifier(g: ProcessGraph, id: string): PNode | null {
 
 /** Run one ASM1 reactor over one 15-min step (20-s sub-steps) with the PI DO loop. kLa and OUR returned are step means. */
 export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; doSP: number; blowerCap: number; settleFactor: number; manual?: boolean; mlssTarget?: number }, T: number) {
+  // alkali dosing paced to flow at the design dose (GAME MODEL: feed-forward, no pH trim in the replay)
+  const alk = st.alkDose_molL && st.alkReagent ? ALK_REAGENTS[st.alkReagent] : null;
+  if (alk) {
+    inlet = cloneStream(inlet);
+    inlet.Cb += alk.eqPerMol * (st.alkDose_molL ?? 0);
+    inlet.CT += alk.cPerMol * (st.alkDose_molL ?? 0);
+  }
   const inA = toASM(inlet);
   const SOsat = oxygenSaturation(T);
   const dt = ASM1_SUBSTEP;
@@ -205,7 +215,8 @@ export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; 
   const airO2 = ((st.airDesign_mold ?? 0) * kLa) / Math.max(kLaDesign, 1e-9);
   const air = Math.max(airO2, mixingAir_mold(p.V, T) * Math.min(1, Math.max(0, p.blowerCap)));
   out = equilibrate(out, aerationCarbonate({ Q_m3d: inlet.Q, CTin: inlet.CT, T, co2Produced_mold: co2P, air_mold: air }));
-  return { st: { ...st, x, integral, inert: out, metals }, out, kLa, OUR, mlss: mlssOf(x), carry };
+  const alkKg = alk ? ((inlet.Q * (st.alkDose_molL ?? 0) * alk.mw) / alk.purity) * stepD : 0; // kg this step
+  return { st: { ...st, x, integral, inert: out, metals }, out, kLa, OUR, mlss: mlssOf(x), carry, alkKg };
 }
 
 /** Build the per-unit dynamic state from a steady-state solution of the design at average flow. */
@@ -236,6 +247,12 @@ function initialise(g: ProcessGraph, base: Stream) {
         integral: 0,
         kLaMax,
         airDesign_mold: airForO2_mold(o2 * 1000),
+        ...(() => {
+          const reagent = isAlkReagent(n.params.alkReagent) ? n.params.alkReagent : 'NaOH';
+          const r = ALK_REAGENTS[reagent];
+          const mgL = ns.result.calcs.alkDose?.value ?? 0; // mg/L product
+          return mgL > 0 ? { alkDose_molL: (mgL * r.purity) / r.mw / 1000, alkReagent: reagent } : {};
+        })(),
         clarifierArea: clar ? Number(clar.params.area) : 0,
         inert: cloneStream(ns.result.out),
         metals: { ...ns.inlet.dissolved },
@@ -389,6 +406,7 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
           const r = stepAS(as[id], inlet, { V, srt: as[id].srtEff ?? Number(n.params.srt), mlssTarget: n.params.control === 'mlss' ? Number(n.params.mlss) || undefined : undefined, doSP: Number(n.params.do), blowerCap: blower.get(id) ?? 1, settleFactor: settle.get(id) ?? 1, manual: !hasInst(n, 'doLoop') }, inlet.T);
           as[id] = r.st;
           outlet = r.out;
+          reagent += r.alkKg;
           energy += ((r.kLa * V * oxygenSaturation(inlet.T)) / 1000 / 1.8) * dtD; // BSM1 aeration-energy relation (kWh)
           units[id] = { DO: r.st.x.SO, MLSS: r.mlss, NH4: r.st.x.SNH, NO3: r.st.x.SNO, OUR: r.OUR / 24, blower: (100 * r.kLa) / Math.max(as[id].kLaMax, 1e-6), carry: r.carry * 100 };
         } else if (kind === 'clarifier' && g.edges.some((e) => e.to === id && byId.get(e.from)?.kind === 'activatedSludge')) {

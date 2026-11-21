@@ -28,6 +28,8 @@ export const MW = {
   Cr: 51.996,
   NaOH: 39.997,
   CaOH2: 74.093,
+  Na2CO3: 105.988,
+  NaHCO3: 84.007,
   H2SO4: 98.079,
   CaCO3: 100.087,
   /** Alum, Al2(SO4)3·14H2O */
