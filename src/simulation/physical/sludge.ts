@@ -18,9 +18,9 @@ const PART_SCALARS = ['grit', 'inert', 'colloid', 'floc', 'XS', 'XI', 'biomass',
  * Water (with the outlet's dissolved composition) moves from main to sludge; particulates left in main are concentrated
  * so their mass is unchanged. `removed` concentrations are relative to `inletQ`.
  */
-export function splitSludge(out: Stream, removed: Stream, inletQ: number, Qs: number): { main: Stream; sludge: Stream } {
+export function splitSludge(out: Stream, removed: Stream, inletQ: number, Qs: number, maxFrac = 0.95): { main: Stream; sludge: Stream } {
   // floor: a sludge stream always carries its solids (mass is conserved even for a vanishing draw-off)
-  const q = Math.min(Math.max(Qs, 1e-6 * out.Q), 0.95 * out.Q);
+  const q = Math.min(Math.max(Qs, 1e-6 * out.Q), maxFrac * out.Q);
   const main = cloneStream(out);
   main.Q = out.Q - q;
   const k = main.Q > 0 ? out.Q / main.Q : 1;
@@ -107,7 +107,29 @@ function captureAll(s: Stream, capture: number) {
   return { out, removed };
 }
 
-export function thicken(s: Stream, p: { area_m2: number }): ProcessResult {
+/**
+ * Sludge holding tank operation (no decant): everything fed goes on to dewatering; the outlet is an emergency
+ * overflow that carries nothing in normal operation. Common at small metal-finishing plants (player/practitioner input).
+ */
+function holdSludge(s: Stream, p: { area_m2: number }): ProcessResult {
+  const dry = (s.Q * tss(s)) / 1000;
+  const { out, removed } = captureAll(s, 1);
+  return result(out, {
+    removed,
+    sludgeSolidsFrac: tss(s) / 1e6,
+    sludgeAll: true,
+    notes: [{ level: 'info', code: 'thick.holding', text: 'Holding tank: no supernatant is decanted — all sludge goes on to the press at the clarifier underflow concentration. The outlet is an emergency overflow only.' }],
+    energy_kWhd: 24 * (0.1 + 0.005 * p.area_m2), // mixer / transfer (GAME MODEL)
+    calcs: {
+      dry: { label: 'Dry solids fed', value: dry, unit: 'kg/d', digits: 1 },
+      under: { label: 'Sludge to press (no thickening)', value: tss(s) / 1e4, unit: '%', digits: 2 },
+      hold: { label: 'Holding time (3 m deep)', value: s.Q > 0 ? (3 * p.area_m2) / s.Q : 0, unit: 'd', digits: 1 },
+    },
+  });
+}
+
+export function thicken(s: Stream, p: { area_m2: number; mode?: 'thicken' | 'holding' }): ProcessResult {
+  if (p.mode === 'holding') return holdSludge(s, p);
   const notes: Note[] = [];
   const dry = (s.Q * tss(s)) / 1000;
   const type = sludgeType(s);
@@ -154,7 +176,9 @@ export function thicken(s: Stream, p: { area_m2: number }): ProcessResult {
 
 export const PRESS = {
   cake: { chemical: { polymer: 0.25, lime: 0.35 }, biological: { polymer: 0.2, lime: 0.28 } },
-  capture: 0.97,
+  // normal operation with conditioned sludge and cloths in good order: filtrate is near solids-free (≈ 50–150 mg/L);
+  // overload (short cycles, cloth blinding) lets solids through. GAME MODEL, verify; practitioner input 2026-11-21.
+  capture: 0.995,
   overloadCapture: 0.9,
   polymer_kgPerT: 3,
   lime_fracDS: 0.2,

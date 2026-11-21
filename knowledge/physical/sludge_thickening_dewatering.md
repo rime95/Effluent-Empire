@@ -71,6 +71,13 @@ Supernatant leaves on the main outlet and underflow on the sludge port.
 
 A supernatant recycle can therefore only run away when the fresh solids alone exceed G_L·A, which is genuinely unworkable. When solids spill, the overload note is an error and gives the area needed, M/SLR. The default thickener area is now max(4, Q/8) m² rather than a fixed 10 m².
 
+**Holding-tank operation (`mode: 'holding'`, 2026-11-21, practitioner input).** At many small metal-finishing plants the "thickener" is run as a sludge holding tank. Nothing is decanted: the whole feed goes on to the filter press, and the outlet to EQ is only an emergency overflow. In this mode the model:
+- passes the full feed (water and all solids) out of the sludge port, with no thickening, so the press sees the clarifier underflow concentration;
+- carries nothing on the main outlet in steady state (an upset overflow is not modelled);
+- still uses the area parameter for CAPEX and footprint, and shows a holding time at 3 m depth.
+
+The trade-off is a clear return and no solids loop, at the cost of a thinner press feed: fewer effective cycles, so a larger press.
+
 ## Filter press (`filterPress`)
 Conditioning is either polymer or lime.
 
@@ -88,7 +95,8 @@ Conditioning is either polymer or lime.
 - **Capacity:**
   - cake volume V_c = M_cake / (w_cake · 1200 kg/m³);
   - required chamber volume = V_c / cycles per day;
-  - if the installed chamber volume is short, the press is overloaded: cake solids fall in proportion and capture falls to 90 %.
+  - normal solids capture is 99.5 %, so the filtrate is near solids-free (≈ 50–150 mg/L for a 1–3 % feed). This was raised from 97 % on practitioner input: a conditioned feed on cloths in good order gives a clear filtrate. 🟡 verify against M&E Table 18 (filter press capture 90–98 %+).
+- if the installed chamber volume is short, the press is overloaded: cake solids fall in proportion and capture falls to 90 %.
 - **Energy:** 0.5 kWh per m³ of feed (🟡).
 - **Dilute feed** lengthens filling, since there is more filtrate per batch. Effective cycles = cycles·min(1, √(feed solids / 3 %)) (GAME MODEL). Thicken first.
 - **Not modelled:** lime raising the filtrate pH, and FeCl₃ + lime conditioning.

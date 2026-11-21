@@ -35,6 +35,8 @@ export interface ProcessResult {
   energy_kWhd: number;
   /** solids mass fraction of the sludge leaving the sludge port (thickener / press); default by unit kind otherwise */
   sludgeSolidsFrac?: number;
+  /** the whole feed leaves through the sludge port (holding tank, no decant); main outlet = emergency overflow only */
+  sludgeAll?: boolean;
 }
 
 export function result(out: Stream, extra: Partial<ProcessResult> = {}): ProcessResult {

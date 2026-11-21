@@ -5,7 +5,7 @@ import { generateEnquiry } from '../../src/game/customers';
 import { PEdge, PNode, ProcessGraph, simulate, findTears } from '../../src/simulation/treatment/graph';
 import { defaultParams, UnitType } from '../../src/simulation/treatment/catalogue';
 import { clarifierUnderflowFraction, filterPress, thicken, THICKENER } from '../../src/simulation/physical/sludge';
-import { emptyStream, poolMass } from '../../src/simulation/core/stream';
+import { emptyStream, poolMass, tss } from '../../src/simulation/core/stream';
 
 function plating() {
   let e = generateEnquiry(11, 1, 0);
@@ -246,5 +246,40 @@ describe('thickener solids-flux limit (regression: clarifier underflow snowballi
     const st = foodQ();
     const sim = simulate(foodCoag(), st);
     expect(sim.edges['cl-th-sludge'].Q).toBeLessThan(0.06 * st.Q);
+  });
+});
+
+describe('holding-tank operation and a clear press filtrate (practitioner layout: overflow to EQ as insurance only)', () => {
+  function holdingPlant(): ProcessGraph {
+    const nodes: PNode[] = [
+      { id: 'in', kind: 'influent', params: {} },
+      unit('eq', 'eq'),
+      unit('pr', 'precipitation', { targetPH: 9.5 }),
+      unit('cf', 'coagulation', { coagulant: 'ferric', dose: 75, pHset: 9.5, polymer: 1 }),
+      unit('cl', 'clarifier'),
+      unit('th', 'thickener', { mode: 'holding' }),
+      unit('fp', 'filterPress'),
+      { id: 'sd', kind: 'disposal', tag: 'SD-01', params: {} },
+      { id: 'out', kind: 'discharge', params: {} },
+    ];
+    const edges = [pipe('in', 'eq'), pipe('eq', 'pr'), pipe('pr', 'cf'), pipe('cf', 'cl'), pipe('cl', 'out'), pipe('cl', 'th', 'sludge'), pipe('th', 'fp', 'sludge'), pipe('fp', 'sd', 'sludge'), pipe('th', 'eq'), pipe('fp', 'eq')];
+    return { nodes, edges };
+  }
+  it('holding mode decants nothing: all clarifier sludge goes to the press, the overflow to EQ is empty', () => {
+    const s = plating();
+    const sim = simulate(holdingPlant(), s);
+    expect(sim.errors.filter((x) => x.level === 'error')).toEqual([]);
+    expect(sim.edges['th-eq-out'].Q).toBeLessThan(1e-6);
+    expect(sim.edges['th-fp-sludge'].Q).toBeCloseTo(sim.edges['cl-th-sludge'].Q, 6);
+    expect(sim.balance?.ok).toBe(true);
+    const disposedQ = sim.disposal.reduce((a, d) => a + d.wetKgD / 1000, 0);
+    expect(sim.effluent!.Q + disposedQ).toBeCloseTo(s.Q, 1);
+  });
+  it('a press in normal operation returns a near solids-free filtrate (< 200 mg/L TSS)', () => {
+    const sim = simulate(holdingPlant(), plating());
+    const f = sim.edges['fp-eq-out'];
+    expect(f.Q).toBeGreaterThan(0);
+    expect(tss(f)).toBeLessThan(200);
+    expect(sim.nodes['fp'].result.notes.some((n) => n.code === 'press.overload')).toBe(false);
   });
 });

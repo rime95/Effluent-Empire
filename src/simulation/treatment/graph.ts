@@ -273,7 +273,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
       if (routed) {
         const frac = r.sludgeSolidsFrac ?? defaultSludgeFraction(node.kind, inlet, r.removed);
         const Qs = frac === null ? BACKWASH_FRACTION * inlet.Q : dry / (Math.max(frac, 1e-4) * 1000);
-        const split = splitSludge(r.out, r.removed!, inlet.Q, Qs);
+        const split = r.sludgeAll ? splitSludge(r.out, r.removed!, inlet.Q, inlet.Q, 1) : splitSludge(r.out, r.removed!, inlet.Q, Qs);
         outlet = split.main;
         sludgeOut = split.sludge;
         res.nodes[id].result = { ...r, out: split.main };
