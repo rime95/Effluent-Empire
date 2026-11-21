@@ -155,7 +155,8 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
         const summary = c?.sor ? `SOR ${fmt(c.sor.value, 2)} m/h` : c?.pH && n.kind !== 'activatedSludge' ? `pH ${fmt(c.pH.value, 1)}` : c?.mlss ? `MLSS ${fmt(c.mlss.value, 0)}` : c?.rate ? `${fmt(c.rate.value, 1)} m/h` : c?.hrt ? `HRT ${fmt(c.hrt.value, 1)} h` : undefined;
         type = 'unit';
         const dosing: DosingTag[] = (ns?.result.chemicals ?? []).filter((c) => c.kgPerDay > 0.01).map((c) => ({ label: shortChem(c.name), kgd: c.kgPerDay }));
-        data = { kind: n.kind, tag: n.tag ?? n.kind, status, summary, dosing, sludgeKgD: ns?.sludgeKgD, sludgeRouted: draft.edges.some((e) => e.from === n.id && e.fromPort === 'sludge') };
+        const rasPort = n.kind === 'clarifier' && draft.edges.some((e) => e.to === n.id && draft.nodes.find((x) => x.id === e.from)?.kind === 'activatedSludge');
+        data = { kind: n.kind, tag: n.tag ?? n.kind, status, summary, dosing, sludgeKgD: ns?.sludgeKgD, sludgeRouted: draft.edges.some((e) => e.from === n.id && e.fromPort === 'sludge'), flip: !!n.flip, rasPort };
       }
       const prev = cache.current.get(n.id);
       const sameData = prev && JSON.stringify(prev.data) === JSON.stringify(data);
@@ -183,8 +184,8 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
         target: e.to,
         selected: selEdges.has(e.id),
         deletable: editable,
-        markerEnd: { type: MarkerType.ArrowClosed, color: e.fromPort === 'sludge' ? '#8b5a2b' : '#00a9c8', width: 14, height: 14 },
-        data: { no: streamNos.get(e.id), q: sim?.edges[e.id] ? `${fmt(sim.edges[e.id].Q, sim.edges[e.id].Q < 10 ? 2 : 0)} m³/d` : undefined, service: e.fromPort === 'sludge' ? ('sludge' as const) : sim?.tears.includes(e.id) ? ('recycle' as const) : ('process' as const) },
+        markerEnd: { type: MarkerType.ArrowClosed, color: e.fromPort === 'sludge' || e.fromPort === 'ras' ? '#8b5a2b' : '#00a9c8', width: 14, height: 14 },
+        data: { no: streamNos.get(e.id), q: sim?.edges[e.id] ? `${fmt(sim.edges[e.id].Q, sim.edges[e.id].Q < 10 ? 2 : 0)} m³/d` : undefined, service: e.fromPort === 'ras' ? ('ras' as const) : e.fromPort === 'sludge' ? ('sludge' as const) : sim?.tears.includes(e.id) ? ('recycle' as const) : ('process' as const) },
       })),
     [draft.edges, sim, selEdges, editable, streamNos],
   );
@@ -267,6 +268,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       if (!c.source || !c.target || c.source === c.target) return false;
       const to = draft.nodes.find((n) => n.id === c.target);
       if (!to || to.kind === 'influent') return false;
+      if (c.sourceHandle === 'ras') return to.kind === 'activatedSludge';
       const sludge = c.sourceHandle === 'sludge';
       if (sludge) return SLUDGE_RECEIVERS.includes(to.kind);
       return to.kind !== 'disposal';
@@ -395,7 +397,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
     if (!sim?.ok) return;
     flush();
     if (draft !== p.graph) storeSetGraph(draft);
-    const ok = confirm(`${p.built ? 'Retrofit' : 'Build'} and commission?\n\nConstruction: ${rm(capexToCharge)} paid now · ${weeks} weeks\nCommissioning in week ${week + weeks}, tested on the REAL wastewater, not your design basis.`);
+    const ok = confirm(`${p.built ? 'Retrofit' : 'Build'} and commission?\n\nConstruction: ${rm(capexToCharge)} paid weekly over ${weeks} weeks${p.built ? '' : ` · client pays ${rm(p.enquiry.contractValue * 0.6)} in progress claims`}\nCommissioning in week ${week + weeks}, tested on the REAL wastewater, not your design basis.`);
     if (!ok) return;
     if (startConstruction()) go('hq');
   };
@@ -531,6 +533,14 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
               }}
             >
               Duplicate <kbd>Ctrl D</kbd>
+            </button>
+            <button
+              onClick={() => {
+                setDraft((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === menuNode.id ? { ...n, flip: !n.flip } : n)) }));
+                setMenu(null);
+              }}
+            >
+              Flip horizontally <kbd>inlet ⇄ outlet</kbd>
             </button>
             <button
               onClick={() => {
@@ -681,8 +691,10 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           <span style={{ color: pp.enquiry.contractValue - pp.spent.lab - pp.spent.capex - capexToCharge < 0 ? 'var(--alarm)' : undefined }}>{rm(pp.enquiry.contractValue - pp.spent.lab - pp.spent.capex - capexToCharge)}</span>
         </div>
         <div className="calc">
-          <span>Cash available to build</span>
-          <span style={{ color: cash + (pp.built ? 0 : pp.enquiry.contractValue * 0.6) < capexToCharge ? 'var(--alarm)' : undefined }}>{rm(cash + (pp.built ? 0 : pp.enquiry.contractValue * 0.6))}</span>
+          <span>Cash + credit vs build shortfall</span>
+          <span style={{ color: cash + 250_000 < Math.max(0, capexToCharge - (pp.built ? 0 : pp.enquiry.contractValue * 0.6)) ? 'var(--alarm)' : undefined }}>
+            {rm(cash + 250_000)} / {rm(Math.max(0, capexToCharge - (pp.built ? 0 : pp.enquiry.contractValue * 0.6)))}
+          </span>
         </div>
         <div className="calc">
           <span>OPEX estimate</span>

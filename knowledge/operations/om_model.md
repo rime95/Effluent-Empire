@@ -57,3 +57,18 @@ Salaries are indicative Malaysian ranges (🔴 not verified).
 
 ## Time
 Lab tests and construction finish on future weeks; the company clock only moves with "Next week" or "Skip to next event". A project's commissioning outcome is computed when construction starts (deterministic) and revealed on completion. Construction is paid up front, with a credit line of RM 100k. The 60 % milestone arrives at completion. Six consecutive weeks of negative cash means insolvency.
+
+## Project cash flow (revised 2026-11-22, player feedback: "ran out of cash before the build finished")
+| Item | Before | Now (GAME MODEL) |
+|---|---|---|
+| Construction CAPEX | all up front at build start | paid weekly over the construction weeks |
+| Client 60 % payment | at mechanical completion | weekly progress claims over the build, as in industry valuations |
+| Advance and retention | 30 % at signing, 10 % on passing | unchanged |
+| Credit line | RM 100,000 | RM 250,000 overdraft facility |
+| Overdraft interest | none | 0.15 %/week on a negative balance (≈ 8 %/yr) |
+| Insolvency | after 6 weeks of any negative cash | after 6 weeks beyond the credit line |
+| Customer OPEX expectation | 1.3–1.8 × reference OPEX + 20 | 1.8–2.5 × reference OPEX + 80 RM/d |
+
+**Legacy behaviour:** builds already in progress in old saves (paid up front) still receive the 60 % at completion.
+
+**Probe (tests):** a typical default-sized train costs 60–75 % of the contract value. The loss was cash timing, not margin.

@@ -109,9 +109,10 @@ export function clarify(s: Stream, p: { area_m2: number; depth_m?: number; plate
     const totalTSS = POOLS.reduce((a, pl) => a + poolMass(s, pl), 0);
     const keep = Math.min(1, carry / Math.max(totalTSS, 1e-9));
     for (const pool of POOLS) removal[pool] = 1 - keep;
-    const slr = ((Qpeak + 0.75 * s.Q) * mlss) / 1000 / 24 / p.area_m2; // kg/m²·h, constant RAS R = 0.75·Q_avg
+    const R = s.ml.ras ?? 0.75;
+    const slr = ((Qpeak + R * s.Q) * mlss) / 1000 / 24 / p.area_m2; // kg/m²·h, RAS R·Q_avg
     calcs.vs = { label: 'Zone settling velocity (Vesilind)', value: vs, unit: 'm/h', digits: 2 };
-    calcs.slr = { label: 'Solids loading rate (peak, RAS 0.75Q)', value: slr, unit: 'kg/m²·h', digits: 1 };
+    calcs.slr = { label: `Solids loading rate (peak, RAS ${R.toFixed(2)}Q)`, value: slr, unit: 'kg/m²·h', digits: 1 };
     if (f > 0.8) notes.push({ level: 'error', code: 'clar.blanket', text: `Peak SOR ${SOR.toFixed(2)} m/h is close to the sludge zone-settling velocity ${vs.toFixed(2)} m/h — sludge blanket washes over the weir.` });
     if (slr > 9) notes.push({ level: 'warn', code: 'clar.slr', text: `Peak solids loading ${slr.toFixed(1)} kg/m²·h exceeds ~9 kg/m²·h: thickening-limited.` });
   }
@@ -136,7 +137,8 @@ export function clarify(s: Stream, p: { area_m2: number; depth_m?: number; plate
   if (SOR > 2.0) notes.push({ level: 'warn', code: 'clar.sor', text: `Peak SOR ${SOR.toFixed(2)} m/h is high for chemical floc (typical ≤ 1.5 m/h).` });
   const sludgeKg = (s.Q * POOLS.reduce((a, pl) => a + poolMass(removed, pl), 0)) / 1000;
   calcs.sludge = { label: 'Sludge produced (dry)', value: sludgeKg, unit: 'kg/d', digits: 1 };
-  return result(out, { removed, notes, calcs, energy_kWhd: 0.5 * 24 });
+  // secondary clarifier: the sludge port carries WAS at the RAS/WAS underflow concentration Xr
+  return result(out, { removed, notes, calcs, energy_kWhd: 0.5 * 24, ...(s.ml?.xr ? { sludgeSolidsFrac: s.ml.xr / 1e6 } : {}) });
 }
 
 // ---------------------------------------------------------------- Rapid sand filter

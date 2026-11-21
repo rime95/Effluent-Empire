@@ -180,7 +180,7 @@ function Game({ onQuit }: { onQuit: () => void }) {
       {paused && <PauseMenu onResume={() => setPaused(false)} onQuit={quit} />}
       {g.gameOver && (
         <div className="toast" style={{ borderColor: 'var(--alarm)', bottom: 'auto', top: 70 }}>
-          <b>Insolvent.</b> Your consultancy ran out of credit after {g.negativeWeeks} weeks in overdraft.{' '}
+          <b>Insolvent.</b> Your consultancy was beyond its credit line for {g.negativeWeeks} weeks.{' '}
           <button className="btn sm danger" onClick={quit}>
             Main menu
           </button>

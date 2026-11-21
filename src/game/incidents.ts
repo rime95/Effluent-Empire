@@ -168,6 +168,8 @@ export const SETPOINTS: Partial<Record<PNode['kind'], { key: string; label: stri
   crReduction: [{ key: 'targetPH', label: 'pH set-point', min: 1.5, max: 4, step: 0.1 }],
   activatedSludge: [
     { key: 'do', label: 'DO set-point (mg/L)', min: 0.5, max: 4, step: 0.1 },
+    { key: 'mlss', label: 'MLSS set-point (mg/L) — MLSS control', min: 500, max: 8000, step: 100 },
+    { key: 'ras', label: 'RAS ratio (Qr/Q)', min: 0.1, max: 2, step: 0.05 },
     { key: 'srt', label: 'SRT (d) — via wasting', min: 3, max: 30, step: 0.5 },
   ],
   coagulation: [{ key: 'dose', label: 'Coagulant dose (mg/L)', min: 0, max: 400, step: 5 }],

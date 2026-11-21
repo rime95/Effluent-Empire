@@ -17,12 +17,17 @@ export type UnitNodeData = {
   sludgeKgD?: number;
   /** sludge port is piped to a thickener / press / disposal point */
   sludgeRouted?: boolean;
+  /** mirrored left↔right: inlet on the right, outlet on the left */
+  flip?: boolean;
+  /** secondary clarifier after activated sludge: offers a RAS (return activated sludge) nozzle */
+  rasPort?: boolean;
 };
 export type TerminalNodeData = { kind: 'influent' | 'discharge' | 'disposal'; label: string; sub: string; tag?: string };
 
 const STATUS_COLOR = { ok: 'var(--ok)', warn: 'var(--warn)', error: 'var(--alarm)', idle: '#9aa7b4' };
 /** symbol is 120×80 drawn below an 18 px tag row; nozzle heights (symbol y) per unit kind */
 const TAG_H = 18;
+const W = 120;
 const NOZZLE: Partial<Record<UnitType, { in: number; out: number }>> = {
   clarifier: { in: 44, out: 30 },
   sandFilter: { in: 26, out: 44 },
@@ -37,6 +42,8 @@ function UnitNodeImpl({ data, selected }: NodeProps<Node<UnitNodeData>>) {
   const accent = CATEGORY_COLOR[def.category];
   const nz = NOZZLE[data.kind] ?? { in: 44, out: 44 };
   const sludgeX = SLUDGE_UNITS[data.kind];
+  const inSide = data.flip ? Position.Right : Position.Left;
+  const outSide = data.flip ? Position.Left : Position.Right;
   const showSludge = sludgeX !== undefined && !data.sludgeRouted && (data.sludgeKgD ?? 0) > 0.05;
   return (
     <div className={`pfd-eq ${selected ? 'selected' : ''}`}>
@@ -64,17 +71,25 @@ function UnitNodeImpl({ data, selected }: NodeProps<Node<UnitNodeData>>) {
         <span className="lamp" style={{ background: STATUS_COLOR[data.status] }} title={data.status} />
         {data.tag}
       </div>
-      <UnitSymbol type={data.kind} accent={accent} />
-      <Handle type="target" position={Position.Left} style={{ top: TAG_H + nz.in }} />
+      <div style={{ transform: data.flip ? 'scaleX(-1)' : undefined }}>
+        <UnitSymbol type={data.kind} accent={accent} />
+      </div>
+      <Handle type="target" position={inSide} style={{ top: TAG_H + nz.in }} />
       {data.kind === 'splitter' ? (
         <>
-          <Handle id="a" type="source" position={Position.Right} style={{ top: TAG_H + 30 }} title="Outlet a" />
-          <Handle id="b" type="source" position={Position.Right} style={{ top: TAG_H + 58 }} title="Outlet b" />
+          <Handle id="a" type="source" position={outSide} style={{ top: TAG_H + 30 }} title="Outlet a" />
+          <Handle id="b" type="source" position={outSide} style={{ top: TAG_H + 58 }} title="Outlet b" />
         </>
       ) : (
-        <Handle id="out" type="source" position={Position.Right} style={{ top: TAG_H + nz.out }} />
+        <Handle id="out" type="source" position={outSide} style={{ top: TAG_H + nz.out }} />
       )}
-      {sludgeX !== undefined && <Handle id="sludge" className="sludge-port" type="source" position={Position.Bottom} style={{ left: sludgeX, top: TAG_H + 78 }} title="Sludge outlet — pipe to a thickener, filter press or sludge disposal" />}
+      {sludgeX !== undefined && (
+        <Handle id="sludge" className="sludge-port" type="source" position={Position.Bottom} style={{ left: data.flip ? W - sludgeX : sludgeX, top: TAG_H + 78 }} title={data.rasPort ? 'WAS — waste activated sludge to the thickener (sludge line)' : 'Sludge outlet — pipe to a thickener, filter press or sludge disposal'} />
+      )}
+      {data.rasPort && (
+        <Handle id="ras" className="ras-port" type="source" position={Position.Bottom} style={{ left: data.flip ? W - 36 : 36, top: TAG_H + 78 }} title="RAS — return activated sludge back to the aeration basin" />
+      )}
+      {data.rasPort && <div className="pfd-portlabels" style={{ flexDirection: data.flip ? 'row-reverse' : 'row' }}><span>RAS</span><span>WAS</span></div>}
       <div className="pfd-name">{def.name}</div>
       {data.summary && <div className="pfd-duty">{data.summary}</div>}
       {showSludge && (
@@ -114,14 +129,14 @@ function TerminalNodeImpl({ data, selected }: NodeProps<Node<TerminalNodeData>>)
   );
 }
 
-export type PipeEdgeData = { no?: number; q?: string; highlight?: boolean; service?: 'process' | 'sludge' | 'recycle' };
+export type PipeEdgeData = { no?: number; q?: string; highlight?: boolean; service?: 'process' | 'sludge' | 'recycle' | 'ras' };
 
 /** Orthogonal process line with an arrowhead and an ISO-style stream-number diamond at its midpoint. */
 function PipeEdgeImpl(props: EdgeProps<Edge<PipeEdgeData>>) {
   const { id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, selected, data } = props;
   const [path, lx, ly] = getSmoothStepPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, borderRadius: 2, offset: 18 });
   const service = data?.service ?? 'process';
-  const color = service === 'sludge' ? 'var(--sludge)' : 'var(--flow)';
+  const color = service === 'sludge' || service === 'ras' ? 'var(--sludge)' : 'var(--flow)';
   const hi = selected || data?.highlight;
   return (
     <>
@@ -129,7 +144,7 @@ function PipeEdgeImpl(props: EdgeProps<Edge<PipeEdgeData>>) {
         id={id}
         path={path}
         markerEnd={markerEnd}
-        style={{ stroke: hi ? 'var(--clean)' : color, strokeWidth: hi ? 3.2 : 2.2, strokeDasharray: service === 'sludge' ? '7 4' : service === 'recycle' ? '10 3 2 3' : undefined }}
+        style={{ stroke: hi ? 'var(--clean)' : color, strokeWidth: hi ? 3.2 : 2.2, strokeDasharray: service === 'sludge' ? '7 4' : service === 'recycle' || service === 'ras' ? '10 3 2 3' : undefined }}
       />
       {data?.no !== undefined && (
         <EdgeLabelRenderer>

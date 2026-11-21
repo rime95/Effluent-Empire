@@ -140,7 +140,7 @@ export function filterPress(s: Stream, p: { chamber_m3: number; cycles: number; 
   const load = cakeVol / capacity;
   if (load > 1) {
     w = w / Math.min(2, load);
-    capture = PRESS.overloadCapture;
+    capture = PRESS.capture - (PRESS.capture - PRESS.overloadCapture) * Math.min(1, load - 1); // continuous (solver stability)
     notes.push({ level: 'warn', code: 'press.overload', text: `Press is ${(load * 100).toFixed(0)} % of its chamber capacity (${capacity.toFixed(2)} m³/d): short cycles, wet cake (${(w * 100).toFixed(0)} % DS) and solids in the filtrate. Add chamber volume or cycles.` });
   }
   const { out, removed } = captureAll(s, capture);

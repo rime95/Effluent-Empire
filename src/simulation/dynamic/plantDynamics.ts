@@ -75,6 +75,8 @@ interface ASState {
   inert: Stream;
   /** dissolved metals in the mixed liquor (CSTR dilution of slugs), mg/L — drives inhibition */
   metals: MetalMap;
+  /** effective sludge age from the steady design solution, d */
+  srtEff?: number;
 }
 
 /** Diurnal production pattern: flow multiplier for hour t. Peak factor sets the amplitude. */
@@ -127,7 +129,7 @@ function nextIsClarifier(g: ProcessGraph, id: string): PNode | null {
 }
 
 /** Run one ASM1 reactor over one 15-min step (20-s sub-steps) with the PI DO loop. kLa and OUR returned are step means. */
-export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; doSP: number; blowerCap: number; settleFactor: number; manual?: boolean }, T: number) {
+export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; doSP: number; blowerCap: number; settleFactor: number; manual?: boolean; mlssTarget?: number }, T: number) {
   const inA = toASM(inlet);
   const SOsat = oxygenSaturation(T);
   const dt = ASM1_SUBSTEP;
@@ -155,7 +157,10 @@ export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; 
     const kLaNow = p.manual ? (st.kLaMax / 1.6) * p.blowerCap : Math.min(st.kLaMax * p.blowerCap, Math.max(0, unclamped));
     if (!p.manual && unclamped === kLaNow) integral += e * dt;
     const carry = clarifierCarry(mlssOf(x), inlet.Q, st.clarifierArea, p.settleFactor);
-    const wasteRate = Math.max(0, 1 / p.srt - D * carry);
+    // MLSS control: the operator raises wasting when MLSS is above set-point (proportional, GAME MODEL gain 2)
+    // capped at 3× design wasting (WAS pump capacity) so a solids slug cannot wash out the nitrifiers; P-only → small offset
+    const trim = p.mlssTarget ? Math.min(3, Math.max(0, 1 + 2 * (mlssOf(x) - p.mlssTarget) / p.mlssTarget)) : 1;
+    const wasteRate = Math.max(0, trim / p.srt - D * carry);
     const r = asmStep(x, { Q: inlet.Q, V: p.V, T, in: inA, kLa: kLaNow, SOsat, wasteRate, effluentCarry: carry, inhibH, inhibA }, dt);
     x = r.x;
     kLaSum += kLaNow;
@@ -219,10 +224,13 @@ function initialise(g: ProcessGraph, base: Stream) {
         inert: cloneStream(ns.result.out),
         metals: { ...ns.inlet.dissolved },
       };
-      const srt = Number(n.params.srt);
+      // effective sludge age from the steady solution (MLSS control fixes it there); the replay then holds MLSS
+      const srt = ns.result.calcs.control?.value ?? Number(n.params.srt);
+      const mlssTarget = n.params.control === 'mlss' ? Number(n.params.mlss) || undefined : undefined;
       const warmSteps = Math.ceil((4 * srt * 24) / STEP_H);
       const manual = !hasInst(n, 'doLoop');
-      for (let i = 0; i < warmSteps; i++) st = stepAS(st, ns.inlet, { V, srt, doSP, blowerCap: 1, settleFactor: 1, manual }, ns.inlet.T).st;
+      for (let i = 0; i < warmSteps; i++) st = stepAS(st, ns.inlet, { V, srt, doSP, blowerCap: 1, settleFactor: 1, manual, mlssTarget }, ns.inlet.T).st;
+      st.srtEff = srt;
       as[n.id] = st;
     }
   }
@@ -362,7 +370,7 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
           units[id] = { pH: st.contents.pH, pHmeasured: measured, pump: 100 * u, sp };
         } else if (kind === 'activatedSludge' && as[id]) {
           const V = Number(n.params.volume);
-          const r = stepAS(as[id], inlet, { V, srt: Number(n.params.srt), doSP: Number(n.params.do), blowerCap: blower.get(id) ?? 1, settleFactor: settle.get(id) ?? 1, manual: !hasInst(n, 'doLoop') }, inlet.T);
+          const r = stepAS(as[id], inlet, { V, srt: as[id].srtEff ?? Number(n.params.srt), mlssTarget: n.params.control === 'mlss' ? Number(n.params.mlss) || undefined : undefined, doSP: Number(n.params.do), blowerCap: blower.get(id) ?? 1, settleFactor: settle.get(id) ?? 1, manual: !hasInst(n, 'doLoop') }, inlet.T);
           as[id] = r.st;
           outlet = r.out;
           energy += ((r.kLa * V * oxygenSaturation(inlet.T)) / 1000 / 1.8) * dtD; // BSM1 aeration-energy relation (kWh)
@@ -385,8 +393,8 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
       }
       // GAME MODEL: in the SCADA replay the sludge line is quasi-static — sludge pipes carry no flow (solids leave as in the
       // steady model) and splitters keep their set split.
-      const outs = g.edges.filter((e) => e.from === id && e.fromPort !== 'sludge');
-      for (const e of g.edges.filter((x) => x.from === id && x.fromPort === 'sludge')) edge.set(e.id, emptyStream(0));
+      const outs = g.edges.filter((e) => e.from === id && e.fromPort !== 'sludge' && e.fromPort !== 'ras');
+      for (const e of g.edges.filter((x) => x.from === id && (x.fromPort === 'sludge' || x.fromPort === 'ras'))) edge.set(e.id, emptyStream(0));
       const split = n.kind === 'splitter' ? Math.min(1, Math.max(0, Number(n.params.split ?? 50) / 100)) : null;
       const aN = outs.filter((e) => e.fromPort === 'a').length;
       const bN = outs.length - aN;

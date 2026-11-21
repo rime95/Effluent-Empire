@@ -61,7 +61,9 @@ export interface Project {
   /** lab tests in progress */
   labQueue: { test: LabTestId; doneWeek: number }[];
   /** construction in progress: the commissioning outcome is fixed when work starts and revealed at doneWeek */
-  building: { doneWeek: number; report: CommissionReport; graph: ProcessGraph } | null;
+  /** under construction. `progress` (new saves): CAPEX is paid and the client's 60 % progress claims are received weekly
+   *  over the build (industry practice); legacy saves without it paid CAPEX up front and get the 60 % at completion. */
+  building: { doneWeek: number; report: CommissionReport; graph: ProcessGraph; progress?: { capexPerWeek: number; claimPerWeek: number; weeksLeft: number } } | null;
   /** O&M contract offered after a successful commissioning */
   omOffer: { weeklyFee: number; weeks: number } | null;
 }

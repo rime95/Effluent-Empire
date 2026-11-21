@@ -108,8 +108,11 @@ describe('time and saves', () => {
     expect(s3.projects[0].testsDone).toEqual(['metals']);
     expect(s3.projects[0].datasheet.Ni).toBeDefined();
   });
-  it('insolvency only after 6 weeks of overdraft', () => {
-    let s = { ...base(), cash: -1 };
+  it('a balance within the credit line is not insolvency; 6 weeks beyond it is', () => {
+    let ok = { ...base(), cash: -100_000 };
+    for (let i = 0; i < 8; i++) ok = stepWeek(ok);
+    expect(ok.gameOver).toBe(false);
+    let s = { ...base(), cash: -400_000 };
     for (let i = 0; i < 5; i++) s = stepWeek(s);
     expect(s.gameOver).toBe(false);
     s = stepWeek(s);

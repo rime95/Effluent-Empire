@@ -15,7 +15,7 @@ import { CATALOGUE, PRICES, Params, UnitType } from './catalogue';
 import { Note, ProcessResult } from './types';
 
 export type NodeKind = UnitType | 'influent' | 'discharge' | 'disposal';
-export type PortId = 'out' | 'sludge' | 'a' | 'b';
+export type PortId = 'out' | 'sludge' | 'a' | 'b' | 'ras';
 /** unit kinds with a sludge draw-off port */
 export const SLUDGE_PORT_KINDS: NodeKind[] = ['clarifier', 'oilSep', 'sandFilter', 'thickener', 'filterPress'];
 
@@ -29,6 +29,8 @@ export interface PNode {
   position?: { x: number; y: number };
   /** out of service: the stream passes through untreated (O&M breakdowns) */
   bypass?: boolean;
+  /** drawn mirrored (inlet on the right, outlet on the left) — UI only */
+  flip?: boolean;
   /** instrumentation / redundancy switched on or off (missing = standard set installed) — see instrumentation.ts */
   inst?: Partial<Record<InstKey, boolean>>;
 }
@@ -98,13 +100,19 @@ export function validateGraph(g: ProcessGraph): Note[] {
       errs.push({ level: 'error', code: 'graph.dangling', text: 'A pipe is connected to a unit that no longer exists.' });
       continue;
     }
+    if (e.fromPort === 'ras' && (from.kind !== 'clarifier' || to.kind !== 'activatedSludge')) errs.push({ level: 'error', code: 'graph.ras', text: 'A RAS line runs from a secondary clarifier back to its aeration basin.' });
     if (from.kind === 'discharge' || from.kind === 'disposal') errs.push({ level: 'error', code: 'graph.dischargeOutlet', text: `${from.tag ?? from.kind} is an end point and cannot have an outlet pipe.` });
     if (to.kind === 'influent') errs.push({ level: 'error', code: 'graph.influentInlet', text: 'The raw-wastewater inlet cannot receive a pipe.' });
     if (e.fromPort === 'sludge' && !SLUDGE_PORT_KINDS.includes(from.kind)) errs.push({ level: 'error', code: 'graph.noSludgePort', text: `${from.tag ?? from.kind} has no sludge outlet.` });
     const sludgeLine = isSludgeEdge(g, e);
     if (to.kind === 'disposal' && !sludgeLine) errs.push({ level: 'error', code: 'graph.disposalWater', text: `Only sludge lines can go to ${to.tag ?? 'sludge disposal'} — treated water must go to the final discharge.` });
     if (sludgeLine && to.kind === 'discharge') errs.push({ level: 'error', code: 'graph.sludgeToRiver', text: `Sludge from ${from.tag ?? from.kind} reaches the final discharge — send it to a thickener, filter press or sludge disposal.` });
-    if (sludgeLine && !['thickener', 'filterPress', 'disposal', 'mixer', 'splitter'].includes(to.kind)) errs.push({ level: 'warn', code: 'graph.sludgeIntoProcess', text: `Sludge is piped into ${to.tag ?? to.kind} — treatment units are not designed for 1 % solids feed.` });
+    if (sludgeLine && e.fromPort !== 'ras' && !['thickener', 'filterPress', 'disposal', 'mixer', 'splitter'].includes(to.kind)) errs.push({ level: 'warn', code: 'graph.sludgeIntoProcess', text: `Sludge is piped into ${to.tag ?? to.kind} — treatment units are not designed for 1 % solids feed.` });
+  }
+  // advice: a secondary clarifier after activated sludge should show its RAS line (the model assumes the return either way)
+  for (const c of g.nodes.filter((x) => x.kind === 'clarifier')) {
+    const fedByAS = g.edges.some((e) => e.to === c.id && g.nodes.find((n) => n.id === e.from)?.kind === 'activatedSludge');
+    if (fedByAS && !g.edges.some((e) => e.from === c.id && e.fromPort === 'ras')) errs.push({ level: 'info', code: 'graph.noRAS', text: `${c.tag ?? 'Clarifier'}: draw the RAS line (round brown RAS nozzle → aeration basin). The model assumes the return; draw it so the PFD, P&ID and stream table show it.` });
   }
   for (const n of g.nodes.filter((x) => x.kind === 'splitter')) {
     const outs = g.edges.filter((e) => e.from === n.id);
@@ -112,7 +120,7 @@ export function validateGraph(g: ProcessGraph): Note[] {
   }
   for (const n of g.nodes) {
     const ins = g.edges.filter((e) => e.to === n.id).length;
-    const mainOuts = g.edges.filter((e) => e.from === n.id && e.fromPort !== 'sludge').length;
+    const mainOuts = g.edges.filter((e) => e.from === n.id && e.fromPort !== 'sludge' && e.fromPort !== 'ras').length;
     if (n.kind !== 'influent' && ins === 0) errs.push({ level: 'error', code: 'graph.noInlet', text: `${n.tag ?? n.kind} has no inlet pipe.` });
     if (n.kind !== 'discharge' && n.kind !== 'disposal' && mainOuts === 0) errs.push({ level: 'error', code: 'graph.noOutlet', text: `${n.tag ?? n.kind} has no outlet pipe.` });
   }
@@ -121,7 +129,7 @@ export function validateGraph(g: ProcessGraph): Note[] {
 
 /** A pipe carries sludge if it leaves a sludge port, or leaves a mixer/splitter fed by sludge. */
 export function isSludgeEdge(g: ProcessGraph, e: PEdge, seen = new Set<string>()): boolean {
-  if (e.fromPort === 'sludge') return true;
+  if (e.fromPort === 'sludge' || e.fromPort === 'ras') return true;
   const from = g.nodes.find((n) => n.id === e.from);
   if (!from || (from.kind !== 'mixer' && from.kind !== 'splitter') || seen.has(from.id)) return false;
   seen.add(from.id);
@@ -188,7 +196,8 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
       sysIn = components(inlet);
       res.capex += instCapex(node); // inlet flow meter
     } else {
-      const ins = inEdges.map((e) => (tears.has(e.id) ? tearIn.get(e.id) : res.edges[e.id])).filter((x): x is Stream => !!x && x.Q > 1e-9);
+      // RAS lines are internal to the activated-sludge model (MLSS retention), shown but not re-added as flow
+      const ins = inEdges.filter((e) => e.fromPort !== 'ras').map((e) => (tears.has(e.id) ? tearIn.get(e.id) : res.edges[e.id])).filter((x): x is Stream => !!x && x.Q > 1e-9);
       inlet = ins.length === 0 ? emptyStream(0) : ins.length === 1 ? cloneStream(ins[0]) : equilibrate(blend(ins));
     }
     if (node.kind === 'discharge') {
@@ -210,7 +219,9 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
     let outlet = inlet;
     let sludgeOut: Stream | null = null;
     const sludgeEdges = outEdges.filter((e) => e.fromPort === 'sludge');
-    const mainEdges = outEdges.filter((e) => e.fromPort !== 'sludge');
+    const rasEdges = outEdges.filter((e) => e.fromPort === 'ras');
+    const mainEdges = outEdges.filter((e) => e.fromPort !== 'sludge' && e.fromPort !== 'ras');
+    let rasOut: Stream | null = null;
     if (node.kind !== 'influent' && !node.bypass && inlet.Q > 1e-9) {
       const def = CATALOGUE[node.kind];
       const clarifierFollows = mainEdges.length > 0 && mainEdges.every((e) => byId.get(e.to)?.kind === 'clarifier');
@@ -251,6 +262,14 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
       sysTerms.consumed = addComponents(sysTerms.consumed, sumPartial(r.consumed));
       sysTerms.produced = addComponents(sysTerms.produced, sumPartial(r.produced));
       outlet = r.out;
+      // RAS stream for display: return ratio × flow at the underflow concentration Xr (same solids as the WAS)
+      if (rasEdges.length && inlet.ml?.ras && r.removed) {
+        const xr = inlet.ml.xr ?? 8000;
+        const dryAll = removedDryKgD(r.removed);
+        const wasLike = splitSludge(r.out, r.removed, inlet.Q, dryAll / (Math.max(xr, 1) / 1000)).sludge;
+        rasOut = cloneStream(wasLike);
+        rasOut.Q = inlet.ml.ras * inlet.Q;
+      }
       if (routed) {
         const frac = r.sludgeSolidsFrac ?? defaultSludgeFraction(node.kind, inlet);
         const Qs = frac === null ? BACKWASH_FRACTION * inlet.Q : dry / (Math.max(frac, 1e-4) * 1000);
@@ -282,6 +301,11 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
       if (isSplitter && aEdges.length && bEdges.length) share = e.fromPort === 'a' ? aFrac / aEdges.length : (1 - aFrac) / bEdges.length;
       const st = cloneStream(outlet);
       st.Q = outlet.Q * share;
+      res.edges[e.id] = st;
+    }
+    for (const e of rasEdges) {
+      const st = rasOut ? cloneStream(rasOut) : emptyStream(0);
+      st.Q = rasOut ? rasOut.Q / rasEdges.length : 0;
       res.edges[e.id] = st;
     }
     for (const e of sludgeEdges) {
@@ -338,26 +362,46 @@ export function simulate(g: ProcessGraph, influent: Stream): SimResult {
   const errors = validateGraph(g);
   if (!(influent.Q > 0)) errors.push({ level: 'error', code: 'graph.noFlow', text: 'Influent flow must be greater than zero.' });
   if (errors.some((e) => e.level === 'error')) return emptyResult(errors);
-  const tears = findTears(g);
+  const flowG: ProcessGraph = { nodes: g.nodes, edges: g.edges.filter((e) => e.fromPort !== 'ras') };
+  const tears = findTears(flowG);
   const tearSet = new Set(tears);
-  const order = topoSort({ nodes: g.nodes, edges: g.edges.filter((e) => !tearSet.has(e.id)) });
+  const order = topoSort({ nodes: g.nodes, edges: flowG.edges.filter((e) => !tearSet.has(e.id)) });
   if (!order) return emptyResult([{ level: 'error', code: 'graph.cycle', text: 'The flowsheet could not be ordered.' }]);
   let x = new Map<string, Stream>(); // tear values fed in
   let res = solvePass(g, order, influent, tearSet, x);
   let it = 1;
   if (tears.length) {
-    // Successive substitution with bounded Wegstein acceleration per tear stream (q ∈ [−20, 0]; q = 0 is plain
-    // substitution). Loops with gain close to 1 (large recycles) then converge in tens rather than hundreds of passes.
+    // Successive substitution with bounded Wegstein acceleration per tear stream (q ∈ [−5, 0]; q = 0 is plain
+    // substitution). Whenever the residual grows the solver drops acceleration for three passes and halves an
+    // under-relaxation factor ω (x ← x + ω(f − x)), which damps the oscillating loops that nonlinear units such as
+    // activated sludge or an overloaded thickener produce.
     let converged = false;
     let prevX: Map<string, number[]> | null = null;
     let prevF: Map<string, number[]> | null = null;
-    for (; it < 80; it++) {
+    let prevDelta = Infinity;
+    let cooldown = 0; // passes without acceleration after the residual grew (Wegstein safeguard)
+    // Biology inside a loop can have two steady states (healthy, or a solids-recirculation collapse). Extrapolation can
+    // jump between them, so with activated sludge in the flowsheet the solver follows the start-up path: damped plain
+    // substitution, no Wegstein (physically: the plant fills from empty with no recycle).
+    const biology = g.nodes.some((n) => n.kind === 'activatedSludge');
+    let omega = biology ? 0.7 : 1; // under-relaxation: halved each time the residual grows (damps oscillating loops)
+    for (; it < 250; it++) {
       const f = new Map(tears.map((id) => [id, res.edges[id]] as const).filter((p): p is [string, Stream] => !!p[1]));
       const delta = Math.max(0, ...tears.map((id) => tearDelta(f.get(id), x.get(id))));
-      if (it > 1 && delta < 1e-5) {
+      if (it > 1 && delta < 1e-6) {
         converged = true;
         break;
       }
+      // a loop still far from converged after 80 passes is running away (e.g. solids recirculating through an
+      // overloaded thickener) — stop early instead of burning time
+      if (it >= 80 && delta > 1e-2) break;
+      if (delta > prevDelta) {
+        cooldown = 3;
+        omega = Math.max(0.1, omega * 0.5);
+      }
+      const accel = cooldown === 0 && !biology;
+      if (cooldown > 0) cooldown--;
+      prevDelta = delta;
       const nextX = new Map<string, Stream>();
       const curX = new Map<string, number[]>();
       const curF = new Map<string, number[]>();
@@ -371,11 +415,11 @@ export function simulate(g: ProcessGraph, influent: Stream): SimResult {
         const px = prevX?.get(id);
         const pf = prevF?.get(id);
         const nv = fv.map((fi, k) => {
-          if (!px || !pf || it < 3) return fi;
+          if (!px || !pf || it < 3 || !accel) return xv[k] + omega * (fi - xv[k]);
           const dx = xv[k] - px[k];
           if (Math.abs(dx) < 1e-12) return fi;
           const slope = (fi - pf[k]) / dx;
-          const q = Math.min(0, Math.max(-20, slope / (slope - 1)));
+          const q = Math.min(0, Math.max(-5, slope / (slope - 1)));
           return q * xv[k] + (1 - q) * fi;
         });
         nextX.set(id, fromVec(fs_, nv));
@@ -386,7 +430,7 @@ export function simulate(g: ProcessGraph, influent: Stream): SimResult {
       res = solvePass(g, order, influent, tearSet, x);
     }
     if (!converged) {
-      res.errors.push({ level: 'error', code: 'graph.recycle', text: 'The recycle loop does not converge — what is returned keeps growing. Return less flow, or remove the solids before recycling.' });
+      res.errors.push({ level: 'error', code: 'graph.recycle', text: 'The recycle loop runs away — what is returned keeps growing (typically solids recirculating through an overloaded thickener or press). Enlarge the sludge-line equipment, return less flow, or remove the solids before recycling.' });
       res.ok = false;
     }
   }

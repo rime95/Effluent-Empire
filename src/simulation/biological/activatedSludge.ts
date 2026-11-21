@@ -250,3 +250,149 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
     },
   });
 }
+
+export interface ControlledASInput extends ActivatedSludgeInput {
+  /** 'srt': wasting set by sludge age; 'mlss': wasting adjusted to hold the MLSS set-point (industry practice) */
+  control: 'srt' | 'mlss';
+  mlssTarget_mgL: number;
+  /** return activated sludge ratio Qr/Q */
+  ras: number;
+}
+
+/**
+ * Activated sludge with an explicit RAS/WAS system and either SRT or MLSS control.
+ * MLSS control: the plant wastes whatever keeps the MLSS at its set-point; at steady state that fixes the SRT, found here
+ * by bisection on SRT (MLSS rises monotonically with SRT). RAS/WAS (clarifier solids balance, effluent solids neglected):
+ *   (Q + Qr)·X = (Qr + Qw)·Xr  →  Xr = [(1 + R)·X − Px/Q] / R     Q_WAS = Px,TSS / Xr     Q_RAS = R·Q   (M&E Ch. 7–8)
+ * Ref: knowledge/biological/activated_sludge.md §RAS/WAS and MLSS control.
+ */
+/** last SRT found per basin and set-point: recycle iterations and repeated runs start next to the answer */
+const srtMemo = new Map<string, number>();
+/** set-point that was unreachable last time (pinned at the shortest / longest sludge age) */
+const pinMemo = new Map<string, 'lo' | 'hi'>();
+
+export function activatedSludgeControlled(s: Stream, p: ControlledASInput, ctx: { clarifierFollows: boolean }): ProcessResult {
+  let r = activatedSludge(s, p, ctx);
+  const hrt = hrtDays(p.volume_m3, Math.max(s.Q, 1e-9));
+  let srtUsed = p.srt_d;
+  const extra: Note[] = [];
+  if (p.control === 'mlss' && ctx.clarifierFollows && s.Q > 0) {
+    let last: { srt: number; r: ProcessResult } | null = null;
+    const mlssAt = (srt: number) => {
+      const rr = activatedSludge(s, { ...p, srt_d: srt }, ctx);
+      last = { srt, r: rr };
+      return rr.calcs.mlss?.value ?? 0;
+    };
+    const memoKey = `${p.volume_m3}|${p.mlssTarget_mgL}|${p.do_mgL}`;
+    const lo = Math.max(hrt * 1.05, 1);
+    const hi = Math.max(60, lo * 1.5);
+    // 0) pinned last time? one solve at that limit confirms it (recycle passes with an unreachable set-point)
+    const pin = pinMemo.get(memoKey);
+    let pinned = false;
+    if (pin) {
+      const at = pin === 'lo' ? lo : hi;
+      const m = mlssAt(at);
+      if ((pin === 'lo' && m > p.mlssTarget_mgL) || (pin === 'hi' && m < p.mlssTarget_mgL)) {
+        srtUsed = at;
+        pinned = true;
+        extra.push(pin === 'lo'
+          ? { level: 'warn', code: 'as.mlssHigh', text: `MLSS set-point ${p.mlssTarget_mgL.toFixed(0)} mg/L is below what the load produces even at the shortest sludge age (≈${m.toFixed(0)} mg/L) — enlarge the basin, raise the set-point, or stop returning solids to the plant.` }
+          : { level: 'warn', code: 'as.mlssLow', text: `MLSS set-point ${p.mlssTarget_mgL.toFixed(0)} mg/L is not reachable: the load only supports ≈${m.toFixed(0)} mg/L even at the longest sludge age. Lower the set-point or reduce the basin volume.` });
+      } else pinMemo.delete(memoKey);
+    }
+    // 1) secant on ln SRT from the remembered answer (2–3 solves when warm; recycle passes stay cheap and smooth)
+    const hint = srtMemo.get(memoKey);
+    let secantOk = false;
+    if (!pinned && hint && hint > lo && hint < hi) {
+      let x0 = Math.log(hint);
+      let f0 = Math.log(Math.max(mlssAt(hint), 1e-9) / p.mlssTarget_mgL);
+      // Newton-like first step with elasticity d ln X / d ln SRT ≈ 0.6 (unless already on target)
+      let x1 = Math.abs(f0) <= 1e-7 ? x0 : x0 - f0 / 0.6;
+      let f1 = x1 === x0 ? f0 : Math.log(Math.max(mlssAt(Math.exp(x1)), 1e-9) / p.mlssTarget_mgL);
+      for (let i = 0; i < 12 && Math.abs(f1) > 1e-7; i++) {
+        if (Math.abs(f1 - f0) < 1e-12) break;
+        const x2 = x1 - (f1 * (x1 - x0)) / (f1 - f0);
+        if (!(x2 > Math.log(lo)) || !(x2 < Math.log(hi))) break;
+        x0 = x1;
+        f0 = f1;
+        x1 = x2;
+        f1 = Math.log(Math.max(mlssAt(Math.exp(x1)), 1e-9) / p.mlssTarget_mgL);
+      }
+      if (Math.abs(f1) <= 1e-6) {
+        srtUsed = Math.exp(x1);
+        secantOk = true;
+      }
+    }
+    // 2) otherwise bracket the full range (Illinois)
+    const mLo = secantOk || pinned ? NaN : mlssAt(lo);
+    const mHi = secantOk || pinned || mLo > p.mlssTarget_mgL ? NaN : mlssAt(hi);
+    if (pinned) {
+      // limit confirmed above
+    } else if (secantOk) {
+      srtMemo.set(memoKey, srtUsed);
+    } else if (mLo > p.mlssTarget_mgL) {
+      srtUsed = lo;
+      pinMemo.set(memoKey, 'lo');
+      extra.push({ level: 'warn', code: 'as.mlssHigh', text: `MLSS set-point ${p.mlssTarget_mgL.toFixed(0)} mg/L is below what the load produces even at the shortest sludge age (≈${mLo.toFixed(0)} mg/L) — enlarge the basin, raise the set-point, or stop returning solids to the plant.` });
+    } else if (mHi < p.mlssTarget_mgL) {
+      srtUsed = hi;
+      pinMemo.set(memoKey, 'hi');
+      extra.push({ level: 'warn', code: 'as.mlssLow', text: `MLSS set-point ${p.mlssTarget_mgL.toFixed(0)} mg/L is not reachable: the load only supports ≈${mHi.toFixed(0)} mg/L even at a 60-day sludge age. Lower the set-point or reduce the basin volume.` });
+    } else {
+      // Illinois (modified regula falsi) on ln SRT: smooth and tight, so recycle loops containing this unit converge
+      let a = Math.log(lo);
+      let b = Math.log(hi);
+      let fa = mLo - p.mlssTarget_mgL;
+      let fb = mHi - p.mlssTarget_mgL;
+      let side = 0;
+      let c = (a + b) / 2;
+      for (let i = 0; i < 40; i++) {
+        c = (a * fb - b * fa) / (fb - fa);
+        const fc = mlssAt(Math.exp(c)) - p.mlssTarget_mgL;
+        if (Math.abs(fc) < 1e-7 * p.mlssTarget_mgL) break;
+        if (fc * fb > 0) {
+          b = c;
+          fb = fc;
+          if (side === -1) fa /= 2;
+          side = -1;
+        } else {
+          a = c;
+          fa = fc;
+          if (side === 1) fb /= 2;
+          side = 1;
+        }
+      }
+      srtUsed = Math.exp(c);
+      if (srtMemo.size > 200) srtMemo.clear();
+      srtMemo.set(memoKey, srtUsed);
+    }
+    const L = last as { srt: number; r: ProcessResult } | null;
+    r = L && Math.abs(L.srt - srtUsed) < 1e-12 ? L.r : activatedSludge(s, { ...p, srt_d: srtUsed }, ctx);
+    const got = r.calcs.mlss?.value ?? 0;
+    if (!extra.length && Math.abs(got - p.mlssTarget_mgL) > 0.02 * p.mlssTarget_mgL)
+      extra.push({ level: 'warn', code: 'as.mlssMiss', text: `MLSS control settled at ${got.toFixed(0)} mg/L instead of ${p.mlssTarget_mgL.toFixed(0)} — the biology changes regime near this sludge age (nitrification / pH); try a different set-point.` });
+  }
+  // the sludge age actually used by the solver (SRT ≥ HRT; = HRT without a clarifier)
+  srtUsed = r.calcs.srt?.value ?? srtUsed;
+  const mlss = r.calcs.mlss?.value ?? 0;
+  const R = Math.max(0.05, p.ras);
+  const pxKgD = r.calcs.sludge?.value ?? 0;
+  const pxConc = s.Q > 0 ? (pxKgD * 1000) / s.Q : 0; // net solids production as a concentration in Q, mg/L
+  // clarifier balance with WAS drawn from the underflow (biology review): Xr = [(1+R)X − Px/Q]/R
+  const xr = Math.max((mlss * (1 + R) - pxConc) / R, mlss);
+  const qWas = xr > 0 ? (pxKgD * 1000) / xr : 0; // m³/d
+  if (r.out.ml) r.out.ml = { ...r.out.ml, ras: R, xr };
+  if (xr > 12000) extra.push({ level: 'warn', code: 'as.xr', text: `RAS concentration ${xr.toFixed(0)} mg/L is beyond what a clarifier can thicken (≈ 8,000–12,000): raise the RAS ratio or lower the MLSS.` });
+  if (R < 0.25 || R > 1.5) extra.push({ level: 'info', code: 'as.rasRange', text: `RAS ratio ${R.toFixed(2)} is outside the usual 0.25–1.0 (up to 1.5) range.` });
+  return {
+    ...r,
+    notes: [...r.notes, ...extra],
+    calcs: {
+      control: { label: p.control === 'mlss' ? `Control: MLSS set-point ${p.mlssTarget_mgL.toFixed(0)} mg/L → SRT` : 'Control: sludge age (SRT)', value: srtUsed, unit: 'd', digits: 1 },
+      ...r.calcs,
+      ras: { label: 'RAS flow (return to basin)', value: R * s.Q, unit: 'm³/d', digits: 0 },
+      xr: { label: 'RAS / WAS concentration', value: xr, unit: 'mg/L', digits: 0 },
+      was: { label: 'WAS flow (to sludge line)', value: qWas, unit: 'm³/d', digits: 1 },
+    },
+  };
+}

@@ -64,15 +64,17 @@ export const PidSheet = memo(function PidSheet({ graph, sim, onSelect, docNo }: 
   const maxX = Math.max(...xs) + W + 120;
   const maxY = Math.max(...ys) + 230;
   const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-  const port = (n: PNode, side: 'in' | 'out' | 'sludge' | 'a' | 'b') => {
+  const port = (n: PNode, side: 'in' | 'out' | 'sludge' | 'a' | 'b' | 'ras') => {
     const p = pos.get(n.id)!;
     if (n.kind === 'influent' || n.kind === 'discharge') return { x: p.x + (side === 'in' ? 0 : 140), y: p.y + 18 };
     if (n.kind === 'disposal') return { x: p.x, y: p.y + TAG_H + 30 };
     const z = NOZ[n.kind] ?? { in: 44, out: 44 };
-    if (side === 'sludge') return { x: p.x + (SLUDGE_X[n.kind] ?? 60), y: p.y + TAG_H + 80 };
-    if (side === 'a') return { x: p.x + W, y: p.y + TAG_H + 30 };
-    if (side === 'b') return { x: p.x + W, y: p.y + TAG_H + 58 };
-    return { x: p.x + (side === 'in' ? 0 : W), y: p.y + TAG_H + (side === 'in' ? z.in : z.out) };
+    const fx = (x: number) => (n.flip ? p.x + W - x : p.x + x);
+    if (side === 'sludge') return { x: fx(SLUDGE_X[n.kind] ?? 60), y: p.y + TAG_H + 80 };
+    if (side === 'ras') return { x: fx(36), y: p.y + TAG_H + 80 };
+    if (side === 'a') return { x: fx(W), y: p.y + TAG_H + 30 };
+    if (side === 'b') return { x: fx(W), y: p.y + TAG_H + 58 };
+    return { x: fx(side === 'in' ? 0 : W), y: p.y + TAG_H + (side === 'in' ? z.in : z.out) };
   };
   let line = 0;
   const tears = new Set(sim?.tears ?? []);
@@ -94,24 +96,25 @@ export const PidSheet = memo(function PidSheet({ graph, sim, onSelect, docNo }: 
         if (!from || !to) return null;
         const s = port(from, (e.fromPort ?? (from.kind === 'splitter' ? 'a' : 'out')) as 'out');
         const t = port(to, 'in');
-        const sludge = e.fromPort === 'sludge';
+        const sludge = e.fromPort === 'sludge' || e.fromPort === 'ras';
+        const ras = e.fromPort === 'ras';
         const mx = sludge ? s.x : (s.x + t.x) / 2;
         const d = sludge ? `M${s.x} ${s.y} V${t.y} H${t.x}` : `M${s.x} ${s.y} H${mx} V${t.y} H${t.x}`;
         line += 1;
-        const lineNo = `${sludge ? 'SL' : tears.has(e.id) ? 'RC' : 'WW'}-${String(line).padStart(3, '0')}`;
+        const lineNo = `${ras ? 'RAS' : sludge ? (from.kind === 'clarifier' && graph.edges.some((x) => x.from === from.id && x.fromPort === 'ras') ? 'WAS' : 'SL') : tears.has(e.id) ? 'RC' : 'WW'}-${String(line).padStart(3, '0')}`;
         const lx = sludge ? s.x + 4 : mx + 4;
         const ly = sludge ? (s.y + t.y) / 2 : Math.min(s.y, t.y) - 6;
         const pumped = from.kind === 'eq' || sludge;
         return (
           <g key={e.id}>
-            <path d={d} fill="none" stroke={INK} strokeWidth={sludge ? 1.6 : 2} strokeDasharray={sludge ? '8 4' : tears.has(e.id) ? '10 3 2 3' : undefined} markerEnd="url(#pidArrow)" />
+            <path d={d} fill="none" stroke={INK} strokeWidth={sludge ? 1.6 : 2} strokeDasharray={ras ? '10 3 2 3' : sludge ? '8 4' : tears.has(e.id) ? '10 3 2 3' : undefined} markerEnd="url(#pidArrow)" />
             <text x={lx} y={ly} fontSize={8} fontFamily="var(--mono)" fill="#5b6b7c">
               {lineNo}
             </text>
             {pumped && (
               <>
-                <Pump x={sludge ? s.x : s.x + 22} y={sludge ? s.y + 22 : s.y} tag={`P-${num(from.tag)}A`} />
-                <Pump x={sludge ? s.x + 26 : s.x + 22} y={sludge ? s.y + 22 : s.y + 26} tag={`P-${num(from.tag)}B`} standby />
+                <Pump x={sludge ? s.x : s.x + 22} y={sludge ? s.y + 22 : s.y} tag={`P-${num(from.tag)}${ras ? 'R' : 'A'}`} />
+                <Pump x={sludge ? s.x + 26 : s.x + 22} y={sludge ? s.y + 22 : s.y + 26} tag={`P-${num(from.tag)}${ras ? 'S' : 'B'}`} standby />
               </>
             )}
           </g>
@@ -160,7 +163,7 @@ export const PidSheet = memo(function PidSheet({ graph, sim, onSelect, docNo }: 
               <text x={60} y={12} textAnchor="middle" fontSize={10.5} fontFamily="var(--mono)" fontWeight={700} fill={INK}>
                 {n.tag}
               </text>
-              <g transform={`translate(0,${TAG_H})`}>
+              <g transform={`translate(${n.flip ? 120 : 0},${TAG_H}) scale(${n.flip ? -1 : 1},1)`}>
                 <svg width={120} height={80} viewBox="0 0 120 80" overflow="visible">
                   <UnitSymbol type={n.kind as UnitType} accent="#9aa7b4" />
                 </svg>

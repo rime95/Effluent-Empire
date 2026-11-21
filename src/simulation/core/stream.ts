@@ -79,7 +79,7 @@ export interface Stream {
   v50: Record<Pool, number>;
 
   /** activated-sludge mixed-liquor context for a downstream secondary clarifier */
-  ml?: { mlss: number; srt: number; clarifierFollows: boolean };
+  ml?: { mlss: number; srt: number; clarifierFollows: boolean; /** RAS ratio Qr/Q */ ras?: number; /** RAS/WAS underflow solids, mg/L */ xr?: number };
 }
 
 export const DEFAULT_V50: Record<Pool, number> = {

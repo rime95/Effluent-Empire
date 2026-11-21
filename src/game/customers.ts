@@ -59,7 +59,8 @@ export function generateEnquiry(seed: number, week: number, reputation: number):
     industry,
     standard,
     contractValue,
-    opexLimitRMd: Math.round(ref.opexRMd * rng.range(1.3, 1.8) + 20),
+    // customer's OPEX expectation: generous vs the reference design so sludge, instruments and safety margins fit (GAME MODEL)
+    opexLimitRMd: Math.round(ref.opexRMd * rng.range(1.8, 2.5) + 80),
     deadlineWeeks: difficult ? rng.int(9, 12) : rng.int(13, 18),
     difficult,
     declared: declaredDatasheet(ww.stream, rng, ww.hidden.undeclaredZn, ww.hidden.undeclaredCrVI),

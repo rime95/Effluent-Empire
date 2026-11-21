@@ -66,3 +66,32 @@ Effluent BOD is dominated by escaping biomass, which is why clarifier performanc
 
 ## Reference train
 Oil separator → EQ → activated sludge (V = 3Q, SRT 10 d) → clarifier (SOR 0.4 m/h avg) → sand filter. It passes Standard B for food seeds 1–5. High-strength food wastewater needs long HRT (about 3 d) to keep MLSS clarifiable.
+
+## RAS/WAS system and MLSS control (added 2026-11-22)
+Plants usually control **MLSS**: operators adjust the waste activated sludge (WAS) rate to hold a mixed-liquor set-point. They do not set the sludge age directly; it follows from the MLSS. The unit therefore offers two wasting-control modes:
+- **MLSS set-point** (default for new designs). At steady state, holding X fixes the SRT. With X = (SRT/HRT)·Px/Q, MLSS rises monotonically with SRT, so the SRT is found by bisection in log(SRT) between max(1.05·HRT, 1 d) and 60 d.
+  - A set-point above what 60 d can support, or below what the shortest SRT already gives, is flagged.
+  - The resulting SRT is shown as "Control: MLSS set-point → SRT".
+- **Sludge age (SRT)**: the original model. Reference designs, and older saves without a `control` parameter, use it.
+
+The clarifier solids balance, neglecting effluent solids, gives:
+
+    (Q + Qr)·X = (Qr + Qw)·Xr   →   Xr = [(1 + R)·X − Px/Q] / R        Q_RAS = R·Q        Q_WAS = Px,TSS / Xr
+
+- The RAS ratio R defaults to 0.75. The usual range is 0.25–1.0, up to 1.5.
+- Xr above about 8,000–12,000 mg/L is beyond what a clarifier can thicken, and is flagged.
+- The secondary clarifier's SLR uses R.
+- Its sludge port is the WAS line, at solids fraction Xr/10⁶.
+
+On the PFD, the RAS line goes from the clarifier's RAS nozzle back to the aeration basin.
+- It is shown, with flow R·Q at Xr, in the stream table and on the P&ID (RAS pumps P-xxR/S).
+- It is **internal to the model**: biomass retention is already in the steady-state solution, so the solver does not re-add it as flow.
+- A clarifier after activated sludge without a drawn RAS line gets advice, not an error.
+
+The simpler form X(1 + R)/R overstates Xr by about 20 % for high-strength industrial plants (HRT 3 d, SRT 10 d). The exact form is used, following biology review.
+
+The MLSS search uses the Illinois method (smooth, tight), so recycle loops containing the unit converge. A search that misses the set-point by more than 2 % is flagged, because the biology can change regime with nitrification or pH. The displayed SRT is the one the solver actually used.
+
+🟡 **Limitation:** biomass is counted as TSS with VSS/TSS = 1, whereas M&E uses Px,bio/0.85. For a given MLSS set-point the solved SRT is therefore about 10–15 % long.
+
+In the SCADA replay, MLSS control is a proportional wasting trim: waste rate = (1 + 2·(MLSS − SP)/SP)/SRT_design (GAME MODEL gain). It is capped at 3 × design wasting, standing in for WAS pump capacity; being proportional-only, it leaves a small offset.

@@ -245,3 +245,6 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 0 4px; border: 1px s
 .sheet-tabs button.on { background: var(--ink); color: #fff; }
 .pid-wrap { position: absolute; inset: 0; z-index: 6; background: #fbfcfd; overflow: auto; }
 .pid-sheet { width: 100%; height: 100%; display: block; }
+
+.pfd-eq .react-flow__handle.ras-port { border-color: var(--sludge); background: var(--sludge); border-radius: 50%; }
+.pfd-portlabels { position: absolute; left: 24px; right: 24px; top: 100px; display: flex; justify-content: space-between; font-family: var(--mono); font-size: 8px; color: var(--sludge); pointer-events: none; }

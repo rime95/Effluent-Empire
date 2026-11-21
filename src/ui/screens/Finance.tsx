@@ -58,7 +58,7 @@ export function Finance() {
   return (
     <div className="page">
       <h1>Finance</h1>
-      <p className="sub">Cash {rm(g.cash)}{g.negativeWeeks > 0 && <b style={{ color: 'var(--alarm)' }}> — overdraft for {g.negativeWeeks} week(s); insolvent after 6.</b>}</p>
+      <p className="sub">Cash {rm(g.cash)}{g.negativeWeeks > 0 && <b style={{ color: 'var(--alarm)' }}> — beyond the RM 250,000 credit line for {g.negativeWeeks} week(s); insolvent after 6.</b>}</p>
       <div className="grid g2">
         <div className="panel">
           <h2>Cash position</h2>

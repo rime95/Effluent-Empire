@@ -25,7 +25,7 @@ export const metalTrain = (Q: number, crVI = false): TrainSpec => [
 export const foodTrain = (Q: number): TrainSpec => [
   u('oilSep', Q, { area: Math.ceil((Q * 2.2) / 24 / 1.0) }),
   u('eq', Q),
-  u('activatedSludge', Q, { volume: Math.ceil(Q * 3.0), srt: 10 }),
+  u('activatedSludge', Q, { volume: Math.ceil(Q * 3.0), srt: 10, control: 'srt' }),
   u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.4) }),
   u('sandFilter', Q),
 ];

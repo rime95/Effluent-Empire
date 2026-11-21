@@ -5,7 +5,7 @@
  * CAPEX — GAME MODEL six-tenths rule: C = C_ref · (size / size_ref)^0.6  (RM, 2026 Malaysian price level, indicative).
  */
 import { Stream } from '../core/stream';
-import { activatedSludge } from '../biological/activatedSludge';
+import { activatedSludgeControlled } from '../biological/activatedSludge';
 import { Coagulant, COAGULANTS, coagulate } from '../chemistry/coagulation';
 import { neutralise } from '../chemistry/neutralisation';
 import { reduceChromium } from '../chemistry/chromiumReduction';
@@ -161,10 +161,14 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     summary: 'Aerated suspended-growth reactor. Removes biodegradable organics (and NH₄ at long SRT). Needs a secondary clarifier.',
     params: [
       { key: 'volume', label: 'Aeration volume', unit: 'm³', min: 10, max: 50000, step: 10, default: (Q) => round(Q * 1.5, 10) },
-      { key: 'srt', label: 'Sludge age (SRT)', unit: 'd', min: 1, max: 40, step: 0.5, default: () => 12 },
+      { key: 'control', label: 'Wasting control', unit: '', options: [{ value: 'mlss', label: 'Hold MLSS set-point (industry practice)' }, { value: 'srt', label: 'Hold sludge age (SRT)' }], default: () => 'mlss', help: 'Operators usually target MLSS and adjust WAS to hold it; the resulting SRT is shown below.' },
+      { key: 'mlss', label: 'MLSS set-point', unit: 'mg/L', min: 500, max: 8000, step: 100, default: () => 3000, help: 'Used in MLSS control. Typical 2,000–4,500 mg/L for a gravity clarifier.' },
+      { key: 'srt', label: 'Sludge age (SRT)', unit: 'd', min: 1, max: 40, step: 0.5, default: () => 12, help: 'Used in SRT control.' },
+      { key: 'ras', label: 'RAS ratio (Qr/Q)', unit: '', min: 0.1, max: 2, step: 0.05, default: () => 0.75, help: 'Return activated sludge from the clarifier underflow; sets the underflow (WAS) concentration Xr = X(1+R)/R.' },
       { key: 'do', label: 'DO set-point', unit: 'mg/L', min: 0.2, max: 4, step: 0.1, default: () => 2.0 },
     ],
-    run: (s, p, ctx) => activatedSludge(s, { volume_m3: n(p, 'volume'), srt_d: n(p, 'srt'), do_mgL: n(p, 'do') }, ctx),
+    run: (s, p, ctx) =>
+      activatedSludgeControlled(s, { volume_m3: n(p, 'volume'), srt_d: n(p, 'srt'), do_mgL: n(p, 'do'), control: p.control === 'mlss' ? 'mlss' : 'srt', mlssTarget_mgL: Number(p.mlss ?? 3000) || 3000, ras: Number(p.ras ?? 0.75) || 0.75 }, ctx),
     capex: (p, _s, r) => scale(450_000, n(p, 'volume'), 500) + scale(150_000, Math.max(r.calcs.o2?.value ?? 1, 1), 500) * (0.8 + 0.1 * n(p, 'do')),
     footprint: (p) => (n(p, 'volume') / 5) * 1.2 + 30,
   },

@@ -18,6 +18,8 @@ export { LEGACY_KEY as SAVE_KEY } from './saves';
 export const START_CASH = 500_000;
 /** office rent, utilities, insurance — RM per week (staff salaries are separate) */
 export const WEEKLY_OVERHEAD = 3_500;
+/** bank overdraft facility (GAME MODEL) */
+export const CREDIT_LINE = 250_000;
 /** weeks of negative cash allowed (bank overdraft) before insolvency */
 export const OVERDRAFT_WEEKS = 6;
 
@@ -208,10 +210,18 @@ export function stepWeek(state: GameState): GameState {
       s = updateProject(s, p.id, (x) => ({ ...x, datasheet, testsDone: [...x.testsDone, ...due.map((q) => q.test)], labQueue: x.labQueue.filter((q) => q.doneWeek > week) }));
       notices.push(`${p.enquiry.company}: lab results ready (${due.map((q) => LAB_TESTS[q.test].name).join(', ')}).`);
     }
+    // construction progress: weekly contractor payment and the client's progress claim
+    const prog = p.building?.progress;
+    if (prog && prog.weeksLeft > 0) {
+      s = book(s, `Construction progress: ${p.enquiry.company}`, -prog.capexPerWeek, 'capex');
+      if (prog.claimPerWeek > 0) s = book(s, `Progress claim (60 % over the build): ${p.enquiry.company}`, prog.claimPerWeek, 'project');
+      s = updateProject(s, p.id, (x) => (x.building?.progress ? { ...x, building: { ...x.building, progress: { ...x.building.progress, weeksLeft: x.building.progress.weeksLeft - 1 } } } : x));
+    }
     // construction complete → commissioning
     if (p.building && p.building.doneWeek <= week) {
       const rep = p.building.report;
-      if (rep.milestone > 0) s = book(s, `Mechanical completion (60 %): ${p.enquiry.company}`, rep.milestone, 'project');
+      // legacy builds (paid up front) receive the 60 % here; new builds were paid progressively
+      if (rep.milestone > 0 && !p.building.progress) s = book(s, `Mechanical completion (60 %): ${p.enquiry.company}`, rep.milestone, 'project');
       if (rep.pass) s = book(s, `Retention released (10 %, net of LDs): ${p.enquiry.company}`, rep.payment, 'project');
       s = { ...s, reputation: s.reputation + rep.reputationDelta };
       const paid = p.paid + rep.milestone + (rep.pass ? rep.payment : 0);
@@ -255,7 +265,9 @@ export function stepWeek(state: GameState): GameState {
   s = refill(s);
 
   // 5. solvency
-  s.negativeWeeks = s.cash < 0 ? s.negativeWeeks + 1 : 0;
+  // overdraft: interest on a negative balance (GAME MODEL 0.15 %/week ≈ 8 %/yr); insolvency only beyond the credit line
+  if (s.cash < 0) s = book(s, "Overdraft interest", Math.round(s.cash * 0.0015), "overhead");
+  s.negativeWeeks = s.cash < -CREDIT_LINE ? s.negativeWeeks + 1 : 0;
   if (s.negativeWeeks >= OVERDRAFT_WEEKS) s.gameOver = true;
   if (notices.length) s.news = [...s.news, ...notices.map((text) => ({ week, text }))].slice(-60);
   return s;
@@ -324,13 +336,16 @@ export const useGame = create<GameState & Actions>((set, get) => {
         set({ toast: rep.errors[0].text });
         return false;
       }
-      // construction is paid up-front; the 60 % milestone arrives at completion (a short overdraft is allowed)
-      if (s.cash + rep.milestone - rep.capexCharged < -100_000) {
-        set({ toast: `Construction needs RM ${Math.round(rep.capexCharged).toLocaleString()} — beyond your credit line.` });
+      // construction is paid weekly as it progresses and the client pays 60 % in weekly progress claims (industry
+      // practice: monthly valuations); only the net shortfall needs the overdraft
+      const capexPerWeek = rep.capexCharged / weeks;
+      const claimPerWeek = rep.milestone / weeks;
+      const shortfall = Math.max(0, capexPerWeek - claimPerWeek) * weeks + WEEKLY_OVERHEAD * weeks;
+      if (s.cash - shortfall < -CREDIT_LINE) {
+        set({ toast: `Construction needs about RM ${Math.round(shortfall).toLocaleString()} more than progress claims cover — beyond your RM ${CREDIT_LINE.toLocaleString()} credit line. Reduce CAPEX or finish a project first.` });
         return false;
       }
-      let next = book(s, `${p.built ? 'Retrofit' : 'Construction'}: ${p.enquiry.company}`, -rep.capexCharged, 'capex');
-      next = updateProject(next, p.id, (x) => ({ ...x, status: 'building', building: { doneWeek: s.week + weeks, report: rep, graph: p.graph }, spent: { ...x.spent, capex: x.spent.capex + rep.capexCharged } }));
+      const next = updateProject(s, p.id, (x) => ({ ...x, status: 'building', building: { doneWeek: s.week + weeks, report: rep, graph: p.graph, progress: { capexPerWeek, claimPerWeek, weeksLeft: weeks } }, spent: { ...x.spent, capex: x.spent.capex + rep.capexCharged } }));
       set({ ...next, toast: `Construction started — commissioning in week ${s.week + weeks}.` });
       return true;
     },

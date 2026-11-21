@@ -15,8 +15,11 @@ Filtrate from a filter press, or thickener supernatant, is normally returned to 
    - each mass-flow component x of a tear stream is updated as x ← q·x + (1 − q)·f(x);
    - q = s/(s − 1), with s the secant slope, bounded to q ∈ [−20, 0];
    - q = 0 is plain substitution, used for the first passes.
-5. **Convergence:** the residual |f(x) − x| / |f(x)| is below 10⁻⁵ for water, solids, COD, Ni/Cu/Zn, NH₄ and sulfate loads, within 80 passes. A non-converged result is flagged as an error and marked not OK.
-6. Recycles of 50 %, 90 % and 95 % converge in tests.
+5. **Safeguard** (added 2026-11-22): when the residual grows, acceleration stops for three passes and an under-relaxation factor ω, with x ← x + ω(f − x), is halved (minimum 0.1). An activated-sludge plant with an overloaded thickener returning solids to the EQ tank oscillated with period 3 under both plain and Wegstein substitution. It now converges in about 70 passes.
+   - With activated sludge in the flowsheet, Wegstein is not used. The solver follows the start-up path with damped substitution (ω = 0.7), because the loop can have two steady states: healthy, or a solids-recirculation collapse.
+   - A loop still above 10⁻² after 80 passes is reported as a runaway, and the solver stops early. Example: an overloaded thickener under MLSS control. Recycled solids raise MLSS, the controller wastes harder, and the thickener is overloaded further.
+6. **Convergence:** the residual |f(x) − x| / |f(x)| is below 10⁻⁵ for water, solids, COD, Ni/Cu/Zn, NH₄ and sulfate loads, within 150 passes. A non-converged result is flagged as an error and marked not OK.
+7. Recycles of 50 %, 90 % and 95 % converge in tests.
    - Recycle loops in wastewater plants are contractive (the return is a small fraction of throughput), so plain substitution converges.
    - If it doesn't, the design is reported as non-converging.
 
