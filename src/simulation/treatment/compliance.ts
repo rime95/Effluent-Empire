@@ -43,7 +43,7 @@ export function measure(s: Stream): Record<ParamId, number> {
     Cu: metalTotal(s, 'Cu'),
     Zn: metalTotal(s, 'Zn'),
     Al: s.alSolid + s.alDissolved,
-    Fe: s.feSolid,
+    Fe: s.feSolid + (s.feDissolved ?? 0),
     CrVI: s.CrVI,
     CrIII: metalTotal(s, 'Cr'),
     MetalsTotal: METALS.reduce((a, m) => a + metalTotal(s, m), 0),
@@ -195,7 +195,9 @@ export function evaluate(effluent: Stream, std: StandardId, sim: SimResult | nul
           ? 'Within limit.'
           : param === 'Al' && effluent.alDissolved > effluent.alSolid
             ? `${effluent.alDissolved.toFixed(1)} mg/L aluminium is dissolved: alum/PAC were used outside their pH window (aluminate forms above pH ≈ 8.5). Use ferric, or coagulate before raising pH.`
-            : `Coagulant ${param === 'Al' ? 'aluminium' : 'iron'} hydroxide floc is carried into the effluent — reduce dose or improve settling/filtration.`;
+            : param === 'Fe' && (effluent.feDissolved ?? 0) > effluent.feSolid
+              ? `${(effluent.feDissolved ?? 0).toFixed(1)} mg/L iron is dissolved: ferric hydroxide only dissolves below pH ≈ 3, so the ferric dose overwhelmed the alkalinity. Reduce the dose or add pH control at the coagulation tank.`
+              : `Coagulant ${param === 'Al' ? 'aluminium' : 'iron'} hydroxide floc is carried into the effluent — reduce dose or improve settling/filtration.`;
         break;
       case 'MetalsTotal':
       case 'MetalsSoluble': {

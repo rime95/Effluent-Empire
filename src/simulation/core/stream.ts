@@ -26,7 +26,7 @@ export interface Stream {
   pH: number;
 
   // ---- acid-base totals (mol/L, eq/L) ----
-  /** net strong ions: Σ strong cations − Σ strong anions, eq/L (excludes H+, dissolved metals and SULFATE). Includes NH4+ (treated as strong cation, valid pH < 8.5). */
+  /** net strong ions: Σ strong cations − Σ strong anions, eq/L (excludes H+, dissolved metals (incl. coagulant Al/Fe) and SULFATE). Includes NH4+ (treated as strong cation, valid pH < 8.5). */
   Cb: number;
   /** total inorganic carbon C_T = [H2CO3*]+[HCO3-]+[CO3 2-], mol/L */
   CT: number;
@@ -44,8 +44,10 @@ export interface Stream {
   feSolid: number;
   /** hexavalent chromium (HCrO4− / CrO4 2−), mg/L as Cr — an anion: does not precipitate as hydroxide */
   CrVI: number;
-  /** dissolved aluminium (Al3+ / Al(OH)4−) left by Al coagulants outside their solubility window, mg/L as Al */
+  /** dissolved aluminium (Al3+, AlOH2+, Al(OH)4−) in equilibrium with Al(OH)3(am), mg/L as Al — set by equilibrate() */
   alDissolved: number;
+  /** dissolved ferric iron (Fe3+, FeOH2+, Fe(OH)2+, Fe(OH)4−) in equilibrium with Fe(OH)3(am), mg/L as Fe — set by equilibrate(); optional for old saves */
+  feDissolved?: number;
 
   // ---- organics, mg COD/L (ASM-style fractions) ----
   /** readily biodegradable soluble */
@@ -112,6 +114,7 @@ export function emptyStream(Q = 0): Stream {
     alSolid: 0,
     feSolid: 0,
     alDissolved: 0,
+    feDissolved: 0,
     CrVI: 0,
     SS: 0,
     SI: 0,
@@ -137,6 +140,7 @@ export function cloneStream(s: Stream): Stream {
     precipitated: { ...s.precipitated },
     v50: { ...s.v50 },
     ml: s.ml ? { ...s.ml } : undefined,
+    feDissolved: s.feDissolved ?? 0,
   };
 }
 
@@ -220,7 +224,7 @@ export function blend(streams: Stream[]): Stream {
     out.dissolved[m] = w((s) => s.dissolved[m]);
     out.precipitated[m] = w((s) => s.precipitated[m]);
   }
-  const scalarKeys = ['SO4T', 'alSolid', 'feSolid', 'alDissolved', 'CrVI', 'SS', 'SI', 'XS', 'XI', 'biomass', 'OGfree', 'OGemulsified', 'NH4N', 'NO3N', 'grit', 'inert', 'colloid', 'floc'] as const;
+  const scalarKeys = ['SO4T', 'alSolid', 'feSolid', 'alDissolved', 'feDissolved', 'CrVI', 'SS', 'SI', 'XS', 'XI', 'biomass', 'OGfree', 'OGemulsified', 'NH4N', 'NO3N', 'grit', 'inert', 'colloid', 'floc'] as const;
   for (const k of scalarKeys) out[k] = w((s) => s[k] ?? 0);
   // settling velocity: mass-weighted average per pool
   for (const p of POOLS) {

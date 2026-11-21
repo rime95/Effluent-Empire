@@ -4,7 +4,7 @@ import { hrtDays, kgPerDay, mgPerL, surfaceOverflowRate_mh, mgL_to_molL, molL_to
 import { emptyStream, cloneStream, METALS } from '../../src/simulation/core/stream';
 import { hazenRemoval, normalCdf, stokesVelocity_mh, waterViscosity } from '../../src/simulation/physical/settling';
 import { coagulate, destabilisation, COAGULANTS } from '../../src/simulation/chemistry/coagulation';
-import { alkalinity, setCbForPH } from '../../src/simulation/chemistry/acidBase';
+import { alkalinityFiltered as alkalinity, setCbForPH } from '../../src/simulation/chemistry/acidBase';
 import { activatedSludge, solveBiology } from '../../src/simulation/biological/activatedSludge';
 import { CATALOGUE, UnitType, defaultParams } from '../../src/simulation/treatment/catalogue';
 import { checkMassBalance, components, zeroComponents } from '../../src/simulation/core/massBalance';

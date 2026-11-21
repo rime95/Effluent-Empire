@@ -11,7 +11,8 @@
 import { Stream, blend, cloneStream, emptyStream, tss, METALS, MetalMap, poolMass } from '../core/stream';
 import { unaidedPrecipitateV50 } from '../chemistry/neutralisation';
 import { effectiveParams, hasInst } from '../treatment/instrumentation';
-import { equilibrate, aeratedH2CO3 } from '../chemistry/acidBase';
+import { equilibrate, aerationCarbonate } from '../chemistry/acidBase';
+import { AERATION, airForO2_mold, mixingAir_mold } from '../biological/aeration';
 import { vesilind_mh } from '../physical/settling';
 import { CATALOGUE, UnitType } from '../treatment/catalogue';
 import { ProcessGraph, simulate, PNode } from '../treatment/graph';
@@ -71,6 +72,8 @@ interface ASState {
   x: AS1State;
   integral: number;
   kLaMax: number;
+  /** aeration air at the design oxygen demand (kLa = kLaMax / 1.6), mol/d */
+  airDesign_mold?: number;
   clarifierArea: number;
   inert: Stream;
   /** dissolved metals in the mixed liquor (CSTR dilution of slugs), mg/L — drives inhibition */
@@ -147,6 +150,8 @@ export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; 
   const steps = Math.round(stepD / dt);
   let kLaSum = 0;
   let ourSum = 0;
+  let heteroGrowth = 0; // ρ1 + ρ2 (aerobic + anoxic heterotroph growth), g COD/m³·d, step mean
+  let nitGrowth = 0; // ρ3
   for (let i = 0; i < steps; i++) {
     const e = p.doSP - x.SO;
     // PI on kLa with conditional-integration anti-windup (BSM1: K = 25 d⁻¹ per g/m³, Ti = 0.002 d)
@@ -165,6 +170,8 @@ export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; 
     x = r.x;
     kLaSum += kLaNow;
     ourSum += r.rates.OUR;
+    heteroGrowth += (r.rates.rho1 + r.rates.rho2) / steps;
+    nitGrowth += r.rates.rho3 / steps;
   }
   const kLa = kLaSum / steps;
   const OUR = ourSum / steps;
@@ -189,7 +196,15 @@ export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; 
     out.precipitated[m] *= carry;
   }
   out.ml = undefined;
-  out = equilibrate(out, { kind: 'open', H2CO3: aeratedH2CO3(T) });
+  // CO2 balance (knowledge/chemistry/acid_base_chemistry.md). Respiration CO2 from heterotroph growth only — aerobic and
+  // anoxic, (1 − YH)/YH g COD oxidised per g COD grown, × RQ; nitrification releases none and nitrifier growth fixes
+  // 1 mol C per 32 g COD (C5H7NO2: 160 g COD / 5 mol C).
+  const co2P = (AERATION.RQ * ((1 - ASM1.YH) / ASM1.YH) * heteroGrowth * p.V) / 32 - (nitGrowth * p.V) / 32;
+  // air follows the blower output: design air × kLa/kLa_design, with the mixing floor only while the blower runs
+  const kLaDesign = st.kLaMax / 1.6;
+  const airO2 = ((st.airDesign_mold ?? 0) * kLa) / Math.max(kLaDesign, 1e-9);
+  const air = Math.max(airO2, mixingAir_mold(p.V, T) * Math.min(1, Math.max(0, p.blowerCap)));
+  out = equilibrate(out, aerationCarbonate({ Q_m3d: inlet.Q, CTin: inlet.CT, T, co2Produced_mold: co2P, air_mold: air }));
   return { st: { ...st, x, integral, inert: out, metals }, out, kLa, OUR, mlss: mlssOf(x), carry };
 }
 
@@ -220,6 +235,7 @@ function initialise(g: ProcessGraph, base: Stream) {
         x: { ...toASM(ns.inlet), XBH: 1500, XBA: 80, XP: 200, SO: doSP, SNH: 1, SNO: 5 },
         integral: 0,
         kLaMax,
+        airDesign_mold: airForO2_mold(o2 * 1000),
         clarifierArea: clar ? Number(clar.params.area) : 0,
         inert: cloneStream(ns.result.out),
         metals: { ...ns.inlet.dissolved },

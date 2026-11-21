@@ -48,8 +48,39 @@ verify: regression coefficients as commonly reproduced in Stumm & Morgan, *Aquat
 - **Buffer intensity** β = dCb/dpH (numerical).
 - **Raw wastewater initialisation:** Cb is back-calculated from charge balance using the measured pH.
 
-## Aerated basins (open system)
-Aeration strips CO₂: [H₂CO₃*] = s·K_H·p_CO₂, with p_CO₂ = 420 µatm and supersaturation s = 10. This is a GAME MODEL; aeration basins typically run 3–20× supersaturated. Without it, CO₂ from COD oxidation would accumulate and depress the pH unrealistically.
+## Aeration CO₂ balance (stripped mode, since 2026-11-21)
+Code: `acidBase.ts` `aerationCarbonate` (carbonate mode `stripped`), `biological/aeration.ts`. Used by the steady-state activated sludge and by the dynamic ASM1 reactor.
+
+The earlier fixed assumption is removed. It held [H₂CO₃*] at 10× air saturation whatever the load or air flow. A lightly loaded, poorly buffered basin was therefore too acidic: semiconductor rinse water neutralised to pH 7.5 came out at pH 6.4 with no nitrification at all. The reactor CO₂ is now a steady-state balance on the completely mixed tank:
+
+  Q·C_T,in + P_CO₂ + G·y_atm = Q·C_T,out + G·y_out
+  y_out·P = [H₂CO₃*]/K_H  (off-gas in equilibrium with the mixed liquor)
+  ⇒ [H₂CO₃*] = (Q·C_T,in + P_CO₂ + G·y_atm) / (Q·α(pH) + G/K_H),  α = 1 + K₁/[H⁺] + K₁K₂/[H⁺]²
+
+- **P_CO₂ (mol/d)** = RQ × heterotrophic O₂ uptake / 32, minus the CO₂ fixed by nitrifier growth (5 mol C per 113 g VSS).
+  - Nitrification itself releases no CO₂; its acid converts HCO₃⁻ to CO₂ inside C_T through the charge balance.
+  - The dynamic model (ASM1) uses RQ·(1 − Y_H)/Y_H·(ρ₁ + ρ₂)·V/32 for aerobic and anoxic heterotroph growth, minus ρ₃·V/32 (32 g COD per mol C of C₅H₇NO₂).
+  - Net production may be negative, for example ammonia condensate. Then only the total carbon supply is bounded at zero, so no carbon is created.
+- **G (mol air/d)** = max(O₂ transferred / (OTE · 0.2095 · 32), mixing air · V).
+  - In the dynamic replay, air follows the blower: design air × kLa/kLa_design.
+  - The mixing floor applies only while the blower runs, so a tripped blower strips nothing.
+- 🟡 verify, all GAME MODEL:
+  - RQ = 0.9 mol CO₂/mol O₂ (carbohydrate 1.0, protein ≈ 0.8, fat ≈ 0.7);
+  - field OTE = 0.10 (fine bubble at ≈ 4.5 m: SOTE 25–30 % × α 0.5 × driving force ≈ 0.7);
+  - mixing minimum 0.012 m³ air/(m³·min) for a full-floor fine-pore grid (≈ 10–15 m³/10³ m³·min, or ≈ 2.2 m³/m²·h of floor). The Metcalf & Eddy 20–30 m³/10³ m³·min figure is for coarse-bubble spiral roll;
+  - P = 1 atm, and full off-gas equilibration. Real off-gas reaches perhaps 50–90 % of equilibrium, so this slightly under-predicts the CO₂; deep tanks with high OTE run closer to equilibrium.
+- The residual is still monotonic in pH: the carbonate charge [H₂CO₃*](K₁/H + 2K₁K₂/H²) rises with pH. Bisection therefore still applies, and the reactor pH self-consistency loop is unchanged.
+- **Consequences**, now load- and flow-dependent as in practice:
+  - **O₂-limited basins:** air scales with the O₂ demand. The CO₂ to air ratio is therefore fixed at RQ·OTE·y_O₂ ≈ 1.9 % v/v, and dissolved CO₂ approaches K_H × 0.019 atm ≈ 25 mg/L at 30 °C, whatever the flow or tank size. A high-strength food basin runs pH 6.5–7 for this reason.
+  - The real design lever is OTE: deep tanks and high-efficiency diffusers give more CO₂ and a lower pH, while surface aerators or coarse bubble give less.
+  - Flow and tank size act only through the mixing floor, and through HRT/SRT effects on the biology.
+  - A lightly loaded basin runs on the mixing-air minimum, strips almost to air equilibrium (a few mg/L CO₂) and drifts up.
+  - Stripping does not change alkalinity; only nitrification, NH₄⁺ uptake, VFA oxidation and dosing do.
+- The tank inspector shows the air flow (and whether it is O₂- or mixing-limited), the dissolved CO₂ and the off-gas CO₂ % v/v.
+- Not yet modelled:
+  - RQ weighted by substrate class (acetate and carbohydrate 1.0, lipids ≈ 0.7);
+  - inorganic carbon as a mass-balance component (`Components` has no C, so the off-gas CO₂ flux is reported in calcs only).
+- Tests: `tests/simulation/aerationCO2.test.ts` covers air equilibrium, closed limit, carbon closure, air flow, the O₂-limited CO₂ ceiling, the mixing floor and negative net production. Reviewed 2026-11-21 by `biological-engineer`, whose findings are applied.
 
 ## Activated-sludge pH self-consistency
 Nitrification consumes alkalinity, and VFA oxidation generates it, so reactor pH and biological activity are coupled. The reactor pH is the root of g(pH*) = pH_computed(pH*) − pH*. A healthy and a "soured" root can coexist. A commissioned plant is seeded, so the **highest** root is taken (downward scan, then bisection). With low alkalinity this gives partial nitrification at pH ≈ 6, as real plants show.

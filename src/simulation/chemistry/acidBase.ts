@@ -7,18 +7,51 @@
  * Solved for pH by bisection (residual is monotonically decreasing in pH over 0–14).
  *
  * Modes:
- *   closed — C_T conserved (tanks, pipes, chemical reactors)
- *   open   — [H2CO3*] fixed (aerated basins strip CO2 towards a supersaturated equilibrium with air)
+ *   closed   — C_T conserved (tanks, pipes, chemical reactors)
+ *   open     — [H2CO3*] fixed (equilibrium with a known gas phase)
+ *   stripped — aerated reactor: steady-state CO2 balance between liquid in/out, CO2 produced and the aeration air
+ *              (see aerationCarbonate)
  */
 import { METALS, Metal, Stream, cloneStream } from '../core/stream';
 import { MW, eqL_to_mgCaCO3, mgL_to_molL, molL_to_mgL } from '../core/units';
 import { KH_CO2, PKA_HCRO4, PKA_HSO4, P_CO2_ATM, pK1, pK2, pKw } from './constants';
-import { meanCharge, solubilityMolL } from './solubility';
+import { coagDissolvedMgL, coagSolubility, meanCharge, solubilityMolL } from './solubility';
 
 export interface CarbonateMode {
-  kind: 'closed' | 'open';
+  kind: 'closed' | 'open' | 'stripped';
   /** open mode: fixed H2CO3* mol/L */
   H2CO3?: number;
+  /** stripped mode: inorganic carbon supplied, mol/d (liquid C_T in + CO2 produced + CO2 in the inlet air) */
+  carbonIn_mold?: number;
+  /** stripped mode: liquid flow, L/d */
+  liquid_Ld?: number;
+  /** stripped mode: air flow / K_H, L/d (off-gas in equilibrium with the liquid: y_CO2·P = [H2CO3*]/K_H) */
+  gas_Ld?: number;
+}
+
+/**
+ * Aeration-tank CO2 balance (steady state, completely mixed). Ref: knowledge/chemistry/acid_base_chemistry.md
+ *   Q·C_T,in + P_CO2 + G·y_atm = Q·C_T,out + G·y_out,  y_out·P = [H2CO3*]/K_H,  C_T,out = [H2CO3*]·α(pH)
+ *   ⇒ [H2CO3*] = (Q·C_T,in + P_CO2 + G·y_atm) / (Q·α(pH) + G/K_H),  α = 1 + K1/[H+] + K1K2/[H+]²
+ * GAME MODEL: off-gas leaves in equilibrium with the mixed liquor (deep diffused aeration; CO2 is ~30× more soluble
+ * than O2, so its bubbles approach equilibrium well before O2 does), P = 1 atm.
+ */
+export function aerationCarbonate(p: { Q_m3d: number; CTin: number; T: number; co2Produced_mold: number; air_mold: number }): CarbonateMode {
+  const kh = KH_CO2(p.T);
+  return {
+    kind: 'stripped',
+    // net production may be negative (nitrifier CO2 fixation); only the total supply is bounded at zero
+    carbonIn_mold: Math.max(0, p.Q_m3d * 1000 * p.CTin + p.co2Produced_mold + p.air_mold * P_CO2_ATM),
+    liquid_Ld: p.Q_m3d * 1000,
+    gas_Ld: p.air_mold / kh,
+  };
+}
+
+/** [H2CO3*] at pH in a stripped (aerated) reactor */
+function strippedH2CO3(H: number, c: { K1: number; K2: number }, mode: CarbonateMode): number {
+  const alpha = 1 + c.K1 / H + (c.K1 * c.K2) / (H * H);
+  const den = (mode.liquid_Ld ?? 0) * alpha + (mode.gas_Ld ?? 0);
+  return den > 0 ? (mode.carbonIn_mold ?? 0) / den : 0;
 }
 
 interface Consts {
@@ -46,8 +79,8 @@ function metalTotalsMol(s: Stream): Record<Metal, number> {
 
 /** Carbonate alkalinity contribution [HCO3−] + 2[CO3 2−], eq/L */
 function carbonateCharge(H: number, c: Consts, s: Stream, mode: CarbonateMode): number {
-  if (mode.kind === 'open') {
-    const h2co3 = mode.H2CO3 ?? 0;
+  if (mode.kind === 'open' || mode.kind === 'stripped') {
+    const h2co3 = mode.kind === 'open' ? (mode.H2CO3 ?? 0) : strippedH2CO3(H, c, mode);
     return (c.K1 * h2co3) / H + (2 * c.K1 * c.K2 * h2co3) / (H * H);
   }
   const D = H * H + c.K1 * H + c.K1 * c.K2;
@@ -75,6 +108,17 @@ export function requiredCb(s: Stream, pH: number, mode: CarbonateMode = { kind: 
     const diss = Math.min(totals[m], solubilityMolL(m, pH, s.T));
     metalCharge += diss * meanCharge(m, pH, s.T);
   }
+  // coagulant Al / Fe: dissolved share of the total in equilibrium with fresh M(OH)3(am)
+  const alT = mgL_to_molL(s.alSolid + s.alDissolved, MW.Al);
+  const feT = mgL_to_molL(s.feSolid + (s.feDissolved ?? 0), MW.Fe);
+  if (alT > 0) {
+    const a = coagSolubility('Al', pH);
+    metalCharge += Math.min(alT, a.molL) * a.zbar;
+  }
+  if (feT > 0) {
+    const f = coagSolubility('Fe', pH);
+    metalCharge += Math.min(feT, f.molL) * f.zbar;
+  }
   return OH + carbonateCharge(H, c, s, mode) + A + chromate + sulfate - H - metalCharge;
 }
 
@@ -93,14 +137,10 @@ export function solvePH(s: Stream, mode: CarbonateMode = { kind: 'closed' }): nu
   return (lo + hi) / 2;
 }
 
-/** H2CO3* in an aerated basin: `supersaturation` × equilibrium with atmospheric CO2. GAME MODEL default 10×. */
-export function aeratedH2CO3(T_C: number, supersaturation = 10): number {
-  return KH_CO2(T_C) * P_CO2_ATM * supersaturation;
-}
 
 /**
  * Re-equilibrate a stream: solve pH, partition metals between dissolved and precipitated
- * (precipitates re-dissolve if under-saturated), update C_T in open mode.
+ * (precipitates re-dissolve if under-saturated), update C_T in open / stripped mode.
  */
 export function equilibrate(s: Stream, mode: CarbonateMode = { kind: 'closed' }): Stream {
   const out = cloneStream(s);
@@ -112,10 +152,16 @@ export function equilibrate(s: Stream, mode: CarbonateMode = { kind: 'closed' })
     out.dissolved[m] = Math.min(total, sol);
     out.precipitated[m] = total - out.dissolved[m];
   }
-  if (mode.kind === 'open') {
+  const alT = s.alSolid + s.alDissolved;
+  out.alDissolved = coagDissolvedMgL('Al', alT, pH);
+  out.alSolid = alT - out.alDissolved;
+  const feT = s.feSolid + (s.feDissolved ?? 0);
+  out.feDissolved = coagDissolvedMgL('Fe', feT, pH);
+  out.feSolid = feT - out.feDissolved;
+  if (mode.kind === 'open' || mode.kind === 'stripped') {
     const c = consts(s);
     const H = Math.pow(10, -pH);
-    const h = mode.H2CO3 ?? 0;
+    const h = mode.kind === 'open' ? (mode.H2CO3 ?? 0) : strippedH2CO3(H, c, mode);
     out.CT = h * (1 + c.K1 / H + (c.K1 * c.K2) / (H * H));
   }
   return out;
@@ -126,9 +172,21 @@ export function baseDemand(s: Stream, targetPH: number): number {
   return requiredCb(s, targetPH) - s.Cb;
 }
 
-/** Total alkalinity: acid needed to titrate to pH 4.5, mg/L as CaCO3. */
+/** Total alkalinity: acid needed to titrate the whole sample (solids included, Standard Methods 2320 B) to pH 4.5, mg/L as CaCO3. */
 export function alkalinity(s: Stream): number {
   return Math.max(0, eqL_to_mgCaCO3(s.Cb - requiredCb(s, 4.5)));
+}
+
+/**
+ * Alkalinity of the solution phase only (filtered sample). Hydroxide solids are excluded: fresh Al(OH)3 / metal
+ * hydroxide floc would otherwise dissolve on paper at pH 4.5 and be counted. Removing neutral solids leaves Cb unchanged.
+ */
+export function alkalinityFiltered(s: Stream): number {
+  const f = cloneStream(s);
+  for (const m of METALS) f.precipitated[m] = 0;
+  f.alSolid = 0;
+  f.feSolid = 0;
+  return Math.max(0, eqL_to_mgCaCO3(f.Cb - requiredCb(f, 4.5)));
 }
 
 /** Acidity: base needed to titrate to pH 8.3, mg/L as CaCO3. */

@@ -5,8 +5,9 @@
  *   Al2(SO4)3·14H2O + 6HCO3− → 2Al(OH)3(s) + 3SO4²− + 6CO2 + 14H2O   → Cb −6 eq per mol alum
  *   FeCl3 + 3HCO3− → Fe(OH)3(s) + 3Cl− + 3CO2                          → Cb −3 eq per mol FeCl3
  *   PAC (Al basicity B): Cb −3(1−B) eq per mol Al
- * The CO2 formed stays in C_T (closed system); pH is then re-solved by charge balance.
- * Al and Fe are assumed to precipitate completely as hydroxide (valid near their solubility minima, pH ≈ 5.5–8).
+ * HCO3− → CO2 leaves C_T unchanged (closed system); pH is then re-solved by charge balance.
+ * The coagulant metal is partitioned between fresh M(OH)3(am) and dissolved species inside the charge balance
+ * (solubility.ts coagSolubility): an overdose beyond the alkalinity leaves Al/Fe dissolved instead of driving pH lower.
  *
  * Destabilisation efficiency E(x, pH) — GAME MODEL (semi-empirical, shape follows the classic four-zone
  * dose/colloid behaviour: under-dose, charge neutralisation, restabilisation, sweep floc):
@@ -16,10 +17,11 @@
  *   E = max(E_cn, E_sw) · f_pH
  */
 import { Stream, cloneStream, poolMass } from '../core/stream';
-import { MW, eqL_to_mgCaCO3, mgL_to_molL, molL_to_mgL } from '../core/units';
+import { MW, eqL_to_mgCaCO3, mgL_to_molL } from '../core/units';
 import { Note, ProcessResult, result } from '../treatment/types';
-import { adjustPH, equilibrate, solvePH } from './acidBase';
+import { adjustPH, equilibrate } from './acidBase';
 import { REAGENTS } from './neutralisation';
+import { coagSolubility } from './solubility';
 
 export type Coagulant = 'alum' | 'ferric' | 'pac';
 
@@ -122,57 +124,26 @@ export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
   let trimSO4 = 0;
   const chemicals = [{ name: spec.label, kgPerDay: (s.Q * p.dose_mgL) / 1000, priceRMkg: spec.priceRMkg }];
   if ((p.polymer_mgL ?? 0) > 0) chemicals.push({ name: POLYMER.label, kgPerDay: (s.Q * (p.polymer_mgL ?? 0)) / 1000, priceRMkg: POLYMER.priceRMkg });
-  // Al(OH)3(am) solubility (verify: log*Ks0 = 10.8; Al(OH)4− formation log*K = −12.1 relative to the solid; MWH Ch. 9 /
-  // Stumm & Morgan Fig. 6.6). Dissolved Al3+ adds +3 eq and aluminate −1 eq relative to the neutral solid (Cb bookkeeping).
-  // Solved properly (chemistry review 2026-11-22): the pH and the dissolved Al are found together by bisection on pH,
-  // instead of an undamped fixed-point loop that oscillated and stopped short of equilibrium.
-  const alAt = (pH: number) => {
-    const al3 = Math.pow(10, 10.8 - 3 * pH);
-    const alO4 = Math.pow(10, -12.1 + pH);
-    return { solMgL: molL_to_mgL(al3 + alO4, MW.Al), zbar: (3 * al3 - alO4) / (al3 + alO4) };
-  };
-  let ref = out; // reference state: all Al as neutral solid
-  if (p.coagulant !== 'ferric' && out.alDissolved > 0) {
-    ref = cloneStream(out);
-    ref.Cb -= mgL_to_molL(out.alDissolved, MW.Al) * alAt(out.pH).zbar;
-    ref.alSolid += out.alDissolved;
-    ref.alDissolved = 0;
-  }
-  const withAl = (pH: number): Stream => {
-    if (p.coagulant === 'ferric') return ref;
-    const total = ref.alSolid + ref.alDissolved;
-    const { solMgL, zbar } = alAt(pH);
-    const d = Math.min(total, solMgL);
-    const t = cloneStream(ref);
-    t.alDissolved = d;
-    t.alSolid = total - d;
-    t.Cb += mgL_to_molL(d, MW.Al) * zbar;
-    return t;
-  };
+  // Al / Fe left dissolved: equilibrate() partitions the coagulant metal against fresh M(OH)3(am) inside the charge
+  // balance (solubility.ts coagSolubility), so the pH, the dissolved Al/Fe and the alkalinity they release or consume
+  // are solved together — and re-solved by every later unit that changes the pH.
   if (p.pHset && p.pHset > 0) {
-    // pH controller holds the set-point: Al speciation at the set-point is known, so one exact dose (net, single reagent)
-    const adj = adjustPH(withAl(p.pHset), p.pHset, 'NaOH');
+    // pH controller holds the set-point: one exact net dose of a single reagent
+    const adj = adjustPH(out, p.pHset, 'NaOH');
     out = equilibrate(adj.stream);
     const r = REAGENTS[adj.reagent];
     if (adj.reagent === 'H2SO4') trimSO4 += adj.mol;
     if (adj.mol > 0) chemicals.push({ name: r.label, kgPerDay: (s.Q * adj.mol * r.mw * 1000) / 1000, priceRMkg: r.priceRMkg });
-  } else if (p.coagulant !== 'ferric') {
-    // g(x) = pH solved with Al speciated at x, minus x: decreasing in x (more aluminate consumes base) → bisection
-    let lo = 1;
-    let hi = 13;
-    for (let i = 0; i < 50; i++) {
-      const mid = (lo + hi) / 2;
-      if (solvePH(withAl(mid)) > mid) lo = mid;
-      else hi = mid;
-    }
-    out = equilibrate(withAl((lo + hi) / 2));
   }
   if (p.coagulant !== 'ferric' && out.alDissolved > 0.5)
     notes.push({ level: 'warn', code: 'coag.aluminate', text: `${out.alDissolved.toFixed(1)} mg/L Al stays dissolved at pH ${out.pH.toFixed(2)} — aluminium hydroxide is soluble outside pH ≈ 5.5–8.` });
 
   const fpH = pHFactor(out.pH, p.coagulant);
-  const alTot = out.alSolid + out.alDissolved;
-  const solidFrac = p.coagulant === 'ferric' || alTot <= 0 ? 1 : out.alSolid / alTot; // dissolved Al (aluminate) forms no floc
+  if (p.coagulant === 'ferric' && (out.feDissolved ?? 0) > 0.5)
+    notes.push({ level: 'warn', code: 'coag.ferricDissolved', text: `${(out.feDissolved ?? 0).toFixed(1)} mg/L Fe stays dissolved at pH ${out.pH.toFixed(2)} — the dose exceeded the alkalinity and ferric hydroxide dissolves below pH ≈ 3.` });
+  const solidFrac = p.coagulant === 'ferric'
+    ? out.feSolid + (out.feDissolved ?? 0) > 0 ? out.feSolid / (out.feSolid + (out.feDissolved ?? 0)) : 1
+    : out.alSolid + out.alDissolved > 0 ? out.alSolid / (out.alSolid + out.alDissolved) : 1; // dissolved coagulant metal forms no floc
   const E = destabilisation(x * solidFrac, fpH);
   // floc growth with flocculation time (GAME MODEL: first-order approach, τ = 8 min)
   const growth = 1 - Math.exp(-p.flocTime_min / 8);
@@ -195,7 +166,11 @@ export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
   out.OGemulsified -= broken;
   out.OGfree += broken;
 
-  const alkUsed = eqL_to_mgCaCO3(molMetal * spec.baseEqPerMetal);
+  // alkalinity actually consumed: stoichiometric, less what the metal still dissolved did not use (relative to the
+  // neutral solid: Al3+ +3, aluminate −1 …) — an overdose cannot consume more alkalinity than the water has
+  const alDissZ = out.alDissolved > 0 ? mgL_to_molL(out.alDissolved, MW.Al) * coagSolubility('Al', out.pH).zbar : 0;
+  const feDissZ = (out.feDissolved ?? 0) > 0 ? mgL_to_molL(out.feDissolved ?? 0, MW.Fe) * coagSolubility('Fe', out.pH).zbar : 0;
+  const alkUsed = eqL_to_mgCaCO3(molMetal * spec.baseEqPerMetal - alDissZ - feDissZ);
   if (x < 0.6) notes.push({ level: 'warn', code: 'coag.underdose', text: `Under-dosed: ${p.dose_mgL.toFixed(0)} mg/L is ${(x * 100).toFixed(0)} % of the estimated optimum — colloids stay stable.` });
   else if (x > 1.6 && x < 3) notes.push({ level: 'warn', code: 'coag.restabilise', text: `Over-dosed into the restabilisation zone (${x.toFixed(1)}× optimum): particle charge reversed.` });
   else if (x >= 3) notes.push({ level: 'info', code: 'coag.sweep', text: `Sweep-floc regime (${x.toFixed(1)}× optimum): good removal but high sludge and chemical cost.` });

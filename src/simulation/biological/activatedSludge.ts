@@ -13,8 +13,10 @@
  */
 import { METALS, Metal, Stream, cloneStream, emptyStream, poolMass } from '../core/stream';
 import { COD_PER_VSS, MW, N_PER_VSS, hrtDays, tempCorrect } from '../core/units';
-import { aeratedH2CO3, equilibrate } from '../chemistry/acidBase';
+import { aerationCarbonate, equilibrate } from '../chemistry/acidBase';
+import { airFlow_mold, co2Produced_mold, gasMolPerM3 } from './aeration';
 import { Note, ProcessResult, result } from '../treatment/types';
+import { KH_CO2, pK1, pK2 } from '../chemistry/constants';
 
 /** Kinetic coefficients at 20 °C — Metcalf & Eddy 5th ed. Table 8-14 (single edition; verify). */
 export const KINETICS = {
@@ -173,8 +175,13 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
     out.OGfree = s.OGfree * (1 - ogFrac);
     out.OGemulsified = s.OGemulsified * (1 - ogFrac);
 
-    out = equilibrate(out, { kind: 'open', H2CO3: aeratedH2CO3(s.T) });
-    return { out, bio, inhib, inhibN, ogFrac, ogDeg, S0, g: out.pH - reactorPH };
+    // CO2: respiration produces it, the aeration air strips it (steady-state balance, aeration.ts / acidBase.ts)
+    const heteroO2 = bio.washout ? 0 : S0 - bio.S - COD_PER_VSS * (bio.PxH + bio.Pxd); // g/m³
+    const o2T = heteroO2 + 4.57 * bio.NOx - COD_PER_VSS * bio.PxN;
+    const air = airFlow_mold(o2T * s.Q, p.volume_m3, s.T);
+    const co2P = co2Produced_mold(heteroO2 * s.Q, bio.PxN * s.Q);
+    out = equilibrate(out, aerationCarbonate({ Q_m3d: s.Q, CTin: s.CT, T: s.T, co2Produced_mold: co2P, air_mold: air.air_mold }));
+    return { out, bio, inhib, inhibN, ogFrac, ogDeg, S0, air, co2P, g: out.pH - reactorPH };
   };
   let hi = 10;
   let lo = 10;
@@ -196,7 +203,7 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
     }
   }
   const state = atPH((lo + hi) / 2);
-  const { bio, inhib, inhibN, ogFrac, ogDeg, S0 } = state;
+  const { bio, inhib, inhibN, ogFrac, ogDeg, S0, air } = state;
   const out = state.out;
   if (!rootFound) notes.push({ level: 'warn', code: 'as.pHroot', text: `Reactor pH could not be resolved self-consistently (≈ ${out.pH.toFixed(1)}): extreme alkalinity or acidity in the feed.` });
 
@@ -245,6 +252,9 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
       sludge: { label: 'Net solids production', value: kg(solidsNet), unit: 'kg/d', digits: 0 },
       nitrified: { label: 'NH₄-N nitrified', value: bio.NOx, unit: 'mg/L', digits: 1 },
       pH: { label: 'Reactor pH', value: out.pH, unit: '', digits: 2 },
+      air: { label: air.mixingLimited ? 'Air flow (mixing minimum)' : 'Air flow (O₂ demand)', value: air.air_mold / gasMolPerM3(s.T) / 1440, unit: 'm³/min', digits: 1 },
+      offgas: { label: 'Off-gas CO₂', value: (100 * (out.CT / (1 + Math.pow(10, out.pH - pK1(s.T)) + Math.pow(10, 2 * out.pH - pK1(s.T) - pK2(s.T))))) / KH_CO2(s.T), unit: '% v/v', digits: 2 },
+      co2: { label: 'Dissolved CO₂', value: (out.CT / (1 + Math.pow(10, out.pH - pK1(s.T)) + Math.pow(10, 2 * out.pH - pK1(s.T) - pK2(s.T)))) * 44010, unit: 'mg/L', digits: 1 },
       inhib: { label: 'Heterotroph activity', value: inhib * 100, unit: '%', digits: 0 },
       inhibN: { label: 'Nitrifier activity', value: inhibN * 100, unit: '%', digits: 0 },
     },

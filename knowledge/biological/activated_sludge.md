@@ -27,7 +27,7 @@ Here μ = μ_max·I·DO/(K_O + DO), where I is the product of the inhibition fac
   - NH₄⁺ uptake: Cb −1 eq/mol N.
   - Nitrification NH₄⁺ → NO₃⁻: Cb −2 eq/mol N, equivalent to 7.14 mg CaCO₃/mg N.
   - VFA oxidation removes A⁻, which raises pH.
-  - Aeration fixes [H₂CO₃*] at 10× air saturation (`acid_base_chemistry.md`).
+  - CO₂: a steady-state balance of respiration CO₂ (RQ 0.9) against stripping by the aeration air (O₂ demand or mixing minimum). There is no fixed supersaturation (`acid_base_chemistry.md` "Aeration CO₂ balance"). An O₂-limited basin approaches ≈ 25 mg/L CO₂ (set by OTE); a lightly loaded, mixing-limited basin strips towards air equilibrium.
 - **pH self-consistency:** the highest self-consistent reactor pH is taken (seeded, healthy reactor).
 - **Bioflocculation:** colloids are enmeshed into floc (v₅₀ 3 m/h).
 - **O&G** sorbs onto floc with partition fraction K·X/(1 + K·X), K = 3 L/g (GAME MODEL, no direct source; tuned so a well-run plant reaches < 10 mg/L from about 100 mg/L).
