@@ -1,20 +1,38 @@
-import { useCallback, useMemo, useState, type DragEvent } from 'react';
-import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow, type Connection, type Edge, type EdgeChange, type Node, type NodeChange, applyNodeChanges } from '@xyflow/react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import {
+  Background,
+  BackgroundVariant,
+  Controls,
+  MiniMap,
+  ReactFlow,
+  ReactFlowProvider,
+  useReactFlow,
+  type Connection,
+  type Edge,
+  type EdgeChange,
+  MarkerType,
+  type Node,
+  type NodeChange,
+} from '@xyflow/react';
 import { useActiveProject, useGame } from '../../game/store';
 import { designBasis } from '../../game/lab';
 import { constructionWeeks, makeNode, RETROFIT_PREMIUM } from '../../game/project';
 import { CATALOGUE, UnitType } from '../../simulation/treatment/catalogue';
-import { PNode, ProcessGraph, simulate } from '../../simulation/treatment/graph';
+import { PNode, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
 import { evaluate, measure, STANDARDS } from '../../simulation/treatment/compliance';
 import { Stream } from '../../simulation/core/stream';
 import { UnitSymbol } from '../components/Symbols';
-import { CATEGORY_COLOR, nodeTypes } from './nodes';
+import { CATEGORY_COLOR, nodeTypes, type UnitNodeData } from './nodes';
+import { NumberField } from './NumberField';
+import { useHistory } from './useHistory';
+import { useSimulation } from './useSimulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
 
 const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'coagulation', 'activatedSludge'];
-
-type Selection = { kind: 'node'; id: string } | { kind: 'edge'; id: string } | null;
+const GRID = 20;
+const isTerminal = (n: PNode) => n.kind === 'influent' || n.kind === 'discharge';
+const newEdgeId = () => `p-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
 
 export function Studio(props: { go: (s: Screen) => void }) {
   return (
@@ -24,120 +42,256 @@ export function Studio(props: { go: (s: Screen) => void }) {
   );
 }
 
-/** Graph identity ignoring canvas positions — simulation only reruns when the process changes. */
-function processKey(g: ProcessGraph) {
-  return JSON.stringify({ n: g.nodes.map((n) => [n.id, n.kind, n.params]), e: g.edges.map((e) => [e.from, e.to]) });
+function defaultPos(n: PNode, i: number) {
+  return n.position ?? (n.kind === 'influent' ? { x: 0, y: 160 } : n.kind === 'discharge' ? { x: 1100, y: 160 } : { x: 160 + i * 150, y: 140 });
 }
 
 function StudioInner({ go }: { go: (s: Screen) => void }) {
-  const g = useGame();
   const p = useActiveProject();
+  const storeSetGraph = useGame((s) => s.setGraph);
+  const startConstruction = useGame((s) => s.startConstruction);
+  const week = useGame((s) => s.week);
+  const cash = useGame((s) => s.cash);
+  const companyName = useGame((s) => s.companyName);
   const rf = useReactFlow();
-  const [sel, setSel] = useState<Selection>(null);
-  const [dragNodes, setDragNodes] = useState<Node[] | null>(null);
 
-  const graph = p?.graph;
   const editable = !!p && (p.status === 'design' || p.status === 'failed');
+  const hist = useHistory<ProcessGraph>(p?.graph ?? { nodes: [], edges: [] });
+  const draft = hist.state;
+  const setDraft = hist.set;
+
+  // a different project (or a project leaving/entering design) → reload the draft from the store
+  const loadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const id = p ? `${p.id}:${p.status}:${p.attempts}` : null;
+    if (id !== loadedFor.current) {
+      loadedFor.current = id;
+      if (p) hist.reset(p.graph);
+    }
+  }, [p, hist.reset]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // commit the draft to the store, debounced (the store write triggers autosave + app re-render)
+  const pending = useRef<ProcessGraph | null>(null);
+  const flush = useCallback(() => {
+    if (pending.current) {
+      storeSetGraph(pending.current);
+      pending.current = null;
+    }
+  }, [storeSetGraph]);
+  useEffect(() => {
+    if (!p || !editable || draft === p.graph) return;
+    pending.current = draft;
+    const t = setTimeout(flush, 400);
+    return () => clearTimeout(t);
+  }, [draft, p, editable, flush]);
+  useEffect(() => () => flush(), [flush]);
+
   const basis = useMemo(() => (p ? designBasis(p.datasheet) : null), [p?.datasheet]); // eslint-disable-line react-hooks/exhaustive-deps
-  const key = graph ? processKey(graph) : '';
-  const sim = useMemo(() => (graph && basis ? simulate(graph, basis.stream) : null), [key, basis]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { sim, busy } = useSimulation(p ? draft : null, basis?.stream ?? null);
   const report = useMemo(() => (sim?.effluent && p ? evaluate(sim.effluent, p.enquiry.standard, sim) : null), [sim, p?.enquiry.standard]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const setGraph = useCallback((ng: ProcessGraph) => g.setGraph(ng), [g]);
+  // ---------- selection & live drag positions (local; positions are written to the draft on drag stop)
+  const [selNodes, setSelNodes] = useState<Set<string>>(new Set());
+  const [selEdges, setSelEdges] = useState<Set<string>>(new Set());
+  const [dragPos, setDragPos] = useState<Record<string, { x: number; y: number }>>({});
+  const [snap, setSnap] = useState(true);
+  const [menu, setMenu] = useState<{ x: number; y: number; id: string } | null>(null);
 
+  // stable per-node objects: only nodes whose data / position / selection changed get a new object
+  const cache = useRef(new Map<string, Node>());
   const rfNodes: Node[] = useMemo(() => {
-    if (!graph) return [];
-    return graph.nodes.map((n, i) => {
-      const pos = n.position ?? (n.kind === 'influent' ? { x: 0, y: 160 } : n.kind === 'discharge' ? { x: 1100, y: 160 } : { x: 160 + i * 150, y: 140 });
-      if (n.kind === 'influent' || n.kind === 'discharge') {
-        return {
-          id: n.id,
-          type: 'terminal',
-          position: pos,
-          deletable: false,
-          selected: sel?.kind === 'node' && sel.id === n.id,
-          data: { kind: n.kind, label: n.kind === 'influent' ? 'RAW WASTEWATER' : 'FINAL DISCHARGE', sub: n.kind === 'influent' ? `${p!.datasheet.Q} m³/d` : `Standard ${p!.enquiry.standard}` },
-        };
+    if (!p) return [];
+    const next = new Map<string, Node>();
+    const out = draft.nodes.map((n, i) => {
+      const position = dragPos[n.id] ?? defaultPos(n, i);
+      const selected = selNodes.has(n.id);
+      let type: string;
+      let data: Record<string, unknown>;
+      if (isTerminal(n)) {
+        type = 'terminal';
+        data = { kind: n.kind, label: n.kind === 'influent' ? 'RAW WASTEWATER' : 'FINAL DISCHARGE', sub: n.kind === 'influent' ? `${p.datasheet.Q} m³/d` : `Standard ${p.enquiry.standard}` };
+      } else {
+        const ns = sim?.nodes[n.id];
+        const notes = ns?.result.notes ?? [];
+        const status: UnitNodeData['status'] = !ns ? 'idle' : notes.some((x) => x.level === 'error') ? 'error' : notes.some((x) => x.level === 'warn') ? 'warn' : 'ok';
+        const c = ns?.result.calcs;
+        const summary = c?.sor ? `SOR ${fmt(c.sor.value, 2)} m/h` : c?.pH && n.kind !== 'activatedSludge' ? `pH ${fmt(c.pH.value, 1)}` : c?.mlss ? `MLSS ${fmt(c.mlss.value, 0)}` : c?.rate ? `${fmt(c.rate.value, 1)} m/h` : c?.hrt ? `HRT ${fmt(c.hrt.value, 1)} h` : undefined;
+        type = 'unit';
+        data = { kind: n.kind, tag: n.tag ?? n.kind, status, summary };
       }
-      const ns = sim?.nodes[n.id];
-      const notes = ns?.result.notes ?? [];
-      const status = !ns ? 'idle' : notes.some((x) => x.level === 'error') ? 'error' : notes.some((x) => x.level === 'warn') ? 'warn' : 'ok';
-      const c = ns?.result.calcs;
-      const summary = c?.sor ? `SOR ${fmt(c.sor.value, 2)} m/h` : c?.pH && n.kind !== 'activatedSludge' ? `pH ${fmt(c.pH.value, 1)}` : c?.mlss ? `MLSS ${fmt(c.mlss.value, 0)}` : c?.rate ? `${fmt(c.rate.value, 1)} m/h` : c?.hrt ? `HRT ${fmt(c.hrt.value, 1)} h` : undefined;
-      return { id: n.id, type: 'unit', position: pos, selected: sel?.kind === 'node' && sel.id === n.id, data: { kind: n.kind, tag: n.tag ?? n.kind, status, summary }, deletable: editable };
+      const prev = cache.current.get(n.id);
+      const sameData = prev && JSON.stringify(prev.data) === JSON.stringify(data);
+      const node: Node =
+        prev && sameData && prev.selected === selected && prev.position.x === position.x && prev.position.y === position.y && prev.deletable === (editable && !isTerminal(n))
+          ? prev
+          : { id: n.id, type, position, selected, data: sameData ? prev!.data : data, deletable: editable && !isTerminal(n) };
+      next.set(n.id, node);
+      return node;
     });
-  }, [graph, sim, sel, editable, p]);
+    cache.current = next;
+    return out;
+  }, [draft, sim, selNodes, dragPos, editable, p]);
 
   const rfEdges: Edge[] = useMemo(
     () =>
-      (graph?.edges ?? []).map((e) => ({
+      draft.edges.map((e) => ({
         id: e.id,
         source: e.from,
         target: e.to,
-        animated: true,
-        selected: sel?.kind === 'edge' && sel.id === e.id,
+        selected: selEdges.has(e.id),
         deletable: editable,
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#00a9c8', width: 16, height: 16 },
         label: sim?.edges[e.id] ? `${fmt(sim.edges[e.id].Q, 0)} m³/d` : undefined,
         labelStyle: { fontFamily: 'var(--mono)', fontSize: 10, fill: '#1a2633' },
         labelBgStyle: { fill: '#eef1f4' },
       })),
-    [graph, sim, sel, editable],
+    [draft.edges, sim, selEdges, editable],
+  );
+
+  // ---------- change handlers
+  const removeNodes = useCallback(
+    (ids: string[]) => {
+      if (!editable || !ids.length) return;
+      setDraft((g) => ({ nodes: g.nodes.filter((n) => !ids.includes(n.id) || isTerminal(n)), edges: g.edges.filter((e) => !ids.includes(e.from) && !ids.includes(e.to)) }));
+      setSelNodes(new Set());
+    },
+    [editable, setDraft],
   );
 
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      if (!graph) return;
-      const moving = changes.some((c) => c.type === 'position' && c.dragging);
-      const base = dragNodes ?? rfNodes;
-      const next = applyNodeChanges(changes, base);
-      if (moving) {
-        setDragNodes(next);
-        return;
+      let sel: Set<string> | null = null;
+      const live: Record<string, { x: number; y: number }> = {};
+      const done: Record<string, { x: number; y: number }> = {};
+      const removed: string[] = [];
+      for (const c of changes) {
+        if (c.type === 'select') {
+          sel = sel ?? new Set(selNodes);
+          if (c.selected) sel.add(c.id);
+          else sel.delete(c.id);
+        } else if (c.type === 'position' && c.position) {
+          if (c.dragging) live[c.id] = c.position;
+          else done[c.id] = c.position;
+        } else if (c.type === 'position' && c.dragging === false) {
+          const cur = dragPos[c.id];
+          if (cur) done[c.id] = cur;
+        } else if (c.type === 'remove') removed.push(c.id);
       }
-      setDragNodes(null);
-      const posChanged = changes.some((c) => c.type === 'position' && !c.dragging);
-      const removed = changes.filter((c) => c.type === 'remove').map((c) => (c as { id: string }).id);
-      if (posChanged || removed.length) {
-        const pos = new Map(next.map((n) => [n.id, n.position]));
-        setGraph({
-          nodes: graph.nodes.filter((n) => !removed.includes(n.id)).map((n) => ({ ...n, position: pos.get(n.id) ?? n.position })),
-          edges: graph.edges.filter((e) => !removed.includes(e.from) && !removed.includes(e.to)),
+      if (sel) setSelNodes(sel);
+      if (Object.keys(live).length) setDragPos((d) => ({ ...d, ...live }));
+      if (Object.keys(done).length) {
+        setDraft((g) => ({ ...g, nodes: g.nodes.map((n) => (done[n.id] ? { ...n, position: done[n.id] } : n)) }), `move:${Object.keys(done).sort().join(',')}`);
+        setDragPos((d) => {
+          const n = { ...d };
+          for (const id of Object.keys(done)) delete n[id];
+          return n;
         });
-        if (sel?.kind === 'node' && removed.includes(sel.id)) setSel(null);
       }
+      if (removed.length) removeNodes(removed);
     },
-    [graph, rfNodes, dragNodes, setGraph, sel],
+    [selNodes, dragPos, setDraft, removeNodes],
   );
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
-      if (!graph) return;
-      const removed = changes.filter((c) => c.type === 'remove').map((c) => (c as { id: string }).id);
-      if (removed.length) setGraph({ ...graph, edges: graph.edges.filter((e) => !removed.includes(e.id)) });
+      let sel: Set<string> | null = null;
+      const removed: string[] = [];
+      for (const c of changes) {
+        if (c.type === 'select') {
+          sel = sel ?? new Set(selEdges);
+          if (c.selected) sel.add(c.id);
+          else sel.delete(c.id);
+        } else if (c.type === 'remove') removed.push(c.id);
+      }
+      if (sel) setSelEdges(sel);
+      if (removed.length && editable) {
+        setDraft((g) => ({ ...g, edges: g.edges.filter((e) => !removed.includes(e.id)) }));
+        setSelEdges(new Set());
+      }
     },
-    [graph, setGraph],
+    [selEdges, editable, setDraft],
   );
 
   const onConnect = useCallback(
     (c: Connection) => {
-      if (!graph || !editable || !c.source || !c.target || c.source === c.target) return;
-      if (graph.edges.some((e) => e.from === c.source && e.to === c.target)) return;
-      setGraph({ ...graph, edges: [...graph.edges, { id: `p-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e5)}`, from: c.source, to: c.target }] });
+      if (!editable || !c.source || !c.target || c.source === c.target) return;
+      setDraft((g) => (g.edges.some((e) => e.from === c.source && e.to === c.target) ? g : { ...g, edges: [...g.edges, { id: newEdgeId(), from: c.source!, to: c.target! }] }));
     },
-    [graph, setGraph, editable],
+    [editable, setDraft],
   );
 
   const addUnit = useCallback(
     (kind: UnitType, position?: { x: number; y: number }) => {
-      if (!graph || !p || !editable) return;
-      const node = makeNode(kind, p.datasheet.Q, graph.nodes);
-      const units = graph.nodes.filter((n) => n.kind !== 'influent' && n.kind !== 'discharge').length;
-      node.position = position ?? { x: 170 + units * 145, y: 120 + (units % 2) * 70 };
-      setGraph({ ...graph, nodes: [...graph.nodes, node] });
-      setSel({ kind: 'node', id: node.id });
+      if (!p || !editable) return;
+      const node = makeNode(kind, p.datasheet.Q, draft.nodes);
+      const units = draft.nodes.filter((n) => !isTerminal(n)).length;
+      const pos = position ?? { x: 170 + units * 145, y: 120 + (units % 2) * 70 };
+      node.position = snap ? { x: Math.round(pos.x / GRID) * GRID, y: Math.round(pos.y / GRID) * GRID } : pos;
+      setDraft((g) => ({ ...g, nodes: [...g.nodes, node] }));
+      setSelNodes(new Set([node.id]));
+      setSelEdges(new Set());
     },
-    [graph, p, editable, setGraph],
+    [p, editable, draft.nodes, snap, setDraft],
   );
+
+  // ---------- clipboard (copy / paste / duplicate)
+  const clip = useRef<ProcessGraph | null>(null);
+  const copySel = useCallback(() => {
+    const ids = new Set([...selNodes].filter((id) => draft.nodes.some((n) => n.id === id && !isTerminal(n))));
+    if (!ids.size) return false;
+    clip.current = { nodes: draft.nodes.filter((n) => ids.has(n.id)), edges: draft.edges.filter((e) => ids.has(e.from) && ids.has(e.to)) };
+    return true;
+  }, [selNodes, draft]);
+  const paste = useCallback(() => {
+    if (!clip.current || !p || !editable) return;
+    const src = clip.current;
+    setDraft((g) => {
+      const map = new Map<string, string>();
+      const nodes = [...g.nodes];
+      for (const n of src.nodes) {
+        const fresh = makeNode(n.kind, p.datasheet.Q, nodes);
+        const pos = n.position ?? { x: 200, y: 200 };
+        const added: PNode = { ...fresh, params: { ...n.params }, position: { x: pos.x + 40, y: pos.y + 40 } };
+        map.set(n.id, added.id);
+        nodes.push(added);
+      }
+      const edges = [...g.edges, ...src.edges.map((e) => ({ id: newEdgeId(), from: map.get(e.from)!, to: map.get(e.to)! }))];
+      setSelNodes(new Set(map.values()));
+      clip.current = { nodes: src.nodes.map((n) => ({ ...n, position: n.position ? { x: n.position.x + 40, y: n.position.y + 40 } : n.position })), edges: src.edges };
+      return { nodes, edges };
+    });
+  }, [p, editable, setDraft]);
+
+  // ---------- keyboard shortcuts (ignored while typing in a field)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        if (editable) hist.undo();
+      } else if ((k === 'z' && e.shiftKey) || k === 'y') {
+        e.preventDefault();
+        if (editable) hist.redo();
+      } else if (k === 'c') {
+        copySel();
+      } else if (k === 'v') {
+        e.preventDefault();
+        paste();
+      } else if (k === 'd') {
+        e.preventDefault();
+        if (copySel()) paste();
+      } else if (k === 'a') {
+        e.preventDefault();
+        setSelNodes(new Set(draft.nodes.filter((n) => !isTerminal(n)).map((n) => n.id)));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editable, hist.undo, hist.redo, copySel, paste, draft.nodes]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
@@ -147,16 +301,25 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
   };
 
   const autoConnect = () => {
-    if (!graph) return;
-    const units = graph.nodes.filter((n) => n.kind !== 'influent' && n.kind !== 'discharge').sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0));
-    const chain = [graph.nodes.find((n) => n.kind === 'influent')!, ...units, graph.nodes.find((n) => n.kind === 'discharge')!];
-    setGraph({ ...graph, edges: chain.slice(0, -1).map((n, i) => ({ id: `p-auto-${i}-${Date.now().toString(36)}`, from: n.id, to: chain[i + 1].id })) });
+    setDraft((g) => {
+      const units = g.nodes.filter((n) => !isTerminal(n)).sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0));
+      const chain = [g.nodes.find((n) => n.kind === 'influent')!, ...units, g.nodes.find((n) => n.kind === 'discharge')!];
+      return { ...g, edges: chain.slice(0, -1).map((n, i) => ({ id: `p-auto-${i}-${Date.now().toString(36)}`, from: n.id, to: chain[i + 1].id })) };
+    });
   };
 
-  if (!p || !graph || !basis) return <div className="page">No active project.</div>;
+  const updateParams = useCallback(
+    (id: string, key: string, value: number | string) => {
+      setDraft((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === id ? { ...n, params: { ...n.params, [key]: value } } : n)) }), `param:${id}:${key}`);
+    },
+    [setDraft],
+  );
 
-  const selectedNode = sel?.kind === 'node' ? graph.nodes.find((n) => n.id === sel.id) : undefined;
-  const selectedEdgeStream = sel?.kind === 'edge' ? sim?.edges[sel.id] : undefined;
+  if (!p || !basis) return <div className="page">No active project.</div>;
+
+  const single = selNodes.size === 1 ? draft.nodes.find((n) => selNodes.has(n.id)) : undefined;
+  const singleEdge = selNodes.size === 0 && selEdges.size === 1 ? [...selEdges][0] : undefined;
+  const selectedEdgeStream = singleEdge ? sim?.edges[singleEdge] : undefined;
   const weeks = constructionWeeks(p);
   const capexToCharge = (() => {
     if (!sim) return 0;
@@ -169,10 +332,14 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
   const doCommission = () => {
     if (!sim?.ok) return;
-    const ok = confirm(`${p.built ? 'Retrofit' : 'Build'} and commission?\n\nConstruction: ${rm(capexToCharge)} paid now · ${weeks} weeks\nCommissioning in week ${g.week + weeks}, tested on the REAL wastewater, not your design basis.`);
+    flush();
+    if (draft !== p.graph) storeSetGraph(draft);
+    const ok = confirm(`${p.built ? 'Retrofit' : 'Build'} and commission?\n\nConstruction: ${rm(capexToCharge)} paid now · ${weeks} weeks\nCommissioning in week ${week + weeks}, tested on the REAL wastewater, not your design basis.`);
     if (!ok) return;
-    if (g.startConstruction()) go('hq');
+    if (startConstruction()) go('hq');
   };
+
+  const menuNode = menu ? draft.nodes.find((n) => n.id === menu.id) : undefined;
 
   return (
     <div className="studio">
@@ -185,21 +352,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
               {cat}
             </div>
             {UNIT_ORDER.filter((t) => CATALOGUE[t].category === cat).map((t) => (
-              <div
-                key={t}
-                className="palette-item"
-                draggable={editable}
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('application/ee-unit', t);
-                  e.dataTransfer.effectAllowed = 'move';
-                }}
-                onClick={() => addUnit(t)}
-                title={CATALOGUE[t].summary}
-                style={{ background: '#f4f6f8', color: 'var(--ink)', opacity: editable ? 1 : 0.5 }}
-              >
-                <UnitSymbol type={t} accent={CATEGORY_COLOR[cat]} />
-                {CATALOGUE[t].name}
-              </div>
+              <PaletteItem key={t} type={t} editable={editable} onAdd={addUnit} />
             ))}
           </div>
         ))}
@@ -208,33 +361,122 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
             Auto-connect in series
           </button>
         </div>
-        <p className="muted" style={{ fontSize: 11 }}>Connect outlet (right) to inlet (left). Select + Delete to remove.</p>
+        <div className="muted shortcut-help">
+          <div>
+            <kbd>Drag</kbd> outlet → inlet to pipe
+          </div>
+          <div>
+            <kbd>Shift</kbd>+drag box-select · <kbd>Ctrl</kbd>+click add
+          </div>
+          <div>
+            <kbd>Del</kbd> delete · <kbd>Ctrl Z</kbd>/<kbd>Y</kbd> undo/redo
+          </div>
+          <div>
+            <kbd>Ctrl C</kbd>/<kbd>V</kbd>/<kbd>D</kbd> copy/paste/duplicate
+          </div>
+          <div>
+            <kbd>Right-click</kbd> a unit for more
+          </div>
+        </div>
       </aside>
 
-      <div className="canvas-wrap" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
+      <div className="canvas-wrap" onDragOver={(e) => e.preventDefault()} onDrop={onDrop} onClick={() => menu && setMenu(null)}>
         <ReactFlow
-          nodes={dragNodes ?? rfNodes}
+          nodes={rfNodes}
           edges={rfEdges}
           nodeTypes={nodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
-          onNodeClick={(_, n) => setSel({ kind: 'node', id: n.id })}
-          onEdgeClick={(_, e) => setSel({ kind: 'edge', id: e.id })}
-          onPaneClick={() => setSel(null)}
-          nodesDraggable
+          onNodeContextMenu={(e, n) => {
+            e.preventDefault();
+            if (!editable || n.type === 'terminal') return;
+            const box = (e.currentTarget as HTMLElement).closest('.canvas-wrap')!.getBoundingClientRect();
+            setSelNodes(new Set([n.id]));
+            setMenu({ x: e.clientX - box.left, y: e.clientY - box.top, id: n.id });
+          }}
+          onPaneContextMenu={(e) => {
+            e.preventDefault();
+            setMenu(null);
+          }}
+          nodesDraggable={true}
           nodesConnectable={editable}
+          elementsSelectable
+          selectionKeyCode="Shift"
+          multiSelectionKeyCode={['Control', 'Meta']}
           deleteKeyCode={editable ? ['Backspace', 'Delete'] : null}
+          snapToGrid={snap}
+          snapGrid={[GRID, GRID]}
           fitView
           fitViewOptions={{ padding: 0.25, maxZoom: 1.1 }}
           minZoom={0.3}
+          onlyRenderVisibleElements
           defaultEdgeOptions={{ type: 'smoothstep' }}
         >
-          <Background variant={BackgroundVariant.Lines} gap={24} color="#dce1e7" />
-          <Background id="major" variant={BackgroundVariant.Lines} gap={120} color="#cdd4dc" />
+          <Background variant={BackgroundVariant.Lines} gap={GRID} color="#dce1e7" />
+          <Background id="major" variant={BackgroundVariant.Lines} gap={GRID * 5} color="#cdd4dc" />
           <Controls showInteractive={false} />
           <MiniMap pannable zoomable style={{ background: '#f6f8fa' }} nodeColor="#9aa7b4" />
         </ReactFlow>
+
+        <div className="studio-toolbar">
+          <button className="tb" onClick={hist.undo} disabled={!editable || !hist.canUndo} title="Undo (Ctrl+Z)">
+            ↶
+          </button>
+          <button className="tb" onClick={hist.redo} disabled={!editable || !hist.canRedo} title="Redo (Ctrl+Y)">
+            ↷
+          </button>
+          <span className="tb-sep" />
+          <button className={`tb ${snap ? 'on' : ''}`} onClick={() => setSnap((s) => !s)} title="Snap to grid">
+            ⊞ Snap
+          </button>
+          <button className="tb" onClick={() => rf.fitView({ padding: 0.25, maxZoom: 1.1, duration: 250 })} title="Fit drawing to screen">
+            ⤢ Fit
+          </button>
+          <span className="tb-sep" />
+          <span className={`tb-status ${busy ? 'busy' : ''}`}>{busy ? 'calculating…' : sim?.ok ? 'balance OK' : 'incomplete'}</span>
+        </div>
+
+        {menu && menuNode && (
+          <div className="ctx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
+            <div className="ctx-title">{menuNode.tag}</div>
+            <button
+              onClick={() => {
+                if (copySel()) paste();
+                setMenu(null);
+              }}
+            >
+              Duplicate <kbd>Ctrl D</kbd>
+            </button>
+            <button
+              onClick={() => {
+                const t = prompt('Equipment tag', menuNode.tag ?? '');
+                if (t && t.trim()) setDraft((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === menuNode.id ? { ...n, tag: t.trim().toUpperCase().slice(0, 12) } : n)) }));
+                setMenu(null);
+              }}
+            >
+              Rename tag…
+            </button>
+            <button
+              onClick={() => {
+                setDraft((g) => ({ ...g, edges: g.edges.filter((e) => e.from !== menuNode.id && e.to !== menuNode.id) }));
+                setMenu(null);
+              }}
+            >
+              Disconnect all pipes
+            </button>
+            <button
+              className="danger"
+              onClick={() => {
+                removeNodes([menuNode.id]);
+                setMenu(null);
+              }}
+            >
+              Delete <kbd>Del</kbd>
+            </button>
+          </div>
+        )}
+
         <div className="title-block">
           <div>
             <span>PROCESS FLOW DIAGRAM</span>
@@ -246,7 +488,9 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           </div>
           <div>
             <span>DESIGN FLOW</span>
-            <span>{p.datasheet.Q} m³/d · PF {p.datasheet.peakFactor}</span>
+            <span>
+              {p.datasheet.Q} m³/d · PF {p.datasheet.peakFactor}
+            </span>
           </div>
           <div>
             <span>DISCHARGE</span>
@@ -254,95 +498,35 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           </div>
           <div>
             <span>BY</span>
-            <span>{g.companyName}</span>
+            <span>{companyName}</span>
           </div>
         </div>
         {p.status === 'failed' && (
-          <div className="note error" style={{ position: 'absolute', top: 10, left: 10, right: 10, zIndex: 5, background: '#fff', color: 'var(--ink)' }}>
+          <div className="note error" style={{ position: 'absolute', top: 52, left: 10, right: 10, zIndex: 5, background: '#fff', color: 'var(--ink)' }}>
             Retrofit mode — the last commissioning failed. Modified or new units are charged at a {Math.round((RETROFIT_PREMIUM - 1) * 100)} % rework premium.
           </div>
         )}
       </div>
 
       <aside className="inspector">
-        {selectedNode && selectedNode.kind !== 'influent' && selectedNode.kind !== 'discharge' ? (
-          <UnitInspector node={selectedNode} editable={editable} sim={sim} onChange={(params) => setGraph({ ...graph, nodes: graph.nodes.map((n) => (n.id === selectedNode.id ? { ...n, params } : n)) })} />
+        {single && !isTerminal(single) ? (
+          <UnitInspector node={single} editable={editable} sim={sim} onParam={updateParams} />
         ) : selectedEdgeStream ? (
           <StreamTable title="Pipe stream" s={selectedEdgeStream} />
-        ) : selectedNode?.kind === 'influent' ? (
+        ) : single?.kind === 'influent' ? (
           <StreamTable title="Raw wastewater (design basis)" s={basis.stream} />
-        ) : (
+        ) : selNodes.size > 1 ? (
           <>
-            <h2>Design summary</h2>
-            <div className="calc">
-              <span>CAPEX (this design)</span>
-              <span>{rm(sim?.capex ?? 0)}</span>
-            </div>
-            {p.built && (
-              <div className="calc">
-                <span>Retrofit charge</span>
-                <span>{rm(capexToCharge)}</span>
-              </div>
-            )}
-            <div className="calc">
-              <span>Contract value</span>
-              <span>{rm(p.enquiry.contractValue)}</span>
-            </div>
-            <div className="calc">
-              <span>Projected margin</span>
-              <span style={{ color: p.enquiry.contractValue - p.spent.lab - p.spent.capex - capexToCharge < 0 ? 'var(--alarm)' : undefined }}>{rm(p.enquiry.contractValue - p.spent.lab - p.spent.capex - capexToCharge)}</span>
-            </div>
-            <div className="calc">
-              <span>Cash available to build</span>
-              <span style={{ color: g.cash + (p.built ? 0 : p.enquiry.contractValue * 0.6) < capexToCharge ? 'var(--alarm)' : undefined }}>{rm(g.cash + (p.built ? 0 : p.enquiry.contractValue * 0.6))}</span>
-            </div>
-            <div className="calc">
-              <span>OPEX estimate</span>
-              <span style={{ color: (sim?.opexRMd ?? 0) > p.enquiry.opexLimitRMd ? 'var(--warn)' : undefined }}>
-                {rm(sim?.opexRMd ?? 0)}/d (max {rm(p.enquiry.opexLimitRMd)})
-              </span>
-            </div>
-            <div className="calc">
-              <span>Energy</span>
-              <span>{fmt(sim?.energy_kWhd ?? 0, 0)} kWh/d</span>
-            </div>
-            <div className="calc">
-              <span>Sludge (dry)</span>
-              <span>{fmt(sim?.sludgeKgD ?? 0, 0)} kg/d</span>
-            </div>
-            <div className="calc">
-              <span>Footprint</span>
-              <span>{fmt(sim?.footprint ?? 0, 0)} m²</span>
-            </div>
-            <div className="calc">
-              <span>Construction time</span>
-              <span>{weeks} weeks</span>
-            </div>
-            {(sim?.chemicals.length ?? 0) > 0 && <h2 style={{ marginTop: 14, fontSize: 12 }}>Chemicals</h2>}
-            {sim?.chemicals.map((c) => (
-              <div className="calc" key={c.name}>
-                <span>{c.name}</span>
-                <span>
-                  {fmt(c.kgPerDay, 1)} kg/d · {rm(c.costRMd)}/d
-                </span>
-              </div>
-            ))}
-            {sim && !sim.balance?.ok && sim.ok && <div className="note error">Mass balance did not close — please report this design.</div>}
-            {sim?.errors.map((e) => (
-              <div key={e.code + e.text} className={`note ${e.level}`}>
-                {e.text}
-              </div>
-            ))}
-            <button className="btn primary" style={{ width: '100%', marginTop: 16 }} disabled={!editable || !sim?.ok} onClick={doCommission}>
-              {p.built ? 'Retrofit & recommission' : 'Build & commission'} ▸
+            <h2>{selNodes.size} units selected</h2>
+            <p className="muted" style={{ fontSize: 12 }}>
+              Drag to move them together. <kbd>Del</kbd> deletes, <kbd>Ctrl D</kbd> duplicates.
+            </p>
+            <button className="btn sm danger" disabled={!editable} onClick={() => removeNodes([...selNodes])}>
+              Delete selection
             </button>
-            {basis.assumptions.length > 0 && (
-              <div className="note warn" style={{ marginTop: 10 }}>
-                Predictions rely on {basis.assumptions.length} assumption(s) — see the Laboratory.
-              </div>
-            )}
-            <p className="muted" style={{ fontSize: 11, marginTop: 10 }}>Select a unit to size it, or a pipe to inspect its stream.</p>
           </>
+        ) : (
+          <DesignSummary sim={sim} capexToCharge={capexToCharge} weeks={weeks} cash={cash} editable={editable} onCommission={doCommission} />
         )}
       </aside>
 
@@ -356,9 +540,107 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       </section>
     </div>
   );
+
+  function DesignSummary(props: { sim: SimResult | null; capexToCharge: number; weeks: number; cash: number; editable: boolean; onCommission: () => void }) {
+    const { sim, capexToCharge, weeks, cash, editable, onCommission } = props;
+    const pp = p!;
+    return (
+      <>
+        <h2>Design summary</h2>
+        <div className="calc">
+          <span>CAPEX (this design)</span>
+          <span>{rm(sim?.capex ?? 0)}</span>
+        </div>
+        {pp.built && (
+          <div className="calc">
+            <span>Retrofit charge</span>
+            <span>{rm(capexToCharge)}</span>
+          </div>
+        )}
+        <div className="calc">
+          <span>Contract value</span>
+          <span>{rm(pp.enquiry.contractValue)}</span>
+        </div>
+        <div className="calc">
+          <span>Projected margin</span>
+          <span style={{ color: pp.enquiry.contractValue - pp.spent.lab - pp.spent.capex - capexToCharge < 0 ? 'var(--alarm)' : undefined }}>{rm(pp.enquiry.contractValue - pp.spent.lab - pp.spent.capex - capexToCharge)}</span>
+        </div>
+        <div className="calc">
+          <span>Cash available to build</span>
+          <span style={{ color: cash + (pp.built ? 0 : pp.enquiry.contractValue * 0.6) < capexToCharge ? 'var(--alarm)' : undefined }}>{rm(cash + (pp.built ? 0 : pp.enquiry.contractValue * 0.6))}</span>
+        </div>
+        <div className="calc">
+          <span>OPEX estimate</span>
+          <span style={{ color: (sim?.opexRMd ?? 0) > pp.enquiry.opexLimitRMd ? 'var(--warn)' : undefined }}>
+            {rm(sim?.opexRMd ?? 0)}/d (max {rm(pp.enquiry.opexLimitRMd)})
+          </span>
+        </div>
+        <div className="calc">
+          <span>Energy</span>
+          <span>{fmt(sim?.energy_kWhd ?? 0, 0)} kWh/d</span>
+        </div>
+        <div className="calc">
+          <span>Sludge (dry)</span>
+          <span>{fmt(sim?.sludgeKgD ?? 0, 0)} kg/d</span>
+        </div>
+        <div className="calc">
+          <span>Footprint</span>
+          <span>{fmt(sim?.footprint ?? 0, 0)} m²</span>
+        </div>
+        <div className="calc">
+          <span>Construction time</span>
+          <span>{weeks} weeks</span>
+        </div>
+        {(sim?.chemicals.length ?? 0) > 0 && <h2 style={{ marginTop: 14, fontSize: 12 }}>Chemicals</h2>}
+        {sim?.chemicals.map((c) => (
+          <div className="calc" key={c.name}>
+            <span>{c.name}</span>
+            <span>
+              {fmt(c.kgPerDay, 1)} kg/d · {rm(c.costRMd)}/d
+            </span>
+          </div>
+        ))}
+        {sim && !sim.balance?.ok && sim.ok && <div className="note error">Mass balance did not close — please report this design.</div>}
+        {sim?.errors.map((e) => (
+          <div key={e.code + e.text} className={`note ${e.level}`}>
+            {e.text}
+          </div>
+        ))}
+        <button className="btn primary" style={{ width: '100%', marginTop: 16 }} disabled={!editable || !sim?.ok} onClick={onCommission}>
+          {pp.built ? 'Retrofit & recommission' : 'Build & commission'} ▸
+        </button>
+        {basis!.assumptions.length > 0 && (
+          <div className="note warn" style={{ marginTop: 10 }}>
+            Predictions rely on {basis!.assumptions.length} assumption(s) — see the Laboratory.
+          </div>
+        )}
+        <p className="muted" style={{ fontSize: 11, marginTop: 10 }}>Select a unit to size it, or a pipe to inspect its stream.</p>
+      </>
+    );
+  }
 }
 
-function UnitInspector({ node, editable, sim, onChange }: { node: PNode; editable: boolean; sim: ReturnType<typeof simulate> | null; onChange: (p: PNode['params']) => void }) {
+const PaletteItem = memo(function PaletteItem({ type, editable, onAdd }: { type: UnitType; editable: boolean; onAdd: (t: UnitType) => void }) {
+  const cat = CATALOGUE[type].category;
+  return (
+    <div
+      className="palette-item"
+      draggable={editable}
+      onDragStart={(e) => {
+        e.dataTransfer.setData('application/ee-unit', type);
+        e.dataTransfer.effectAllowed = 'move';
+      }}
+      onClick={() => onAdd(type)}
+      title={CATALOGUE[type].summary}
+      style={{ background: '#f4f6f8', color: 'var(--ink)', opacity: editable ? 1 : 0.5 }}
+    >
+      <UnitSymbol type={type} accent={CATEGORY_COLOR[cat]} />
+      {CATALOGUE[type].name}
+    </div>
+  );
+});
+
+function UnitInspector({ node, editable, sim, onParam }: { node: PNode; editable: boolean; sim: SimResult | null; onParam: (id: string, key: string, v: number | string) => void }) {
   const def = CATALOGUE[node.kind as UnitType];
   const ns = sim?.nodes[node.id];
   return (
@@ -378,7 +660,7 @@ function UnitInspector({ node, editable, sim, onChange }: { node: PNode; editabl
             {d.label} {d.unit && `(${d.unit})`}
           </label>
           {d.options ? (
-            <select disabled={!editable} value={String(node.params[d.key])} onChange={(e) => onChange({ ...node.params, [d.key]: e.target.value })}>
+            <select disabled={!editable} value={String(node.params[d.key] ?? d.default(0))} onChange={(e) => onParam(node.id, d.key, e.target.value)}>
               {d.options.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -386,18 +668,7 @@ function UnitInspector({ node, editable, sim, onChange }: { node: PNode; editabl
               ))}
             </select>
           ) : (
-            <input
-              type="number"
-              disabled={!editable}
-              min={d.min}
-              max={d.max}
-              step={d.step}
-              value={Number(node.params[d.key])}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (Number.isFinite(v)) onChange({ ...node.params, [d.key]: Math.min(d.max ?? Infinity, Math.max(d.min ?? -Infinity, v)) });
-              }}
-            />
+            <NumberField value={Number(node.params[d.key] ?? d.default(0))} min={d.min} max={d.max} step={d.step} disabled={!editable} onCommit={(v) => onParam(node.id, d.key, v)} />
           )}
           {d.help && <span className="help">{d.help}</span>}
         </div>

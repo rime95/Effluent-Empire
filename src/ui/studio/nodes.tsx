@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Handle, NodeProps, Position, type Node } from '@xyflow/react';
 import { CATALOGUE, UnitType } from '../../simulation/treatment/catalogue';
 import { UnitSymbol } from '../components/Symbols';
@@ -9,7 +10,7 @@ export type TerminalNodeData = { kind: 'influent' | 'discharge'; label: string; 
 
 const STATUS_COLOR = { ok: 'var(--ok)', warn: 'var(--warn)', error: 'var(--alarm)', idle: '#9aa7b4' };
 
-export function UnitNode({ data, selected }: NodeProps<Node<UnitNodeData>>) {
+function UnitNodeImpl({ data, selected }: NodeProps<Node<UnitNodeData>>) {
   const def = CATALOGUE[data.kind];
   const accent = CATEGORY_COLOR[def.category];
   return (
@@ -25,7 +26,7 @@ export function UnitNode({ data, selected }: NodeProps<Node<UnitNodeData>>) {
   );
 }
 
-export function TerminalNode({ data }: NodeProps<Node<TerminalNodeData>>) {
+function TerminalNodeImpl({ data }: NodeProps<Node<TerminalNodeData>>) {
   return (
     <div className="pfd-terminal" style={{ background: data.kind === 'influent' ? 'var(--sludge)' : 'var(--clean)' }}>
       {data.kind === 'discharge' && <Handle type="target" position={Position.Left} />}
@@ -36,4 +37,6 @@ export function TerminalNode({ data }: NodeProps<Node<TerminalNodeData>>) {
   );
 }
 
+export const UnitNode = memo(UnitNodeImpl);
+export const TerminalNode = memo(TerminalNodeImpl);
 export const nodeTypes = { unit: UnitNode, terminal: TerminalNode };
