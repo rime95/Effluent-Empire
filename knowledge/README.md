@@ -18,6 +18,7 @@ Verification status of every constant is tracked in **`VERIFICATION.md`** (last 
 | `dynamic/asm1.ts` | `biological/asm1.md` |
 | `physical/sludge.ts`, sludge routing in `treatment/graph.ts` | `physical/sludge_thickening_dewatering.md` |
 | recycles, splitter, mixer in `treatment/graph.ts` | `design/recycle_streams.md` |
+| `treatment/instrumentation.ts`, `ui/studio/PidSheet.tsx` | `operations/instrumentation.md` |
 | `dynamic/plantDynamics.ts`, `game/incidents.ts`, `ui/screens/Scada.tsx` | `operations/scada.md` |
 | `treatment/catalogue.ts`, `game/industries.ts` | `processes/*.md` |
 

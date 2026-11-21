@@ -8,6 +8,7 @@
  */
 import { BalanceCheck, Components, addComponents, checkMassBalance, components, zeroComponents } from '../core/massBalance';
 import { POOLS, Stream, blend, cloneStream, codTotal, emptyStream, poolMass, tss } from '../core/stream';
+import { effectiveParams, instCapex, type InstKey } from './instrumentation';
 import { BACKWASH_FRACTION, defaultSludgeFraction, removedDryKgD, splitSludge } from '../physical/sludge';
 import { equilibrate } from '../chemistry/acidBase';
 import { CATALOGUE, PRICES, Params, UnitType } from './catalogue';
@@ -28,6 +29,8 @@ export interface PNode {
   position?: { x: number; y: number };
   /** out of service: the stream passes through untreated (O&M breakdowns) */
   bypass?: boolean;
+  /** instrumentation / redundancy switched on or off (missing = standard set installed) — see instrumentation.ts */
+  inst?: Partial<Record<InstKey, boolean>>;
 }
 
 export interface PEdge {
@@ -183,6 +186,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
     if (node.kind === 'influent') {
       inlet = cloneStream(influent);
       sysIn = components(inlet);
+      res.capex += instCapex(node); // inlet flow meter
     } else {
       const ins = inEdges.map((e) => (tears.has(e.id) ? tearIn.get(e.id) : res.edges[e.id])).filter((x): x is Stream => !!x && x.Q > 1e-9);
       inlet = ins.length === 0 ? emptyStream(0) : ins.length === 1 ? cloneStream(ins[0]) : equilibrate(blend(ins));
@@ -210,7 +214,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
     if (node.kind !== 'influent' && !node.bypass && inlet.Q > 1e-9) {
       const def = CATALOGUE[node.kind];
       const clarifierFollows = mainEdges.length > 0 && mainEdges.every((e) => byId.get(e.to)?.kind === 'clarifier');
-      const r = def.run(inlet, node.params, { clarifierFollows });
+      const r = def.run(inlet, effectiveParams(node), { clarifierFollows });
       const sludge = r.removed ? components(r.removed, false) : zeroComponents();
       const balance = checkMassBalance({
         in: components(inlet),
@@ -220,7 +224,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
         consumed: sumPartial(r.consumed),
         produced: sumPartial(r.produced),
       });
-      const capex = def.capex(node.params, inlet, r);
+      const capex = def.capex(node.params, inlet, r) + instCapex(node);
       const footprint = def.footprint(node.params);
       const dry = r.removed ? removedDryKgD(r.removed) : 0;
       const routed = sludgeEdges.length > 0 && !!r.removed && dry > 0;
@@ -262,7 +266,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
       const def = CATALOGUE[node.kind];
       // equipment is still built: CAPEX from its parameters, evaluated on the plant influent as a sizing proxy
       const proxy = def.run(cloneStream(influent), node.params, { clarifierFollows: false });
-      const capex = def.capex(node.params, influent, proxy);
+      const capex = def.capex(node.params, influent, proxy) + instCapex(node);
       res.capex += capex;
       res.footprint += def.footprint(node.params);
       res.nodes[id] = { node, inlet, result: { ...proxy, out: emptyStream(0), removed: null, chemicals: [], energy_kWhd: 0, calcs: {}, notes: [{ level: 'warn', code: 'unit.dry', text: 'No flow reaches this unit — it is built but idle.' }] }, capex, footprint: def.footprint(node.params), balance: checkMassBalance({ in: zeroComponents(), out: zeroComponents(), sludge: zeroComponents(), gas: zeroComponents(), consumed: zeroComponents(), produced: zeroComponents() }), sludgeKgD: 0, opexRMd: 0 };

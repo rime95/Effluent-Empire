@@ -104,6 +104,7 @@ Effect of the Ni correction: the model's Ni(OH)₂ solubility minimum moves from
 | Underflow solids (clarifier 1 % / 0.8 % bio, oil sep 5 %, backwash 3 %) | 🟡 M&E ranges |
 | Thickener SLR 20 / 30, HLR max 24 / 8, underflow 3 % / 2.5 % | 🟡 |
 | Filter press cake 25/35 % (chemical), 20/28 % (bio), capture 97 %, polymer 3 kg/t, lime 20 % DS | 🟡 |
+| Instrument CAPEX (pH loop 18k, DO loop 22k, level 6k, flow 12k, standby pump 9k / blower 35k RM) | 🟡 GAME MODEL |
 | Disposal RM 0.18 / 0.06 per kg wet (balanced against contractor RM 1.2 / 0.3 per kg DS) | 🟡 both likely low |
 
 ## Still needs a human with the books

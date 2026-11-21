@@ -7,6 +7,17 @@ import { cloneStream } from '../../simulation/core/stream';
 import { DynamicResult, runDynamic } from '../../simulation/dynamic/plantDynamics';
 import { CATALOGUE, UnitType } from '../../simulation/treatment/catalogue';
 import { limitsFor } from '../../simulation/treatment/compliance';
+import { hasInst } from '../../simulation/treatment/instrumentation';
+import type { PNode } from '../../simulation/treatment/graph';
+
+/** Tags a unit can show in SCADA: without the instrument there is no signal (knowledge/operations/instrumentation.md). */
+function tagVisible(n: PNode | undefined, key: string): boolean {
+  if (!n) return true;
+  if (['pH', 'pHmeasured', 'pump', 'sp'].includes(key) && ['neutralisation', 'precipitation'].includes(n.kind)) return hasInst(n, 'pHLoop');
+  if (['DO', 'blower'].includes(key) && n.kind === 'activatedSludge') return hasInst(n, 'doLoop');
+  if (['level', 'overflow'].includes(key) && n.kind === 'eq') return hasInst(n, 'level');
+  return true;
+}
 import { fmt, INDUSTRY_LABEL, rm } from '../format';
 
 /* SCADA control room: dark mimic + trends + alarms. Ref: knowledge/operations/scada.md */
@@ -39,10 +50,10 @@ function alarmsOf(r: DynamicResult, plant: Plant): Alarm[] {
     for (const n of plant.graph.nodes) {
       const u = p.units[n.id];
       if (!u) continue;
-      if (u.DO !== undefined) raise(`${n.id}:DO`, u.DO < 0.5, p.t, `${n.tag} DO LOW (${fmt(u.DO, 2)} mg/L)`, 'alarm');
-      if (u.sp !== undefined) raise(`${n.id}:pH`, Math.abs(u.pHmeasured - u.sp) > 0.5, p.t, `${n.tag} pH deviation (probe ${fmt(u.pHmeasured, 2)}, SP ${fmt(u.sp, 1)})`, 'warn');
-      if (u.pump !== undefined) raise(`${n.id}:pump`, u.pump > 99, p.t, `${n.tag} dosing pump at 100 %`, 'warn');
-      if (u.level !== undefined) raise(`${n.id}:lvl`, u.level > 95, p.t, `${n.tag} level HIGH-HIGH — overflow to drain`, 'alarm');
+      if (u.DO !== undefined && tagVisible(n, 'DO')) raise(`${n.id}:DO`, u.DO < 0.5, p.t, `${n.tag} DO LOW (${fmt(u.DO, 2)} mg/L)`, 'alarm');
+      if (u.sp !== undefined && tagVisible(n, 'sp')) raise(`${n.id}:pH`, Math.abs(u.pHmeasured - u.sp) > 0.5, p.t, `${n.tag} pH deviation (probe ${fmt(u.pHmeasured, 2)}, SP ${fmt(u.sp, 1)})`, 'warn');
+      if (u.pump !== undefined && tagVisible(n, 'pump')) raise(`${n.id}:pump`, u.pump > 99, p.t, `${n.tag} dosing pump at 100 %`, 'warn');
+      if (u.level !== undefined && tagVisible(n, 'level')) raise(`${n.id}:lvl`, u.level > 95, p.t, `${n.tag} level HIGH-HIGH — overflow to drain`, 'alarm');
       if (u.carry !== undefined) raise(`${n.id}:carry`, u.carry > 1.5, p.t, `${n.tag} secondary clarifier solids carry-over`, 'warn');
     }
   }
@@ -101,10 +112,12 @@ export function Scada() {
     );
 
   const unitData = result && unit ? result.points.map((p) => ({ t: p.t, ...(p.units[unit.id] ?? {}) })) : [];
-  const unitKeys = unitData.length ? Object.keys(unitData[0]).filter((k) => k !== 't' && k !== 'sp') : [];
+  const unitKeys = unitData.length ? Object.keys(unitData[0]).filter((k) => k !== 't' && k !== 'sp' && tagVisible(unit, k)) : [];
+  const hidden = unitData.length ? Object.keys(unitData[0]).filter((k) => k !== 't' && k !== 'sp' && !tagVisible(unit, k)) : [];
+  const flowMeter = hasInst(plant.graph.nodes.find((n) => n.kind === 'influent'), 'flow');
   const effData = result ? result.points.map((p) => ({ t: p.t, v: p.effluent[effParam], Q: p.Qin })) : [];
   const lim = (limits as Record<string, { max?: number; min?: number }>)[effParam];
-  const actions = availableActions(plant.graph);
+  const actions = availableActions(plant.graph, plant.incident ?? null);
 
   return (
     <div className="page" style={{ background: BG, minHeight: '100%' }}>
@@ -160,7 +173,7 @@ export function Scada() {
             </marker>
           </defs>
           <text x={8} y={70} fill="#8aa0b8" fontSize={11} fontFamily="var(--mono)">
-            IN {at ? fmt(at.Qin, 0) : '—'}
+            IN {at && flowMeter ? fmt(at.Qin, 0) : '—'}
           </text>
           <text x={8} y={84} fill="#5f7891" fontSize={10} fontFamily="var(--mono)">
             m³/d
@@ -170,7 +183,7 @@ export function Scada() {
             const cat = CATALOGUE[u.kind as UnitType]?.category ?? 'physical';
             const vals = at?.units[u.id] ?? {};
             const alarm = (vals.DO !== undefined && vals.DO < 0.5) || (vals.sp !== undefined && Math.abs(vals.pHmeasured - vals.sp) > 0.5) || (vals.level !== undefined && vals.level > 95);
-            const entries = Object.entries(vals).filter(([k]) => k !== 'sp').slice(0, 3);
+            const entries = Object.entries(vals).filter(([k]) => k !== 'sp' && tagVisible(u, k)).slice(0, 3);
             return (
               <g key={u.id} onClick={() => setUnitSel(u.id)} style={{ cursor: 'pointer' }}>
                 <line x1={x - 40} y1={60} x2={x} y2={60} stroke="var(--flow)" strokeWidth={2} markerEnd="url(#arr)" />
@@ -233,7 +246,10 @@ export function Scada() {
                 <div className="muted">{busy ? 'Simulating…' : '—'}</div>
               )}
             </div>
-            <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>Each series has its own scale; hover for values.</p>
+            <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
+              Each series has its own scale; hover for values.
+              {hidden.length > 0 && <b style={{ color: '#f3c95a' }}> No instrument for {hidden.join(', ')} — this loop runs by hand and is not alarmed.</b>}
+            </p>
           </div>
 
           {/* effluent */}
@@ -263,7 +279,7 @@ export function Scada() {
                     {lim?.max !== undefined && <ReferenceLine yAxisId="v" y={lim.max} stroke="var(--alarm)" strokeDasharray="4 3" />}
                     {lim?.min !== undefined && <ReferenceLine yAxisId="v" y={lim.min} stroke="var(--alarm)" strokeDasharray="4 3" />}
                     <ReferenceLine x={cursor} yAxisId="v" stroke="#cfe3f7" strokeDasharray="2 3" />
-                    <Line yAxisId="Q" dataKey="Q" stroke="#3d6f9e" dot={false} strokeWidth={1} isAnimationActive={false} />
+                    {flowMeter && <Line yAxisId="Q" dataKey="Q" stroke="#3d6f9e" dot={false} strokeWidth={1} isAnimationActive={false} />}
                     <Line yAxisId="v" dataKey="v" stroke="#22d3ee" dot={false} strokeWidth={2} isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>

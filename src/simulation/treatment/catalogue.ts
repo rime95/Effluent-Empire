@@ -134,7 +134,7 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
       { key: 'polymer', label: 'Polymer flocculant (anionic PAM)', unit: 'mg/L', min: 0, max: 10, step: 0.1, default: () => 1.0, help: 'Bridges floc and hydroxide precipitate into large, fast-settling flocs. Optimum ≈ 0.5–2 mg/L; overdosing hurts.' },
     ],
     run: (s, p) => coagulate(s, { coagulant: p.coagulant as Coagulant, dose_mgL: n(p, 'dose'), flocTime_min: n(p, 'flocTime'), pHset: n(p, 'pHset'), polymer_mgL: Number(p.polymer ?? 0) || 0 }),
-    capex: (p, s) => scale(90_000, s.Q * s.peakFactor, 250) * (0.7 + 0.3 * (n(p, 'flocTime') / 20)) + 30_000 + (n(p, 'pHset') > 0 ? 25_000 : 0),
+    capex: (p, s) => scale(90_000, s.Q * s.peakFactor, 250) * (0.7 + 0.3 * (n(p, 'flocTime') / 20)) + 30_000, // pH-trim instruments are costed in instrumentation.ts
     footprint: (p) => 15 + n(p, 'flocTime') * 0.8,
   },
   clarifier: {

@@ -4,7 +4,7 @@ import type { Stream } from '../../simulation/core/stream';
 
 /** Graph identity ignoring canvas positions — the simulation only reruns when the process changes. */
 export function processKey(g: ProcessGraph): string {
-  return JSON.stringify({ n: g.nodes.map((n) => [n.id, n.kind, n.params, !!n.bypass]), e: g.edges.map((e) => [e.from, e.to]) });
+  return JSON.stringify({ n: g.nodes.map((n) => [n.id, n.kind, n.params, !!n.bypass, n.inst ?? null]), e: g.edges.map((e) => [e.from, e.to, e.fromPort ?? 'out']) });
 }
 
 let worker: Worker | null | undefined;

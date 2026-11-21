@@ -10,6 +10,7 @@
  */
 import { Stream, blend, cloneStream, emptyStream, tss, METALS, MetalMap, poolMass } from '../core/stream';
 import { unaidedPrecipitateV50 } from '../chemistry/neutralisation';
+import { effectiveParams, hasInst } from '../treatment/instrumentation';
 import { equilibrate, aeratedH2CO3 } from '../chemistry/acidBase';
 import { vesilind_mh } from '../physical/settling';
 import { CATALOGUE, UnitType } from '../treatment/catalogue';
@@ -126,7 +127,7 @@ function nextIsClarifier(g: ProcessGraph, id: string): PNode | null {
 }
 
 /** Run one ASM1 reactor over one 15-min step (20-s sub-steps) with the PI DO loop. kLa and OUR returned are step means. */
-export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; doSP: number; blowerCap: number; settleFactor: number }, T: number) {
+export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; doSP: number; blowerCap: number; settleFactor: number; manual?: boolean }, T: number) {
   const inA = toASM(inlet);
   const SOsat = oxygenSaturation(T);
   const dt = ASM1_SUBSTEP;
@@ -150,8 +151,9 @@ export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; 
     const K = 25;
     const Ti = 0.002;
     const unclamped = K * (e + integral / Ti);
-    const kLaNow = Math.min(st.kLaMax * p.blowerCap, Math.max(0, unclamped));
-    if (unclamped === kLaNow) integral += e * dt;
+    // no DO loop: blower runs at the fixed design output (kLaMax was sized at 1.6 × design demand)
+    const kLaNow = p.manual ? (st.kLaMax / 1.6) * p.blowerCap : Math.min(st.kLaMax * p.blowerCap, Math.max(0, unclamped));
+    if (!p.manual && unclamped === kLaNow) integral += e * dt;
     const carry = clarifierCarry(mlssOf(x), inlet.Q, st.clarifierArea, p.settleFactor);
     const wasteRate = Math.max(0, 1 / p.srt - D * carry);
     const r = asmStep(x, { Q: inlet.Q, V: p.V, T, in: inA, kLa: kLaNow, SOsat, wasteRate, effluentCarry: carry, inhibH, inhibA }, dt);
@@ -219,7 +221,8 @@ function initialise(g: ProcessGraph, base: Stream) {
       };
       const srt = Number(n.params.srt);
       const warmSteps = Math.ceil((4 * srt * 24) / STEP_H);
-      for (let i = 0; i < warmSteps; i++) st = stepAS(st, ns.inlet, { V, srt, doSP, blowerCap: 1, settleFactor: 1 }, ns.inlet.T).st;
+      const manual = !hasInst(n, 'doLoop');
+      for (let i = 0; i < warmSteps; i++) st = stepAS(st, ns.inlet, { V, srt, doSP, blowerCap: 1, settleFactor: 1, manual }, ns.inlet.T).st;
       as[n.id] = st;
     }
   }
@@ -231,7 +234,7 @@ const warmCache = new Map<string, ReturnType<typeof initialise>>();
 export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, opts: DynamicOptions): DynamicResult {
   const warm = opts.warmBase ?? base;
   // full design + full warm stream (incl. bypass flags, metals, T, Cb …) so no stale state can leak between plants or runs
-  const key = JSON.stringify({ n: g.nodes.map((n) => [n.id, n.kind, n.params, !!n.bypass]), e: g.edges, w: warm });
+  const key = JSON.stringify({ n: g.nodes.map((n) => [n.id, n.kind, n.params, !!n.bypass, n.inst ?? null]), e: g.edges, w: warm });
   if (!warmCache.has(key)) {
     if (warmCache.size > 20) warmCache.clear();
     warmCache.set(key, initialise(g, warm));
@@ -323,6 +326,7 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
           // 1-min sub-steps: the loop (probe class A, T90 ≈ 1 min) must be sampled much faster than the tank HRT,
           // otherwise a 15-min step against a ~15-min HRT tank limit-cycles (bang-bang). Exact CSTR washout per sub-step.
           const sign = st.capacity >= 0 ? 1 : -1;
+          const manualDose = !hasInst(n, 'pHLoop');
           const Kp = 0.4; // pump fraction per pH unit
           const Ti_h = 0.25;
           const sub = 15;
@@ -337,7 +341,8 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
             const uc = Math.min(1, Math.max(0, raw));
             if (raw === uc) st.integral += (Kp * err * h) / Ti_h; // conditional-integration anti-windup
             st.integral = Math.min(1, Math.max(0, st.integral));
-            const u = pumpOff.has(id) ? 0 : uc;
+            // no pH loop: the operator set the pump by hand at the design-average dose (half the pump capacity)
+            const u = pumpOff.has(id) ? 0 : manualDose ? 0.5 : uc;
             uSum += u;
             const doseEq = u * Math.abs(st.capacity) * (h / 24);
             const keep = cloneStream(st.contents);
@@ -357,7 +362,7 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
           units[id] = { pH: st.contents.pH, pHmeasured: measured, pump: 100 * u, sp };
         } else if (kind === 'activatedSludge' && as[id]) {
           const V = Number(n.params.volume);
-          const r = stepAS(as[id], inlet, { V, srt: Number(n.params.srt), doSP: Number(n.params.do), blowerCap: blower.get(id) ?? 1, settleFactor: settle.get(id) ?? 1 }, inlet.T);
+          const r = stepAS(as[id], inlet, { V, srt: Number(n.params.srt), doSP: Number(n.params.do), blowerCap: blower.get(id) ?? 1, settleFactor: settle.get(id) ?? 1, manual: !hasInst(n, 'doLoop') }, inlet.T);
           as[id] = r.st;
           outlet = r.out;
           energy += ((r.kLa * V * oxygenSaturation(inlet.T)) / 1000 / 1.8) * dtD; // BSM1 aeration-energy relation (kWh)
@@ -370,7 +375,8 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
           units[id] = { pH: inlet.pH, pump: 0 };
         } else {
           // quasi-steady unit; a pH-probe offset makes its loop hold the TRUE pH at set-point − offset
-          const params = probe.has(id) && n.params.targetPH !== undefined ? { ...n.params, targetPH: Number(n.params.targetPH) - probe.get(id)! } : n.params;
+          const base = effectiveParams(n);
+          const params = probe.has(id) && base.targetPH !== undefined ? { ...base, targetPH: Number(base.targetPH) - probe.get(id)! } : base;
           const r = CATALOGUE[kind].run(inlet, params, { clarifierFollows: true });
           outlet = r.out;
           const c = r.calcs;

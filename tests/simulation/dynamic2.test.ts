@@ -115,10 +115,12 @@ describe('SCADA store actions', () => {
     expect(wrong.ok).toBe(false);
     expect(useGame.getState().plants[0].incident?.tried).toEqual(['recalibrate']);
     expect(useGame.getState().cash).toBe(99_700);
-    const right = useGame.getState().resolveIncident('p1', 'standbyBlower');
+    // no standby installed by default → switching to standby is not possible; emergency hire is
+    expect(useGame.getState().resolveIncident('p1', 'standbyBlower').ok).toBe(false);
+    const right = useGame.getState().resolveIncident('p1', 'hireBlower');
     expect(right.ok).toBe(true);
     expect(useGame.getState().plants[0].incident).toBeNull();
-    expect(useGame.getState().cash).toBe(97_700);
+    expect(useGame.getState().cash).toBe(99_700 - 9_000);
   });
   it('setSetpoint only accepts whitelisted operator set-points and clamps them', () => {
     useGame.setState({ plants: [mkPlant()], gameOver: false });

@@ -11,6 +11,7 @@
 import { Stream } from '../simulation/core/stream';
 import { Disturbance } from '../simulation/dynamic/plantDynamics';
 import { PNode, ProcessGraph } from '../simulation/treatment/graph';
+import { hasInst } from '../simulation/treatment/instrumentation';
 import { Rng } from './rng';
 
 export type IncidentKind = 'blowerTrip' | 'pumpTrip' | 'probeDrift' | 'toxicSlug' | 'hydraulicSurge' | 'bulking';
@@ -36,12 +37,16 @@ export interface IncidentAction {
   fixes: IncidentKind[];
   /** unit kinds this action needs somewhere in the plant */
   requires?: PNode['kind'][];
+  /** only offered when the faulty unit has (true) / lacks (false) a standby machine */
+  needsStandby?: boolean;
   explain: string;
 }
 
 export const ACTIONS: IncidentAction[] = [
-  { id: 'standbyBlower', label: 'Start standby blower & call blower service', cost: 2_000, fixes: ['blowerTrip'], requires: ['activatedSludge'], explain: 'Restores air supply; DO recovers within an hour.' },
-  { id: 'standbyPump', label: 'Switch to standby dosing pump', cost: 800, fixes: ['pumpTrip'], explain: 'Dosing resumes; the PI loop pulls pH back to set-point.' },
+  { id: 'standbyBlower', label: 'Start standby blower & call blower service', cost: 2_000, fixes: ['blowerTrip'], requires: ['activatedSludge'], needsStandby: true, explain: 'Restores air supply; DO recovers within an hour.' },
+  { id: 'hireBlower', label: 'Hire an emergency blower & repair the duty unit', cost: 9_000, fixes: ['blowerTrip'], requires: ['activatedSludge'], needsStandby: false, explain: 'No standby installed — a hired blower restores air until the duty blower is repaired.' },
+  { id: 'standbyPump', label: 'Switch to standby dosing pump', cost: 800, fixes: ['pumpTrip'], needsStandby: true, explain: 'Dosing resumes; the loop pulls pH back to set-point.' },
+  { id: 'hirePump', label: 'Emergency dosing-pump replacement', cost: 3_500, fixes: ['pumpTrip'], needsStandby: false, explain: 'No standby installed — a replacement pump is fitted the same day.' },
   { id: 'recalibrate', label: 'Two-point recalibrate pH probe (pH 4 / 7 buffers)', cost: 300, fixes: ['probeDrift'], explain: 'Removes the measurement offset — the loop was controlling to a wrong reading.' },
   { id: 'divertEQ', label: 'Divert to EQ / hold back feed, trace the source', cost: 1_200, fixes: ['toxicSlug', 'hydraulicSurge'], requires: ['eq'], explain: 'The EQ tank absorbs the slug or surge and feeds it forward at a controlled rate.' },
   { id: 'chlorinateRAS', label: 'Dose chlorine into return sludge (filament control)', cost: 1_500, fixes: ['bulking'], requires: ['activatedSludge'], explain: 'Kills exposed filaments; settleability (SVI) recovers over days.' },
@@ -54,15 +59,18 @@ const DOSING: PNode['kind'][] = ['neutralisation', 'precipitation', 'crReduction
 export function rollIncident(g: ProcessGraph, week: number, rng: Rng): Incident | null {
   const as = g.nodes.find((n) => n.kind === 'activatedSludge');
   const dosing = g.nodes.filter((n) => DOSING.includes(n.kind));
-  const opts: (() => Incident)[] = [() => mk('hydraulicSurge', null, 1.6 + 0.4 * rng.next(), ['Influent flow alarm HIGH', 'Customer reports a production wash-down after a shutdown'])];
+  const fm = hasInst(g.nodes.find((n) => n.kind === 'influent'), 'flow');
+  const opts: (() => Incident)[] = [() => mk('hydraulicSurge', null, 1.6 + 0.4 * rng.next(), [fm ? 'Influent flow alarm HIGH' : 'Operators report the inlet channel running unusually full', 'Customer reports a production wash-down after a shutdown'])];
   if (as) {
-    opts.push(() => mk('blowerTrip', as, 0, ['Aeration header pressure LOW', `Effluent clarity normal, odour reported around ${as.tag}`]));
+    opts.push(() => mk('blowerTrip', as, 0, [hasInst(as, 'doLoop') ? `DO LOW alarm at ${as.tag}; aeration header pressure LOW` : 'Aeration header pressure LOW', `Effluent clarity normal, odour reported around ${as.tag}`]));
     opts.push(() => mk('bulking', as, 0.35, ['Sludge blanket rising in secondary clarifier', 'Effluent turbid after the afternoon peak']));
     opts.push(() => mk('toxicSlug', as, 2 + 2 * rng.next(), ['Respiration (OUR) dropped sharply mid-shift', 'Blue-green tint seen in the inlet channel']));
   }
   for (const d of dosing) {
-    opts.push(() => mk('pumpTrip', d, 0, [`pH deviation alarm at ${d.tag}`, 'Reagent day-tank level unchanged since last shift']));
-    opts.push(() => mk('probeDrift', d, rng.chance(0.5) ? 2.0 : -2.0, [`Reagent consumption at ${d.tag} changed ~30 % with no change in production`, 'Lab bench pH disagrees with the online reading']));
+    // what the operator sees depends on what is instrumented (no pH loop → no alarm, only the weekly lab result)
+    const ph = d.kind === 'crReduction' || hasInst(d, 'pHLoop'); // Cr reduction's pH/ORP control is integral
+    opts.push(() => mk('pumpTrip', d, 0, [ph ? `pH deviation alarm at ${d.tag}` : 'Weekly lab sample: final effluent pH out of range', 'Reagent day-tank level unchanged since last shift']));
+    if (ph) opts.push(() => mk('probeDrift', d, rng.chance(0.5) ? 2.0 : -2.0, [`Reagent consumption at ${d.tag} changed ~30 % with no change in production`, 'Lab bench pH disagrees with the online reading']));
   }
   const f = rng.pick(opts);
   return f ? f() : null;
@@ -127,8 +135,21 @@ export function applyIncidentSteady(g: ProcessGraph, inf: Stream, inc: Incident 
   return { graph: { ...g, nodes }, influent };
 }
 
-export function availableActions(g: ProcessGraph): IncidentAction[] {
-  return ACTIONS.filter((a) => !a.requires || a.requires.every((k) => g.nodes.some((n) => n.kind === k)));
+export function availableActions(g: ProcessGraph, inc?: Incident | null): IncidentAction[] {
+  const unit = inc ? g.nodes.find((n) => n.id === inc.unitId) : undefined;
+  return ACTIONS.filter((a) => {
+    if (a.requires && !a.requires.every((k) => g.nodes.some((n) => n.kind === k))) return false;
+    if (a.needsStandby === undefined) return true;
+    // no incident given → list every possible action; a plant-wide incident → pump/blower actions are not offered
+    if (!unit) return inc === undefined;
+    return hasInst(unit, 'standby') === a.needsStandby;
+  });
+}
+
+/** A trip on a machine that has an installed standby changes over automatically (no incident, just a repair). */
+export function autoChangeover(g: ProcessGraph, inc: Incident): boolean {
+  if (inc.kind !== 'pumpTrip' && inc.kind !== 'blowerTrip') return false;
+  return hasInst(g.nodes.find((n) => n.id === inc.unitId), 'standby');
 }
 
 export const INCIDENT_LABEL: Record<IncidentKind, string> = {

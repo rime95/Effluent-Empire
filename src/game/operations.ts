@@ -12,7 +12,8 @@ import { IndustryId } from './industries';
 import { Market, marketOpex } from './market';
 import { commissioningInfluent } from './project';
 import { createRng } from './rng';
-import { Incident, INCIDENT_LABEL, applyIncidentSteady, incidentDisturbances, rollIncident } from './incidents';
+import { Incident, INCIDENT_LABEL, applyIncidentSteady, autoChangeover, incidentDisturbances, rollIncident } from './incidents';
+import { hasInst } from '../simulation/treatment/instrumentation';
 import { runDynamic } from '../simulation/dynamic/plantDynamics';
 
 export const OM = {
@@ -116,6 +117,18 @@ export function degradedGraph(g: ProcessGraph, b: Breakdown | null): ProcessGrap
 }
 
 /** Effluent sample from a 0–36 h dynamic replay of the disturbed plant at hour tH. */
+/** True if any pH or DO loop that the plant would normally have is not installed. */
+export function runsManually(g: ProcessGraph): boolean {
+  return g.nodes.some((n) => ((n.kind === 'neutralisation' || n.kind === 'precipitation') && !hasInst(n, 'pHLoop')) || (n.kind === 'activatedSludge' && !hasInst(n, 'doLoop')));
+}
+
+/** Grab sample from an undisturbed dynamic replay at hour tH (manual-control plants). */
+export function routineGrabSample(g: ProcessGraph, inf: Stream, std: StandardId, tH: number, warmBase?: Stream): { pass: boolean; failed: string[] } {
+  const r = runDynamic(g, inf, std, { hours: Math.ceil(tH + 1), disturbances: [], warmBase });
+  const pt = r.points.reduce((b, x) => (Math.abs(x.t - tH) < Math.abs(b.t - tH) ? x : b), r.points[0]);
+  return { pass: pt.pass, failed: pt.failed };
+}
+
 export function incidentGrabSample(g: ProcessGraph, inf: Stream, std: StandardId, inc: Incident, tH: number, warmBase?: Stream): { pass: boolean; failed: string[] } {
   // warm state from the plant's design stream → cached across weeks (weekly influent noise does not force a new warm-up)
   const r = runDynamic(g, inf, std, { hours: Math.ceil(tH + 1), disturbances: incidentDisturbances(inc), warmBase });
@@ -173,6 +186,13 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
     }
   } else if (!p.breakdown && rng.chance(OM.incidentChance)) {
     p.incident = rollIncident(p.graph, week, rng);
+    if (p.incident && autoChangeover(p.graph, p.incident)) {
+      const tag = p.incident.tag;
+      messages.push(`${p.company} — ${INCIDENT_LABEL[p.incident.kind]} at ${tag}: standby took over automatically. Duty unit repaired (RM 500).`);
+      cost += 500;
+      event = event ?? `Auto-changeover at ${tag}`;
+      p.incident = null;
+    }
     if (p.incident) {
       event = event ?? `Alarm: ${p.incident.symptoms[0]}`;
       messages.push(`${p.company} — SCADA alarm: ${p.incident.symptoms[0]}. Open SCADA to diagnose.`);
@@ -191,6 +211,14 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   const report = sim.effluent ? evaluate(sim.effluent, p.standard, sim) : null;
   let pass = !!report?.pass;
   let failed = report ? report.checks.filter((c) => !c.pass).map((c) => c.param) : ['no effluent'];
+  if (!p.incident && !p.breakdown && sim.ok && runsManually(p.graph)) {
+    // loops without instruments run on a fixed manual setting: the grab sample catches the plant at a random hour,
+    // with the daily production swing, from the dynamic replay (knowledge/operations/instrumentation.md)
+    // shorter replay (≤ 20 h) keeps weekly simulation light; warm state is cached on the design stream
+    const g = routineGrabSample(p.graph, inf, p.standard, rng.range(6, 19), p.trueStream);
+    pass = g.pass && pass;
+    failed = [...new Set([...failed, ...g.failed])];
+  }
   if (p.incident && sim.ok) {
     // During an incident the grab sample is taken from the dynamic plant (ASM1, PI loops) at a random hour of the
     // disturbed day: the steady models cannot represent oxygen-supply or settling failures (knowledge/operations/scada.md).

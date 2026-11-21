@@ -24,6 +24,8 @@ import { Stream } from '../../simulation/core/stream';
 import { DisposalSymbol, UnitSymbol } from '../components/Symbols';
 import { CATEGORY_COLOR, edgeTypes, nodeTypes, type DosingTag, type UnitNodeData } from './nodes';
 import { NumberField } from './NumberField';
+import { PidSheet } from './PidSheet';
+import { applicableInstruments, hasInst, STANDBY_BLOWER_EXTRA_RM, type InstKey } from '../../simulation/treatment/instrumentation';
 import { useHistory } from './useHistory';
 import { useSimulation } from './useSimulation';
 import type { Screen } from '../App';
@@ -170,6 +172,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
   const streamNos = useMemo(() => numberStreams(draft, sim?.order), [draft, sim?.order]);
   const [drawerTab, setDrawerTab] = useState<'compliance' | 'streams'>('compliance');
+  const [sheet, setSheet] = useState<'pfd' | 'pid'>('pfd');
   const rfEdges: Edge[] = useMemo(
     () =>
       draft.edges.map((e) => ({
@@ -359,6 +362,13 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
     });
   };
 
+  const toggleInst = useCallback(
+    (id: string, key: InstKey, on: boolean) => {
+      setDraft((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === id ? { ...n, inst: { ...(n.inst ?? {}), [key]: on } } : n)) }));
+    },
+    [setDraft],
+  );
+
   const updateParams = useCallback(
     (id: string, key: string, value: number | string) => {
       setDraft((g) => ({ ...g, nodes: g.nodes.map((n) => (n.id === id ? { ...n, params: { ...n.params, [key]: value } } : n)) }), `param:${id}:${key}`);
@@ -472,7 +482,28 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           <MiniMap pannable zoomable style={{ background: '#f6f8fa' }} nodeColor="#9aa7b4" />
         </ReactFlow>
 
-        <div className="studio-toolbar">
+        <div className="sheet-tabs">
+          <button className={sheet === 'pfd' ? 'on' : ''} onClick={() => setSheet('pfd')} title="Process flow diagram — draw and edit here">
+            PFD
+          </button>
+          <button className={sheet === 'pid' ? 'on' : ''} onClick={() => setSheet('pid')} title="Piping & instrumentation diagram — generated from the PFD and the instruments chosen per unit">
+            P&amp;ID
+          </button>
+        </div>
+        {sheet === 'pid' && (
+          <div className="pid-wrap">
+            <PidSheet
+              graph={draft}
+              sim={sim}
+              docNo={`EE-${p.id.slice(-4).toUpperCase()}-PFD-001`}
+              onSelect={(id) => {
+                setSelEdges(new Set());
+                setSelNodes(new Set([id]));
+              }}
+            />
+          </div>
+        )}
+        <div className="studio-toolbar" style={{ display: sheet === 'pid' ? 'none' : undefined }}>
           <button className="tb" onClick={hist.undo} disabled={!editable || !hist.canUndo} title="Undo (Ctrl+Z)">
             ↶
           </button>
@@ -570,13 +601,16 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
       <aside className="inspector">
         {single && !isNonUnit(single) ? (
-          <UnitInspector node={single} editable={editable} sim={sim} onParam={updateParams} />
+          <UnitInspector node={single} editable={editable} sim={sim} onParam={updateParams} onInst={toggleInst} />
         ) : selectedEdgeStream ? (
           <StreamTable title="Pipe stream" s={selectedEdgeStream} />
         ) : single?.kind === 'disposal' ? (
           <DisposalInspector id={single.id} tag={single.tag ?? 'SD'} sim={sim} />
         ) : single?.kind === 'influent' ? (
-          <StreamTable title="Raw wastewater (design basis)" s={basis.stream} />
+          <>
+            <StreamTable title="Raw wastewater (design basis)" s={basis.stream} />
+            <InstrumentSection node={single} editable={editable} onInst={toggleInst} />
+          </>
         ) : selNodes.size > 1 ? (
           <>
             <h2>{selNodes.size} units selected</h2>
@@ -798,7 +832,32 @@ function DisposalInspector({ id, tag, sim }: { id: string; tag: string; sim: Sim
   );
 }
 
-function UnitInspector({ node, editable, sim, onParam }: { node: PNode; editable: boolean; sim: SimResult | null; onParam: (id: string, key: string, v: number | string) => void }) {
+function InstrumentSection({ node, editable, onInst }: { node: PNode; editable: boolean; onInst: (id: string, key: InstKey, on: boolean) => void }) {
+  const defs = applicableInstruments(node.kind, node.params);
+  if (!defs.length) return null;
+  return (
+    <div className="inst-section">
+      <h2 style={{ fontSize: 12, marginTop: 14 }}>Instrumentation &amp; redundancy</h2>
+      {defs.map((d) => {
+        const on = hasInst(node, d.key);
+        const cost = d.capexRM + (d.key === 'standby' && node.kind === 'activatedSludge' ? STANDBY_BLOWER_EXTRA_RM : 0);
+        return (
+          <label key={d.key} className={`inst-row ${on ? 'on' : ''}`} title={d.why}>
+            <input type="checkbox" disabled={!editable} checked={on} onChange={(e) => onInst(node.id, d.key, e.target.checked)} />
+            <span className="inst-isa">{d.key === 'standby' ? (node.kind === 'activatedSludge' ? 'B·B' : 'P·B') : d.isa}</span>
+            <span className="inst-label">
+              {d.key === 'standby' ? (node.kind === 'activatedSludge' ? 'Standby blower (auto-changeover)' : 'Standby dosing pump (auto-changeover)') : d.label}
+              <small>{d.why}</small>
+            </span>
+            <span className="inst-cost">{rm(cost)}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function UnitInspector({ node, editable, sim, onParam, onInst }: { node: PNode; editable: boolean; sim: SimResult | null; onParam: (id: string, key: string, v: number | string) => void; onInst: (id: string, key: InstKey, on: boolean) => void }) {
   const def = CATALOGUE[node.kind as UnitType];
   const ns = sim?.nodes[node.id];
   return (
@@ -831,6 +890,7 @@ function UnitInspector({ node, editable, sim, onParam }: { node: PNode; editable
           {d.help && <span className="help">{d.help}</span>}
         </div>
       ))}
+      <InstrumentSection node={node} editable={editable} onInst={onInst} />
       {ns && (
         <>
           <h2 style={{ fontSize: 12, marginTop: 14 }}>Calculated performance</h2>
