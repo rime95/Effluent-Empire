@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useGame } from '../../game/store';
-import { OM, Plant, recommendedMaintenance } from '../../game/operations';
+import { OM, Plant, WEEKS_PER_MONTH, recommendedMaintenance } from '../../game/operations';
+import { OMFeeTable } from '../components/OMFee';
 import { operatorCapacity } from '../../game/staff';
 import { INDUSTRY_LABEL, rm } from '../format';
 
@@ -31,7 +32,7 @@ export function Plants() {
     <div className="page">
       <h1>Plants &amp; O&amp;M contracts</h1>
       <p className="sub">
-        Operated plants earn a weekly fee; you pay chemicals, power and sludge at market prices, maintenance, repairs and DOE fines. Operators cover {capacity} plant(s); {operating.length} operating
+        Operated plants earn a fixed monthly service fee, and chemicals, power and sludge are re-billed to the client at cost + {Math.round(OM.handling * 100)} %. You pay maintenance, CePIETSO supervision, compliance sampling, repairs and DOE fines; operators are on your payroll. Operators cover {capacity} plant(s); {operating.length} operating
         {operating.length > capacity && <b style={{ color: 'var(--warn)' }}> — {operating.length - capacity} uncovered (faster wear, longer breakdowns). Hire operators.</b>}
       </p>
       {g.plants.length === 0 && <div className="panel muted">No plants yet. Commission a plant and accept the O&amp;M contract the customer offers.</div>}
@@ -48,7 +49,7 @@ export function Plants() {
                 <th>Status</th>
                 <th>Condition</th>
                 <th>Last sample</th>
-                <th style={{ textAlign: 'right' }}>Fee / wk</th>
+                <th style={{ textAlign: 'right' }}>Fee / month</th>
                 <th style={{ textAlign: 'right' }}>Net last wk</th>
                 <th>Contract</th>
                 <th>Customer</th>
@@ -72,7 +73,7 @@ export function Plants() {
                       <ConditionBar value={p.condition} />
                     </td>
                     <td>{last ? <span className={`pill ${last.pass ? 'pass' : 'fail'}`}>{last.pass ? 'PASS' : `FAIL ${last.failed.join(', ')}`}</span> : <span className="muted">—</span>}</td>
-                    <td className="num">{p.contract ? rm(p.contract.weeklyFee) : '—'}</td>
+                    <td className="num">{p.contract ? rm(p.contract.monthlyFee) : '—'}</td>
                     <td className="num" style={{ color: last && last.revenue - last.cost < 0 ? '#ff9c9c' : undefined }}>{last ? rm(last.revenue - last.cost) : '—'}</td>
                     <td className="muted">{p.contract ? `${p.contract.endWeek - g.week} wk left` : '—'}</td>
                     <td>{p.satisfaction.toFixed(0)} %</td>
@@ -92,6 +93,23 @@ function PlantDetail({ plant }: { plant: Plant }) {
   const g = useGame();
   const rec = recommendedMaintenance(plant.capex);
   const data = plant.history.slice(-26).map((h) => ({ week: h.week, net: Math.round(h.revenue - h.cost), pass: h.pass }));
+  // last 4 weeks ≈ one month of the plant's own economics
+  const recent = plant.history.slice(-4);
+  const scale = recent.length ? WEEKS_PER_MONTH / recent.length : 0;
+  const sum = (f: (h: Plant['history'][number]) => number) => recent.reduce((a, h) => a + f(h), 0) * scale;
+  const month = {
+    fee: sum((h) => h.fee ?? h.revenue),
+    deduction: sum((h) => h.deduction ?? 0),
+    reimbursed: sum((h) => h.reimbursed ?? 0),
+    maintenance: sum((h) => h.costs?.maintenance ?? 0),
+    repairs: sum((h) => h.costs?.repairs ?? 0),
+    opex: sum((h) => h.costs?.opex ?? 0),
+    service: sum((h) => h.costs?.service ?? 0),
+    actions: sum((h) => h.costs?.actions ?? 0),
+    fines: sum((h) => h.costs?.fines ?? 0),
+  };
+  const monthNet = sum((h) => h.revenue - h.cost);
+  const [showQuote, setShowQuote] = useState(false);
   const compliance = plant.history.length ? (plant.history.filter((h) => h.pass).length / plant.history.length) * 100 : 100;
   return (
     <div className="grid g2">
@@ -127,13 +145,46 @@ function PlantDetail({ plant }: { plant: Plant }) {
         )}
       </div>
       <div className="panel">
-        <h2>Weekly result (last 26 weeks)</h2>
+        <h2>Contract economics — per month</h2>
+        {recent.length === 0 ? (
+          <p className="muted">No weeks operated yet.</p>
+        ) : (
+          <table className="data" style={{ fontSize: 12.5, marginBottom: 10 }}>
+            <tbody>
+              <tr><td>Fixed service fee</td><td className="num">{rm(month.fee)}</td></tr>
+              {month.deduction > 0 && <tr><td>Performance deductions (failed samples)</td><td className="num" style={{ color: '#ff9c9c' }}>{rm(-month.deduction)}</td></tr>}
+              <tr><td>Reimbursables billed</td><td className="num">{rm(month.reimbursed)}</td></tr>
+              <tr><td>Chemicals, power, sludge (market prices)</td><td className="num">{rm(-month.opex)}</td></tr>
+              <tr><td>Maintenance budget</td><td className="num">{rm(-month.maintenance)}</td></tr>
+              <tr><td>CePIETSO, sampling, management</td><td className="num">{rm(-month.service)}</td></tr>
+              {month.repairs > 0 && <tr><td>Repairs</td><td className="num">{rm(-month.repairs)}</td></tr>}
+              {month.actions > 0 && <tr><td>SCADA field actions</td><td className="num">{rm(-month.actions)}</td></tr>}
+              {month.fines > 0 && <tr><td>DOE fines</td><td className="num" style={{ color: '#ff9c9c' }}>{rm(-month.fines)}</td></tr>}
+              <tr>
+                <td style={{ fontWeight: 600 }}>Plant net (before operator payroll)</td>
+                <td className="num" style={{ fontWeight: 600, color: monthNet < 0 ? '#ff9c9c' : '#6fd39a' }}>{rm(monthNet)}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+        {plant.contract && (
+          <>
+            <button className="btn sm ghost" onClick={() => setShowQuote(!showQuote)}>{showQuote ? 'Hide' : 'Show'} contract fee build-up</button>
+            {showQuote && (
+              <div style={{ marginTop: 8 }}>
+                <OMFeeTable q={plant.contract.quote} monthlyFee={plant.contract.monthlyFee} />
+              </div>
+            )}
+          </>
+        )}
+        <h2 style={{ marginTop: 14 }}>Weekly result (last 26 weeks)</h2>
         <div className="lab-chart" style={{ height: 200 }}>
           <ResponsiveContainer>
             <BarChart data={data} margin={{ top: 8, right: 8, bottom: 4, left: 0 }}>
               <CartesianGrid stroke="#1c3653" />
               <XAxis dataKey="week" {...AXIS} />
-              <YAxis {...AXIS} />
+              <YAxis {...AXIS} width={56} tickFormatter={(v: number) => (Math.abs(v) >= 1000 ? `${+(v / 1000).toFixed(1)}k` : String(v))} label={{ value: 'RM / week', angle: -90, position: 'insideLeft', fill: '#8aa0b8', fontSize: 10, style: { textAnchor: 'middle' } }} />
+              <ReferenceLine y={0} stroke="#8aa0b8" />
               <Tooltip contentStyle={{ background: '#0d1c2e', border: '1px solid #24405f' }} formatter={(v: number) => rm(v)} labelFormatter={(l) => `Week ${l}`} />
               <Bar dataKey="net" isAnimationActive={false}>
                 {data.map((d) => (
@@ -143,7 +194,7 @@ function PlantDetail({ plant }: { plant: Plant }) {
             </BarChart>
           </ResponsiveContainer>
         </div>
-        <p className="muted" style={{ fontSize: 11 }}>Bars: weekly fee minus costs. Red = non-compliant sample that week.</p>
+        <p className="muted" style={{ fontSize: 11 }}>Bars: fee + reimbursables − plant costs (operator salaries are payroll). Red = non-compliant sample that week.</p>
         {plant.history
           .filter((h) => h.event || h.fine)
           .slice(-5)

@@ -9,7 +9,8 @@ import { LAB_TESTS, LabTestId, applyTest } from './lab';
 import { Market, initialMarket, stepMarket } from './market';
 import { INCIDENT_LABEL, availableActions, clampSetpoint } from './incidents';
 import { importLegacy, newSlotId, readSlot, summarize, writeSlot } from './saves';
-import { OM, Plant, omFeeOffer, operateWeek, recommendedMaintenance } from './operations';
+import { OM, Plant, omFeeQuote, operateWeek, recommendedMaintenance } from './operations';
+import { simulate } from '../simulation/treatment/graph';
 import { Project, ABANDON_PENALTY, commission, constructionWeeks, newProject } from './project';
 import { createRng } from './rng';
 import { Employee, founder, generateCandidates, labDiscount, labWeeks, operatorCapacity, payroll, projectSlots, salesBoost } from './staff';
@@ -153,6 +154,17 @@ function migrateAmmoniaCb(node: unknown, seen = new Set<unknown>()): void {
   for (const k of Object.keys(o)) migrateAmmoniaCb(o[k], seen);
 }
 
+/**
+ * Contracts signed before 2026-11-22 were a fixed weekly lump sum out of which the player paid every running cost
+ * (player feedback: far too low). They are re-priced to the fixed-fee + reimbursables model for the remaining term.
+ */
+export function repriceLegacyContract(p: Plant, reputation: number): Plant {
+  if (!p.contract || p.contract.quote) return p;
+  const sim = simulate(p.graph, p.trueStream);
+  const quote = omFeeQuote({ capex: p.capex, Q: p.trueStream.Q, std: p.standard, reputation, opexRMd: sim.opexRMd, graph: p.graph });
+  return { ...p, contract: { monthlyFee: quote.monthlyFee, quote, startWeek: p.contract.startWeek, endWeek: p.contract.endWeek } };
+}
+
 export function migrate(raw: unknown): GameState | null {
   const s = raw as Record<string, unknown>;
   if (!s || typeof s !== 'object') return null;
@@ -168,12 +180,17 @@ export function migrate(raw: unknown): GameState | null {
       ...d,
       ...v,
       projects: Array.isArray(v.projects) ? v.projects : [],
-      plants: Array.isArray(v.plants) ? v.plants : [],
+      plants: Array.isArray(v.plants) ? v.plants.map((p) => repriceLegacyContract(p, v.reputation ?? 0)) : [],
       staff: Array.isArray(v.staff) && v.staff.length ? v.staff : d.staff,
       candidates: Array.isArray(v.candidates) ? v.candidates : d.candidates,
       enquiries: Array.isArray(v.enquiries) ? v.enquiries : d.enquiries,
       market: v.market && Array.isArray(v.market.history) ? v.market : d.market,
-      news: Array.isArray(v.news) ? v.news : [],
+      news: [
+        ...(Array.isArray(v.news) ? v.news : []),
+        ...(Array.isArray(v.plants) && v.plants.some((p) => p.contract && !p.contract.quote)
+          ? [{ week: v.week, text: 'O&M contracts re-priced: a fixed monthly service fee plus chemicals, power and sludge re-billed at cost + 10 % (see Plants & O&M).' }]
+          : []),
+      ].slice(-60),
       history: Array.isArray(v.history) ? v.history : [],
       ledger: Array.isArray(v.ledger) ? v.ledger : [],
       seedCounter: typeof v.seedCounter === 'number' ? v.seedCounter : d.seedCounter,
@@ -249,7 +266,10 @@ export function stepWeek(state: GameState): GameState {
       if (rep.pass) s = book(s, `Retention released (10 %, net of LDs): ${p.enquiry.company}`, rep.payment, 'project');
       s = { ...s, reputation: s.reputation + rep.reputationDelta };
       const paid = p.paid + rep.milestone + (rep.pass ? rep.payment : 0);
-      const omOffer = rep.pass ? { weeklyFee: omFeeOffer(rep.opexRMd, p.enquiry.trueStream.Q), weeks: OM.contractWeeks } : null;
+      const builtGraph = p.building.graph ?? p.graph;
+      const omOffer = rep.pass
+        ? { quote: omFeeQuote({ capex: p.spent.capex, Q: p.enquiry.trueStream.Q, std: p.enquiry.standard, reputation: s.reputation, opexRMd: rep.opexRMd, graph: builtGraph }), weeks: OM.contractWeeks }
+        : null;
       s = updateProject(s, p.id, (x) => ({ ...x, building: null, built: p.building!.graph ?? x.graph, paid, attempts: x.attempts + 1, status: rep.pass ? 'completed' : 'failed', reports: [...x.reports, rep], omOffer }));
       if (rep.pass) {
         const x = s.projects.find((q) => q.id === p.id)!;
@@ -271,7 +291,12 @@ export function stepWeek(state: GameState): GameState {
     if (covered) capacity -= 1;
     const out = operateWeek(pl, week, s.market, covered);
     plants.push(out.plant);
-    s = book(s, `O&M ${pl.company}: fee − costs`, out.cash, 'om');
+    const rec = out.plant.history[out.plant.history.length - 1];
+    if (rec?.fee !== undefined) {
+      s = book(s, `O&M service fee: ${pl.company}${rec.deduction ? ' (less performance deduction)' : ''}`, rec.fee - (rec.deduction ?? 0), 'om');
+      if (rec.reimbursed) s = book(s, `Reimbursables billed (chemicals, power, sludge + ${Math.round(OM.handling * 100)} %): ${pl.company}`, rec.reimbursed, 'om');
+      s = book(s, `Plant running costs: ${pl.company}`, out.cash - (rec.fee - (rec.deduction ?? 0)) - (rec.reimbursed ?? 0), 'opex');
+    } else s = book(s, `O&M ${pl.company}: fee − costs`, out.cash, 'om');
     s.reputation += out.reputation;
     notices.push(...out.messages);
   }
@@ -400,6 +425,8 @@ export const useGame = create<GameState & Actions>((set, get) => {
         const p = s.projects.find((x) => x.id === projectId);
         if (!p || !p.omOffer || !p.built) return {};
         const capex = p.spent.capex;
+        // offers made before the 2026-11-22 contract model are re-priced when signed
+        const offer = p.omOffer.quote ? p.omOffer : { ...p.omOffer, quote: omFeeQuote({ capex, Q: p.enquiry.trueStream.Q, std: p.enquiry.standard, reputation: s.reputation, opexRMd: simulate(p.built, p.enquiry.trueStream).opexRMd, graph: p.built }) };
         const plant: Plant = {
           id: `plant-${p.id}`,
           company: p.enquiry.company,
@@ -410,7 +437,7 @@ export const useGame = create<GameState & Actions>((set, get) => {
           seed: p.enquiry.seed,
           capex,
           commissionedWeek: s.week,
-          contract: { weeklyFee: p.omOffer.weeklyFee, startWeek: s.week, endWeek: s.week + p.omOffer.weeks },
+          contract: { monthlyFee: offer.quote.monthlyFee, quote: offer.quote, startWeek: s.week, endWeek: s.week + offer.weeks },
           condition: 100,
           maintenanceBudget: recommendedMaintenance(capex),
           satisfaction: 75,
@@ -421,7 +448,7 @@ export const useGame = create<GameState & Actions>((set, get) => {
         };
         const projects = s.projects.filter((x) => x.id !== projectId);
         const activeProjectId = s.activeProjectId === projectId ? (projects.find(isLive)?.id ?? null) : s.activeProjectId;
-        return { plants: [...s.plants, plant], projects, activeProjectId, toast: `O&M contract signed: RM ${p.omOffer.weeklyFee.toLocaleString()}/week for 3 years.` };
+        return { plants: [...s.plants, plant], projects, activeProjectId, toast: `O&M contract signed: RM ${offer.quote.monthlyFee.toLocaleString()}/month service fee + reimbursables for 3 years.` };
       }),
     declineOM: (projectId) => set((s) => ({ projects: s.projects.map((p) => (p.id === projectId ? { ...p, omOffer: null } : p)) })),
     resolveIncident: (plantId, actionId) => {
@@ -437,7 +464,7 @@ export const useGame = create<GameState & Actions>((set, get) => {
       let next: GameState = a.cost ? book(s, `SCADA action at ${pl.company}: ${a.label}`, -a.cost, 'maintenance') : { ...s };
       next = {
         ...next,
-        plants: next.plants.map((p) => (p.id !== plantId || !p.incident ? p : { ...p, incident: ok ? null : { ...p.incident, tried: [...p.incident.tried, a.id] }, satisfaction: ok ? Math.min(100, p.satisfaction + 2) : p.satisfaction })),
+        plants: next.plants.map((p) => (p.id !== plantId || !p.incident ? p : { ...p, actionCost: (p.actionCost ?? 0) + a.cost, incident: ok ? null : { ...p.incident, tried: [...p.incident.tried, a.id] }, satisfaction: ok ? Math.min(100, p.satisfaction + 2) : p.satisfaction })),
         news: [...next.news, { week: s.week, text: `${pl.company} — ${text}` }].slice(-60),
       };
       set(next);

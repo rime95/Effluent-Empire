@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useActiveProject, useGame } from '../../game/store';
 import { ABANDON_PENALTY } from '../../game/project';
+import { OM } from '../../game/operations';
+import { OMFeeTable } from '../components/OMFee';
 import { ComplianceTable } from '../studio/Studio';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
@@ -91,9 +93,18 @@ export function Commissioning({ go }: { go: (s: Screen) => void }) {
         {p.status === 'completed' && i === p.reports.length - 1 && p.omOffer && (
           <div className="panel" style={{ marginTop: 12, borderColor: 'var(--flow)' }}>
             <div style={{ fontWeight: 600, color: '#fff' }}>Operation & maintenance contract offered</div>
-            <p className="muted" style={{ margin: '6px 0 10px' }}>
-              {p.enquiry.company} offers {rm(p.omOffer.weeklyFee)}/week for {p.omOffer.weeks / 52} years to operate the plant. You pay chemicals, power and sludge at market prices, maintenance, repairs and any DOE fines — and you need a plant operator (1 per 2 plants) or the plant wears out faster.
-            </p>
+            {p.omOffer.quote ? (
+              <>
+                <p className="muted" style={{ margin: '6px 0 10px' }}>
+                  {p.enquiry.company} offers a {p.omOffer.weeks / 52}-year O&amp;M contract: a fixed service fee of <b style={{ color: '#fff' }}>{rm(p.omOffer.quote.monthlyFee)}/month</b> plus chemicals, power and sludge re-billed at cost + {Math.round(OM.handling * 100)} %. You staff and maintain the plant (an operator covers 2 plants) and carry repairs and DOE fines.
+                </p>
+                <div style={{ maxWidth: 620, marginBottom: 10 }}>
+                  <OMFeeTable q={p.omOffer.quote} />
+                </div>
+              </>
+            ) : (
+              <p className="muted" style={{ margin: '6px 0 10px' }}>{p.enquiry.company} offers an O&amp;M contract; it is priced on the current contract model when you sign.</p>
+            )}
             <div className="row">
               <button className="btn primary" onClick={() => { g.acceptOM(p.id); go('plants'); }}>Sign O&M contract ▸</button>
               <button className="btn ghost" onClick={() => g.declineOM(p.id)}>Hand the plant over</button>

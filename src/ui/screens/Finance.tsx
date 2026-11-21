@@ -7,9 +7,9 @@ const AXIS = { stroke: '#8aa0b8', fontSize: 10, fontFamily: 'var(--mono)' };
 const CAT_LABEL: Record<LedgerCat, string> = {
   capital: 'Capital',
   project: 'Project payments',
-  om: 'O&M (fees − plant costs)',
-  opex: 'Operating costs',
-  maintenance: 'Maintenance',
+  om: 'O&M income (service fees + reimbursables)',
+  opex: 'Plant running costs (O&M)',
+  maintenance: 'SCADA field actions & maintenance',
   payroll: 'Payroll',
   overhead: 'Office overheads',
   lab: 'Laboratory',

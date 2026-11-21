@@ -8,6 +8,7 @@ import { Note } from '../simulation/treatment/types';
 import { Enquiry, PAYMENT } from './customers';
 import { Datasheet, LabTestId } from './lab';
 import { createRng } from './rng';
+import type { FeeQuote } from './operations';
 
 export type ProjectStatus = 'design' | 'building' | 'failed' | 'completed' | 'abandoned';
 
@@ -65,7 +66,8 @@ export interface Project {
    *  over the build (industry practice); legacy saves without it paid CAPEX up front and get the 60 % at completion. */
   building: { doneWeek: number; report: CommissionReport; graph: ProcessGraph; progress?: { capexPerWeek: number; claimPerWeek: number; weeksLeft: number } } | null;
   /** O&M contract offered after a successful commissioning */
-  omOffer: { weeklyFee: number; weeks: number } | null;
+  /** O&M offer after a passed commissioning: fixed monthly fee build-up + reimbursables (operations.ts omFeeQuote) */
+  omOffer: { quote: FeeQuote; weeks: number; weeklyFee?: number } | null;
 }
 
 export function starterGraph(): ProcessGraph {

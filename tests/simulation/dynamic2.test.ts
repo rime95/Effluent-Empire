@@ -9,7 +9,7 @@ import { ASM1, AS1State, derivatives, integrate } from '../../src/simulation/dyn
 import { cloneStream } from '../../src/simulation/core/stream';
 import { Incident } from '../../src/game/incidents';
 import { useGame } from '../../src/game/store';
-import { omFeeOffer, recommendedMaintenance, Plant } from '../../src/game/operations';
+import { contractFor, omFeeQuote, recommendedMaintenance, Plant } from '../../src/game/operations';
 
 function refPlant(industry: 'plating' | 'food', pred: (e: ReturnType<typeof generateEnquiry>) => boolean = () => true, seed0 = 11) {
   let e = generateEnquiry(seed0, 1, 0);
@@ -105,7 +105,7 @@ describe('SCADA store actions', () => {
     const incident: Incident = { kind: 'blowerTrip', unitId: as.id, tag: as.tag!, startWeek: 1, symptoms: ['x'], tried: [], magnitude: 0 };
     return {
       id: 'p1', company: e.company, industry: 'food', standard: 'B', graph, trueStream: e.trueStream, seed: e.seed, capex: sim.capex, commissionedWeek: 1,
-      contract: { weeklyFee: omFeeOffer(sim.opexRMd, e.trueStream.Q), startWeek: 1, endWeek: 157 },
+      contract: contractFor(omFeeQuote({ capex: sim.capex, Q: e.trueStream.Q, std: 'B', reputation: 0, opexRMd: sim.opexRMd, graph }), 1),
       condition: 100, maintenanceBudget: recommendedMaintenance(sim.capex), satisfaction: 75, fines: 0, breakdown: null, incident, history: [], status: 'operating',
     };
   };

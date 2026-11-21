@@ -6,7 +6,7 @@
  */
 import { Stream, cloneStream } from '../simulation/core/stream';
 import { CATALOGUE, Params, UnitType } from '../simulation/treatment/catalogue';
-import { evaluate, StandardId } from '../simulation/treatment/compliance';
+import { evaluate, limitsFor, StandardId } from '../simulation/treatment/compliance';
 import { PNode, ProcessGraph, simulate } from '../simulation/treatment/graph';
 import { IndustryId } from './industries';
 import { Market, marketOpex } from './market';
@@ -18,10 +18,28 @@ import { runDynamic } from '../simulation/dynamic/plantDynamics';
 
 export const OM = {
   contractWeeks: 156,
-  /** fee = 7·OPEX·markup + base + per-m³ management */
-  feeMarkup: 1.25,
-  feeBase: 1_500,
-  feePerM3d: 1.2,
+  // ---- O&M contract: fixed monthly service fee + reimbursables (knowledge/operations/om_model.md, GAME MODEL, verify) ----
+  /** plant operator basic salary, RM/month, and employer on-costs (EPF 13 %, SOCSO, EIS, leave, uniform/PPE) */
+  operatorSalary: 3_500,
+  onCost: 0.4,
+  /** CePIETSO competent person (Environmental Quality (Industrial Effluent) Regulations 2009): part-time supervision */
+  cepietsoSalary: 8_000,
+  cepietsoFTE: 0.15,
+  /** compliance sampling: accredited-lab price per parameter per weekly grab sample, RM */
+  labPerParam: 25,
+  /** contract management, insurance and head-office support, fraction of the direct cost base */
+  managementFraction: 0.1,
+  /** margin on the fixed-fee cost base: 125 % at reputation 0, ±25 points per 50 reputation, clamped 100–150 % */
+  marginBase: 1.25,
+  marginPerRep: 0.25 / 50,
+  marginMin: 1.0,
+  marginMax: 1.5,
+  /** chemicals, power and sludge disposal are re-billed to the client at cost plus handling */
+  handling: 0.1,
+  /** fixed fee escalation each contract year */
+  escalation: 0.04,
+  /** performance deduction per failed weekly sample, fraction of the monthly fixed fee */
+  deduction: 0.05,
   /** recommended maintenance = 2 % of CAPEX per year */
   maintenanceFraction: 0.02,
   wearPerWeek: 0.5,
@@ -57,6 +75,39 @@ export interface WeekRecord {
   flowFactor: number;
   event?: string;
   fine?: number;
+  /** revenue split (absent on old records): fixed fee, reimbursables billed, performance deduction */
+  fee?: number;
+  reimbursed?: number;
+  deduction?: number;
+  /** cost split, RM this week */
+  costs?: { maintenance: number; repairs: number; opex: number; service: number; actions: number; fines: number };
+}
+
+export const WEEKS_PER_MONTH = 52 / 12;
+
+/** Monthly fixed-fee build-up of an O&M offer (RM/month). */
+export interface FeeQuote {
+  operatorFTE: number;
+  staffing: number;
+  supervision: number;
+  maintenance: number;
+  lab: number;
+  management: number;
+  costBase: number;
+  margin: number;
+  monthlyFee: number;
+  /** expected reimbursables (chemicals, power, sludge at cost + handling), RM/month at base prices */
+  reimbursables: number;
+}
+
+export interface OMContract {
+  /** current fixed service fee, RM/month (escalates yearly) */
+  monthlyFee: number;
+  quote: FeeQuote;
+  startWeek: number;
+  endWeek: number;
+  /** legacy (pre-2026-11-22) lump-sum contracts: replaced by a re-priced contract on load */
+  weeklyFee?: number;
 }
 
 export interface Plant {
@@ -69,7 +120,9 @@ export interface Plant {
   seed: number;
   capex: number;
   commissionedWeek: number;
-  contract: { weeklyFee: number; startWeek: number; endWeek: number } | null;
+  contract: OMContract | null;
+  /** SCADA field-action costs booked since the last weekly record (shown in the plant's economics, already paid) */
+  actionCost?: number;
   condition: number;
   maintenanceBudget: number;
   satisfaction: number;
@@ -85,8 +138,58 @@ export function recommendedMaintenance(capex: number): number {
   return Math.round((capex * OM.maintenanceFraction) / 52);
 }
 
-export function omFeeOffer(opexRMd: number, Q: number): number {
-  return Math.round((7 * opexRMd * OM.feeMarkup + OM.feeBase + OM.feePerM3d * Q) / 10) * 10;
+/** Operators needed: half a post for a very small plant, one up to 300 m³/d, two above; +0.5 for an activated-sludge plant (daily DO/MLSS/SVI checks, weekend cover). */
+export function operatorFTE(Q: number, graph?: ProcessGraph): number {
+  const base = Q < 50 ? 0.5 : Q < 300 ? 1 : 2;
+  return base + (graph?.nodes.some((n) => n.kind === 'activatedSludge') ? 0.5 : 0);
+}
+
+/** Number of parameters in the weekly compliance sample (everything the standard regulates). */
+export function sampleParams(std: StandardId): number {
+  return Object.keys(limitsFor(std)).length;
+}
+
+/** O&M margin on the cost base for the company's reputation. */
+export function omMargin(reputation: number): number {
+  return Math.min(OM.marginMax, Math.max(OM.marginMin, OM.marginBase + OM.marginPerRep * reputation));
+}
+
+/**
+ * Fixed monthly service fee = (operators + CePIETSO supervision + maintenance + compliance sampling) × (1 + management)
+ * × (1 + margin). Chemicals, power and sludge are not in it: they are re-billed at cost + handling.
+ */
+export function omFeeQuote(o: { capex: number; Q: number; std: StandardId; reputation: number; opexRMd: number; graph?: ProcessGraph }): FeeQuote {
+  const fte = operatorFTE(o.Q, o.graph);
+  const staffing = fte * OM.operatorSalary * (1 + OM.onCost);
+  const supervision = OM.cepietsoFTE * OM.cepietsoSalary * (1 + OM.onCost);
+  const maintenance = (o.capex * OM.maintenanceFraction) / 12;
+  const lab = sampleParams(o.std) * OM.labPerParam * WEEKS_PER_MONTH;
+  const direct = staffing + supervision + maintenance + lab;
+  const management = direct * OM.managementFraction;
+  const costBase = direct + management;
+  const margin = omMargin(o.reputation);
+  const r = (x: number) => Math.round(x);
+  return {
+    operatorFTE: fte,
+    staffing: r(staffing),
+    supervision: r(supervision),
+    maintenance: r(maintenance),
+    lab: r(lab),
+    management: r(management),
+    costBase: r(costBase),
+    margin,
+    monthlyFee: Math.round((costBase * (1 + margin)) / 10) * 10,
+    reimbursables: r(((o.opexRMd * 365) / 12) * (1 + OM.handling)),
+  };
+}
+
+export function contractFor(quote: FeeQuote, startWeek: number, weeks = OM.contractWeeks): OMContract {
+  return { monthlyFee: quote.monthlyFee, quote, startWeek, endWeek: startWeek + weeks };
+}
+
+/** The plant's own weekly service costs that the fee's cost base covers and the plant pays (operators are on payroll). */
+export function weeklyServiceCost(q: FeeQuote): number {
+  return (q.supervision + q.lab + q.management) / WEEKS_PER_MONTH;
 }
 
 const BREAKDOWNS: Record<UnitType, { description: string; apply: (p: Params) => Params | 'bypass' }> = {
@@ -151,11 +254,26 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   let cost = 0;
   let event: string | undefined;
 
+  const costs = { maintenance: 0, repairs: 0, opex: 0, service: 0, actions: p.actionCost ?? 0, fines: 0 };
+  p.actionCost = 0;
+
+  // 0. contract-year escalation of the fixed fee
+  if (p.contract && week > p.contract.startWeek && (week - p.contract.startWeek) % 52 === 0) {
+    p.contract = { ...p.contract, monthlyFee: Math.round((p.contract.monthlyFee * (1 + OM.escalation)) / 10) * 10 };
+    messages.push(`${p.company}: contract anniversary — fixed fee escalated ${Math.round(OM.escalation * 100)} % to RM ${p.contract.monthlyFee.toLocaleString()}/month.`);
+  }
+
   // 1. equipment condition
   const rec = recommendedMaintenance(p.capex);
   const care = rec > 0 ? p.maintenanceBudget / rec : 1;
   p.condition = Math.max(0, Math.min(100, p.condition - OM.wearPerWeek - (covered ? 0 : OM.uncoveredWear) + 0.9 * Math.min(care, 2)));
   cost += p.maintenanceBudget;
+  costs.maintenance = p.maintenanceBudget;
+  // CePIETSO supervision, weekly compliance sampling, contract management (the fee's cost base; operators are on payroll)
+  if (p.contract) {
+    costs.service = weeklyServiceCost(p.contract.quote);
+    cost += costs.service;
+  }
 
   // 2. breakdowns
   if (p.breakdown) {
@@ -171,6 +289,7 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
         const unitCapex = CATALOGUE[u.kind as UnitType] ? p.capex / units.length : 0;
         const repair = Math.round(unitCapex * rng.range(0.005, 0.015));
         cost += repair;
+        costs.repairs += repair;
         p.breakdown = { unitId: u.id, tag: u.tag ?? u.kind, description: def.description, weeksLeft: weeks };
         event = `${u.tag}: ${def.description} (repair RM ${repair.toLocaleString()}, ${weeks} wk)`;
         messages.push(`${p.company} — ${event}`);
@@ -190,6 +309,7 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
       const tag = p.incident.tag;
       messages.push(`${p.company} — ${INCIDENT_LABEL[p.incident.kind]} at ${tag}: standby took over automatically. Duty unit repaired (RM 500).`);
       cost += 500;
+      costs.repairs += 500;
       event = event ?? `Auto-changeover at ${tag}`;
       p.incident = null;
     }
@@ -205,7 +325,8 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   inf.Q = inf.Q * flowFactor;
   const disturbed = applyIncidentSteady(degradedGraph(p.graph, p.breakdown), inf, p.incident ?? null);
   const sim = simulate(disturbed.graph, disturbed.influent);
-  cost += sim.ok ? 7 * marketOpex(sim.opexSplit, market) : 0;
+  costs.opex = sim.ok ? 7 * marketOpex(sim.opexSplit, market) : 0;
+  cost += costs.opex;
 
   // 4. grab sample and compliance
   const report = sim.effluent ? evaluate(sim.effluent, p.standard, sim) : null;
@@ -236,13 +357,21 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
       fine = Math.min(OM.fineMax, OM.fineBase * (1 + 0.5 * p.fines));
       p.fines += 1;
       cost += fine;
+      costs.fines = fine;
       reputation -= 8;
       messages.push(`DOE inspection at ${p.company}: effluent non-compliant (${failed.join(', ')}). Compound fine RM ${fine.toLocaleString()}, −8 reputation.`);
     }
   }
 
-  const revenue = p.contract ? p.contract.weeklyFee : 0;
-  p.history = [...p.history, { week, pass, failed, revenue, cost, condition: p.condition, flowFactor, event, fine }].slice(-52);
+  // revenue: weekly share of the fixed monthly fee, less a performance deduction on a failed sample,
+  // plus chemicals/power/sludge re-billed at actual cost + handling
+  const fee = p.contract ? p.contract.monthlyFee / WEEKS_PER_MONTH : 0;
+  const deduction = p.contract && !pass ? p.contract.monthlyFee * OM.deduction : 0;
+  const reimbursed = p.contract ? costs.opex * (1 + OM.handling) : 0;
+  if (deduction) messages.push(`${p.company}: failed sample — performance deduction RM ${Math.round(deduction).toLocaleString()} from the service fee.`);
+  const revenue = fee - deduction + reimbursed;
+  // field-action costs were paid when taken (ledger); they are shown in this week's plant costs but not charged again
+  p.history = [...p.history, { week, pass, failed, revenue, cost: cost + costs.actions, condition: p.condition, flowFactor, event, fine, fee, reimbursed, deduction, costs }].slice(-52);
 
   // 5. contract lifecycle
   if (p.contract && p.satisfaction < OM.terminateBelow) {

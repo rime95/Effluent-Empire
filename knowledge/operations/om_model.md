@@ -2,17 +2,40 @@
 
 Module: `src/game/operations.ts`. Every number here is a GAME MODEL value tuned for play, not engineering data.
 
-## Contract
-After a successful commissioning, the customer offers a 3-year (156-week) O&M contract.
+## Contract (revised 2026-11-22: fixed service fee + reimbursables)
+After a successful commissioning, the customer offers a 3-year (156-week) O&M contract. It is structured like a typical Malaysian industrial O&M service contract: a **fixed monthly service fee** plus **reimbursable consumables**. All rates are GAME MODEL; `verify:` against current contracts.
 
-    weekly fee = 7 · OPEX(base prices) · 1.25 + RM 1,500 + RM 1.2 · Q(m³/d)
+**Fixed monthly service fee** = cost base × (1 + margin), rounded to RM 10.
 
-The operator (the player) pays:
-- chemicals, electricity and sludge disposal at **market prices** (`market.ts`);
-- maintenance budget and repairs;
-- DOE fines.
+| Cost-base item | RM/month | Notes |
+|---|---|---|
+| Plant operators | FTE × 3,500 × 1.40 on-costs | FTE = 0.5 (Q < 50 m³/d), 1 (< 300), 2 (≥ 300); +0.5 for activated sludge. On-costs cover EPF 13 %, SOCSO/EIS, leave and PPE. `verify:` salary |
+| CePIETSO competent person | 0.15 × 8,000 × 1.40 | Certified Environmental Professional, part-time supervision (Environmental Quality (Industrial Effluent) Regulations 2009). `verify:` |
+| Preventive maintenance | 2 %/yr × CAPEX ÷ 12 | |
+| Compliance sampling | n_params × RM 25 × 52/12 | Weekly grab sample of every parameter the standard regulates. `verify:` lab price |
+| Management & insurance | 10 % of the above | |
 
-Operator salaries are paid through payroll.
+- **Margin:** 100–150 % on the cost base. It is 125 % at reputation 0, ±25 points per 50 reputation, clamped. This range was set by the player (2026-11-22).
+- **Reimbursables:** chemicals, electricity and sludge disposal at **market prices** and actual flow, re-billed to the client at cost + 10 % handling. The client carries price and flow risk.
+- **Escalation:** the fixed fee rises 4 % each contract year. `verify:`
+- **Performance deduction:** each failed weekly sample deducts 5 % of the monthly fee. DOE fines remain the operator's.
+
+What the plant pays each week (`operateWeek`):
+- the maintenance budget;
+- CePIETSO, sampling and management (cost base ÷ 52/12);
+- chemicals, power and sludge at market prices;
+- repairs, SCADA field actions and fines.
+
+Operators are paid through company payroll. The ledger shows the service fee, the reimbursables and plant running costs as separate lines.
+
+**Example** (plating, Q = 90 m³/d, CAPEX ≈ RM 420k, Standard B, reputation 0):
+- Cost base: operators 4,900 + CePIETSO 1,680 + maintenance 700 + sampling 1,517 + management 880 = **RM 9,677/month**.
+- Fixed fee: × 2.25 = **RM 21,770/month**.
+- Old model: RM 2,990/week ≈ RM 12,960/month, out of which the player also paid every chemical, power and sludge bill.
+
+**Why it changed (player feedback):** the old fee was 7·OPEX·1.25 + 1,500 + 1.2·Q per week, fixed for 3 years. It had no allowance for staff, supervision, sampling or risk, and no escalation, while running costs grew with flow (up to ×1.3) and market prices (up to ×1.6). A cheaper-to-run design even earned a lower fee.
+
+**Legacy saves:** lump-sum contracts are re-priced on load to the new model for their remaining term (`repriceLegacyContract`), and a news line says so.
 
 ## Weekly simulation
 1. **Equipment condition** (0–100):
@@ -42,7 +65,7 @@ Operator salaries are paid through payroll.
 ## Calibration (`tests/game/phase2.test.ts`)
 A staffed, maintained reference plant is more than 85 % compliant and profitable over a year. Typical results:
 - 0–2 failed samples per year.
-- About RM 90–120k net per year per plant before operator salary.
+- About RM 120–250k net per year per plant before operator salary (fixed-fee model; `tests/game/omContract.test.ts`). The old lump-sum model gave about RM 90–120k.
 - Neglected plants (no maintenance, no operator) lose more than 40 condition points per year.
 
 ## Staff (`src/game/staff.ts`)

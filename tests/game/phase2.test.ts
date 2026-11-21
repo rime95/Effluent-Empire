@@ -2,7 +2,7 @@
 import { generateEnquiry } from '../../src/game/customers';
 import { REFERENCE } from '../../src/game/referenceDesigns';
 import { linearGraph, simulate } from '../../src/simulation/treatment/graph';
-import { Plant, degradedGraph, omFeeOffer, operateWeek, recommendedMaintenance } from '../../src/game/operations';
+import { Plant, contractFor, degradedGraph, omFeeQuote, operateWeek, recommendedMaintenance } from '../../src/game/operations';
 import { initialMarket, stepMarket } from '../../src/game/market';
 import { createRng } from '../../src/game/rng';
 import { founder, generateCandidates, labDiscount, labWeeks, operatorCapacity, payroll, projectSlots } from '../../src/game/staff';
@@ -16,7 +16,7 @@ function plantFor(industry: 'plating' | 'food', seed0: number): Plant {
   const sim = simulate(graph, e.trueStream);
   return {
     id: 'p1', company: e.company, industry, standard: 'B', graph, trueStream: e.trueStream, seed: e.seed, capex: sim.capex, commissionedWeek: 1,
-    contract: { weeklyFee: omFeeOffer(sim.opexRMd, e.trueStream.Q), startWeek: 1, endWeek: 157 },
+    contract: contractFor(omFeeQuote({ capex: sim.capex, Q: e.trueStream.Q, std: 'B', reputation: 0, opexRMd: sim.opexRMd, graph }), 1),
     condition: 100, maintenanceBudget: recommendedMaintenance(sim.capex), satisfaction: 75, fines: 0, breakdown: null, history: [], status: 'operating',
   };
 }
@@ -57,9 +57,6 @@ describe('O&M economics', () => {
     const sim = simulate(g, p.trueStream);
     expect(sim.ok).toBe(true);
     expect(sim.effluent!.Q).toBeCloseTo(p.trueStream.Q, 6);
-  });
-  it('the O&M fee covers expected operating cost with margin', () => {
-    expect(omFeeOffer(500, 200)).toBeGreaterThan(7 * 500);
   });
 });
 
