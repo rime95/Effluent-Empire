@@ -192,3 +192,38 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 0 4px; border: 1px s
 .numfield { position: relative; }
 .numfield input.invalid { border-color: var(--warn) !important; }
 .numfield-hint { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 10.5px; color: var(--warn); pointer-events: none; }
+
+/* ---- PFD sheet (ISO-style equipment, stream numbers, dosing packages) ---- */
+.pfd-eq { position: relative; width: 120px; color: var(--ink); text-align: center; padding-bottom: 2px; }
+.pfd-eq svg { display: block; width: 120px; height: 80px; }
+.pfd-eq.selected::before { content: ''; position: absolute; inset: -6px -8px; border: 1.5px dashed var(--flow); border-radius: 4px; pointer-events: none; }
+.pfd-tag { height: 18px; line-height: 18px; font-family: var(--mono); font-weight: 700; font-size: 11.5px; letter-spacing: 0.03em; display: flex; align-items: center; justify-content: center; gap: 5px; }
+.pfd-tag .lamp { width: 8px; height: 8px; border-radius: 50%; display: inline-block; box-shadow: 0 0 0 1.5px var(--paper); }
+.pfd-name { font-size: 10px; color: var(--ink); line-height: 1.15; margin-top: 1px; }
+.pfd-duty { font-family: var(--mono); font-size: 9.5px; color: var(--ink-muted); }
+.pfd-dosing { position: absolute; left: 0; right: 0; top: -66px; height: 64px; pointer-events: none; }
+.pfd-dose { position: absolute; top: 0; width: 56px; display: flex; gap: 2px; align-items: flex-start; }
+.pfd-dose-label { font-family: var(--mono); font-size: 8.5px; color: var(--chem); text-align: left; line-height: 1.15; margin-top: 2px; white-space: nowrap; }
+.pfd-sludge { position: absolute; left: 50%; bottom: -34px; transform: translateX(-7px); display: flex; align-items: flex-end; gap: 3px; pointer-events: none; }
+.pfd-sludge span { font-family: var(--mono); font-size: 8.5px; color: var(--sludge); white-space: nowrap; margin-bottom: 2px; }
+.pfd-eq .react-flow__handle { width: 8px; height: 8px; border-radius: 1px; background: var(--paper); border: 1.6px solid var(--ink); }
+.pfd-eq .react-flow__handle:hover, .react-flow__handle.connectingto { background: var(--flow); }
+.pfd-terminal-arrow { position: relative; min-width: 120px; padding: 6px 22px 6px 10px; font-family: var(--mono); color: #fff; clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 0 100%); }
+.pfd-terminal-arrow.in { background: #6b4f2a; }
+.pfd-terminal-arrow.out { background: var(--clean); }
+.pfd-terminal-arrow.selected { outline: 2px dashed var(--flow); outline-offset: 3px; }
+.pfd-terminal-arrow .t-label { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; }
+.pfd-terminal-arrow .t-sub { font-size: 9.5px; opacity: 0.85; }
+.pipe-label { position: absolute; pointer-events: all; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.stream-no { position: relative; isolation: isolate; display: inline-grid; place-items: center; width: 22px; height: 22px; font-family: var(--mono); font-size: 9.5px; font-weight: 700; color: var(--ink); line-height: 1; }
+.stream-no::before { content: ""; position: absolute; inset: 4px; transform: rotate(45deg); background: var(--paper); border: 1.4px solid var(--ink); z-index: -1; }
+.pipe-label .stream-q { font-family: var(--mono); font-size: 9px; color: var(--ink-muted); background: rgba(238, 241, 244, 0.85); padding: 0 2px; margin-top: 3px; }
+.pipe-label.hi .stream-no { color: #fff; }
+.pipe-label.hi .stream-no::before { background: var(--clean); border-color: var(--clean); }
+.sheet-frame { position: absolute; inset: 6px; border: 2px solid #4b5a69; pointer-events: none; z-index: 4; box-shadow: inset 0 0 0 4px var(--canvas), inset 0 0 0 5px #9aa7b4; }
+.drawer-tabs { display: flex; gap: 2px; }
+.drawer-tabs button { background: transparent; border: 1px solid var(--chrome-line); border-bottom: none; color: var(--chrome-muted); padding: 5px 12px; border-radius: 6px 6px 0 0; cursor: pointer; font-size: 12.5px; font-weight: 600; }
+.drawer-tabs button.on { background: var(--chrome-2); color: #fff; border-color: var(--flow); }
+.stream-table th { cursor: pointer; text-align: center; white-space: nowrap; }
+.stream-table th.hi, .stream-table td.hi { background: rgba(47, 127, 209, 0.18); }
+.stream-table td.num { text-align: right; }

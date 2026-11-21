@@ -22,7 +22,7 @@ import { PNode, ProcessGraph, SimResult } from '../../simulation/treatment/graph
 import { evaluate, measure, STANDARDS } from '../../simulation/treatment/compliance';
 import { Stream } from '../../simulation/core/stream';
 import { UnitSymbol } from '../components/Symbols';
-import { CATEGORY_COLOR, nodeTypes, type UnitNodeData } from './nodes';
+import { CATEGORY_COLOR, edgeTypes, nodeTypes, type DosingTag, type UnitNodeData } from './nodes';
 import { NumberField } from './NumberField';
 import { useHistory } from './useHistory';
 import { useSimulation } from './useSimulation';
@@ -32,6 +32,33 @@ import { fmt, rm } from '../format';
 const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'coagulation', 'activatedSludge'];
 const GRID = 20;
 const isTerminal = (n: PNode) => n.kind === 'influent' || n.kind === 'discharge';
+/** Short reagent names for the dosing-package labels on the PFD. */
+function shortChem(name: string): string {
+  if (/NaOH/.test(name)) return 'NaOH';
+  if (/lime|Ca\(OH\)/i.test(name)) return 'Lime';
+  if (/H₂SO₄|H2SO4|sulph|sulfur/i.test(name)) return 'H₂SO₄';
+  if (/FeCl|ferric/i.test(name)) return 'FeCl₃';
+  if (/alum/i.test(name)) return 'Alum';
+  if (/PAC|polyalumin/i.test(name)) return 'PAC';
+  if (/polymer|PAM/i.test(name)) return 'Polymer';
+  if (/bisulfite|S₂O₅|metabisul/i.test(name)) return 'SMBS';
+  return name.split(/[ (]/)[0];
+}
+
+/** Stream numbers in flow order (topological when a simulation is available), so the PFD reads left to right. */
+function numberStreams(g: ProcessGraph, order: string[] | undefined): Map<string, number> {
+  const pos = new Map(g.nodes.map((n, i) => [n.id, defaultPos(n, i)]));
+  const seq = order && order.length ? order : [...g.nodes].sort((a, b) => (pos.get(a.id)!.x - pos.get(b.id)!.x)).map((n) => n.id);
+  const map = new Map<string, number>();
+  let k = 1;
+  for (const id of seq) {
+    const outs = g.edges.filter((e) => e.from === id).sort((a, b) => (pos.get(a.to)?.y ?? 0) - (pos.get(b.to)?.y ?? 0));
+    for (const e of outs) if (!map.has(e.id)) map.set(e.id, k++);
+  }
+  for (const e of g.edges) if (!map.has(e.id)) map.set(e.id, k++);
+  return map;
+}
+
 const newEdgeId = () => `p-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
 
 export function Studio(props: { go: (s: Screen) => void }) {
@@ -43,7 +70,7 @@ export function Studio(props: { go: (s: Screen) => void }) {
 }
 
 function defaultPos(n: PNode, i: number) {
-  return n.position ?? (n.kind === 'influent' ? { x: 0, y: 160 } : n.kind === 'discharge' ? { x: 1100, y: 160 } : { x: 160 + i * 150, y: 140 });
+  return n.position ?? (n.kind === 'influent' ? { x: 0, y: 160 } : n.kind === 'discharge' ? { x: 1100, y: 160 } : { x: 160 + i * 190, y: 160 });
 }
 
 function StudioInner({ go }: { go: (s: Screen) => void }) {
@@ -117,7 +144,8 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
         const c = ns?.result.calcs;
         const summary = c?.sor ? `SOR ${fmt(c.sor.value, 2)} m/h` : c?.pH && n.kind !== 'activatedSludge' ? `pH ${fmt(c.pH.value, 1)}` : c?.mlss ? `MLSS ${fmt(c.mlss.value, 0)}` : c?.rate ? `${fmt(c.rate.value, 1)} m/h` : c?.hrt ? `HRT ${fmt(c.hrt.value, 1)} h` : undefined;
         type = 'unit';
-        data = { kind: n.kind, tag: n.tag ?? n.kind, status, summary };
+        const dosing: DosingTag[] = (ns?.result.chemicals ?? []).filter((c) => c.kgPerDay > 0.01).map((c) => ({ label: shortChem(c.name), kgd: c.kgPerDay }));
+        data = { kind: n.kind, tag: n.tag ?? n.kind, status, summary, dosing, sludgeKgD: ns?.sludgeKgD };
       }
       const prev = cache.current.get(n.id);
       const sameData = prev && JSON.stringify(prev.data) === JSON.stringify(data);
@@ -132,20 +160,21 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
     return out;
   }, [draft, sim, selNodes, dragPos, editable, p]);
 
+  const streamNos = useMemo(() => numberStreams(draft, sim?.order), [draft, sim?.order]);
+  const [drawerTab, setDrawerTab] = useState<'compliance' | 'streams'>('compliance');
   const rfEdges: Edge[] = useMemo(
     () =>
       draft.edges.map((e) => ({
         id: e.id,
+        type: 'pipe',
         source: e.from,
         target: e.to,
         selected: selEdges.has(e.id),
         deletable: editable,
-        markerEnd: { type: MarkerType.ArrowClosed, color: '#00a9c8', width: 16, height: 16 },
-        label: sim?.edges[e.id] ? `${fmt(sim.edges[e.id].Q, 0)} m³/d` : undefined,
-        labelStyle: { fontFamily: 'var(--mono)', fontSize: 10, fill: '#1a2633' },
-        labelBgStyle: { fill: '#eef1f4' },
+        markerEnd: { type: MarkerType.ArrowClosed, color: '#00a9c8', width: 14, height: 14 },
+        data: { no: streamNos.get(e.id), q: sim?.edges[e.id] ? `${fmt(sim.edges[e.id].Q, 0)} m³/d` : undefined },
       })),
-    [draft.edges, sim, selEdges, editable],
+    [draft.edges, sim, selEdges, editable, streamNos],
   );
 
   // ---------- change handlers
@@ -225,7 +254,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       if (!p || !editable) return;
       const node = makeNode(kind, p.datasheet.Q, draft.nodes);
       const units = draft.nodes.filter((n) => !isTerminal(n)).length;
-      const pos = position ?? { x: 170 + units * 145, y: 120 + (units % 2) * 70 };
+      const pos = position ?? { x: 180 + units * 190, y: 160 };
       node.position = snap ? { x: Math.round(pos.x / GRID) * GRID, y: Math.round(pos.y / GRID) * GRID } : pos;
       setDraft((g) => ({ ...g, nodes: [...g.nodes, node] }));
       setSelNodes(new Set([node.id]));
@@ -385,6 +414,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           nodes={rfNodes}
           edges={rfEdges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
@@ -411,7 +441,6 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           fitViewOptions={{ padding: 0.25, maxZoom: 1.1 }}
           minZoom={0.3}
           onlyRenderVisibleElements
-          defaultEdgeOptions={{ type: 'smoothstep' }}
         >
           <Background variant={BackgroundVariant.Lines} gap={GRID} color="#dce1e7" />
           <Background id="major" variant={BackgroundVariant.Lines} gap={GRID * 5} color="#cdd4dc" />
@@ -477,10 +506,17 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           </div>
         )}
 
+        <div className="sheet-frame" />
         <div className="title-block">
           <div>
             <span>PROCESS FLOW DIAGRAM</span>
             <span>REV {String.fromCharCode(65 + Math.min(p.attempts, 25))}</span>
+          </div>
+          <div>
+            <span>DWG NO.</span>
+            <span>
+              EE-{p.id.slice(-4).toUpperCase()}-PFD-001 · SHEET 1/1 · NTS
+            </span>
           </div>
           <div>
             <span>CLIENT</span>
@@ -532,11 +568,30 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
       <section className="drawer">
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
-          <h2 style={{ margin: 0 }}>Predicted effluent vs {STANDARDS.standards[p.enquiry.standard].label}</h2>
+          <div className="drawer-tabs">
+            <button className={drawerTab === 'compliance' ? 'on' : ''} onClick={() => setDrawerTab('compliance')}>
+              Effluent vs {STANDARDS.standards[p.enquiry.standard].label}
+            </button>
+            <button className={drawerTab === 'streams' ? 'on' : ''} onClick={() => setDrawerTab('streams')}>
+              Stream table (mass balance)
+            </button>
+          </div>
           {report && <span className={`pill ${report.pass ? 'pass' : 'fail'}`}>{report.pass ? 'PREDICTED PASS' : `${report.checks.filter((c) => !c.pass).length} PARAMETER(S) FAIL`}</span>}
         </div>
-        {!report && <p className="muted">Connect raw wastewater → units → final discharge to see the predicted effluent.</p>}
-        {report && <ComplianceTable checks={report.checks} />}
+        {drawerTab === 'compliance' && !report && <p className="muted">Connect raw wastewater → units → final discharge to see the predicted effluent.</p>}
+        {drawerTab === 'compliance' && report && <ComplianceTable checks={report.checks} />}
+        {drawerTab === 'streams' && (
+          <StreamBalanceTable
+            graph={draft}
+            sim={sim}
+            numbers={streamNos}
+            selected={singleEdge}
+            onPick={(id) => {
+              setSelNodes(new Set());
+              setSelEdges(new Set([id]));
+            }}
+          />
+        )}
       </section>
     </div>
   );
@@ -707,6 +762,60 @@ function UnitInspector({ node, editable, sim, onParam }: { node: PNode; editable
       )}
       {!ns && <p className="muted">Connect this unit into the train to see its performance.</p>}
     </>
+  );
+}
+
+function StreamBalanceTable({ graph, sim, numbers, selected, onPick }: { graph: ProcessGraph; sim: SimResult | null; numbers: Map<string, number>; selected?: string; onPick: (edgeId: string) => void }) {
+  const tag = (id: string) => graph.nodes.find((n) => n.id === id)?.tag ?? (id === 'in' ? 'RAW' : id);
+  const cols = graph.edges
+    .map((e) => ({ e, no: numbers.get(e.id) ?? 0, s: sim?.edges[e.id] }))
+    .filter((c) => c.s)
+    .sort((a, b) => a.no - b.no);
+  if (!cols.length) return <p className="muted">Connect the train to see the stream table.</p>;
+  const rows: [string, (s: Stream) => number, number][] = [
+    ['Flow, m³/d', (s) => s.Q, 0],
+    ['pH', (s) => measure(s).pH, 2],
+    ['COD, mg/L', (s) => measure(s).COD, 0],
+    ['BOD₅, mg/L', (s) => measure(s).BOD5, 0],
+    ['TSS, mg/L', (s) => measure(s).TSS, 1],
+    ['O&G, mg/L', (s) => measure(s).OG, 1],
+    ['NH₄-N, mg/L', (s) => measure(s).NH3N, 1],
+    ['Ni total, mg/L', (s) => measure(s).Ni, 2],
+    ['Cu total, mg/L', (s) => measure(s).Cu, 2],
+    ['Zn total, mg/L', (s) => measure(s).Zn, 2],
+    ['Cr(VI), mg/L', (s) => measure(s).CrVI, 3],
+    ['Solids, kg/d', (s) => (s.Q * measure(s).TSS) / 1000, 1],
+  ];
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table className="data stream-table">
+        <thead>
+          <tr>
+            <th>Stream</th>
+            {cols.map((c) => (
+              <th key={c.e.id} className={selected === c.e.id ? 'hi' : ''} onClick={() => onPick(c.e.id)} title="Highlight this pipe on the PFD">
+                <span className="stream-no">{c.no}</span>
+                <div className="muted" style={{ fontSize: 10, fontWeight: 400 }}>
+                  {tag(c.e.from)} → {tag(c.e.to)}
+                </div>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([label, f, d]) => (
+            <tr key={label}>
+              <td>{label}</td>
+              {cols.map((c) => (
+                <td key={c.e.id} className={`num ${selected === c.e.id ? 'hi' : ''}`}>
+                  {fmt(f(c.s!), d)}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

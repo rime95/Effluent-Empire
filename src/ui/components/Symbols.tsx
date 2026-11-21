@@ -3,107 +3,135 @@ import { UnitType } from '../../simulation/treatment/catalogue';
 
 const INK = 'var(--ink)';
 
+/** Equipment symbols for the PFD (line art in the spirit of ISO 10628-2). viewBox 120×80; nozzles at x=0 / x=120, y=44. */
 export function UnitSymbol({ type, accent }: { type: UnitType; accent: string }) {
-  const common = { fill: 'none', stroke: INK, strokeWidth: 1.6, strokeLinejoin: 'round' as const };
+  const L = { fill: 'none', stroke: INK, strokeWidth: 1.7, strokeLinejoin: 'round' as const, strokeLinecap: 'round' as const };
+  const thin = { ...L, strokeWidth: 1.1 };
+  const liquid = (d: string) => <path d={d} fill={accent} opacity={0.13} stroke="none" />;
+  const level = (x1: number, x2: number, y: number) => <path d={`M${x1} ${y} h${x2 - x1}`} stroke={accent} strokeWidth={1.1} strokeDasharray="5 3" />;
+  // top-entry agitator: motor box, shaft, impeller
+  const agitator = (x: number, top: number, bottom: number, kind: 'hydrofoil' | 'paddle' = 'hydrofoil') => (
+    <g>
+      <rect x={x - 6} y={top - 9} width={12} height={8} {...L} />
+      <path d={`M${x} ${top - 1} V${bottom}`} {...L} />
+      {kind === 'hydrofoil' ? <path d={`M${x - 9} ${bottom + 3} L${x} ${bottom} L${x + 9} ${bottom - 3}`} {...L} /> : <path d={`M${x - 10} ${bottom} h20 M${x - 10} ${bottom - 6} v12 M${x + 10} ${bottom - 6} v12`} {...L} />}
+    </g>
+  );
+  const nozzles = <path d="M0 44 h8 M112 44 h8" {...L} />;
   switch (type) {
     case 'eq':
       return (
-        <svg viewBox="0 0 92 52">
-          <rect x="10" y="10" width="72" height="34" {...common} />
-          <path d="M10 22 h72" stroke={accent} strokeWidth="1.4" strokeDasharray="4 3" />
-          <path d="M46 4 v26 M38 30 h16" {...common} />
-          <rect x="10" y="22" width="72" height="22" fill={accent} opacity="0.12" />
+        <svg viewBox="0 0 120 80">
+          {liquid('M14 28 H106 V70 H14 Z')}
+          <path d="M14 14 V70 H106 V14" {...L} />
+          {level(14, 106, 28)}
+          {agitator(60, 12, 56)}
+          <path d="M8 44 h6 M106 60 h6 V44 h8 M0 44 h8" {...L} />
+          <text x="98" y="24" fontSize="8" fontFamily="var(--mono)" fill={INK}>LT</text>
         </svg>
       );
     case 'oilSep':
       return (
-        <svg viewBox="0 0 92 52">
-          <rect x="6" y="12" width="80" height="30" {...common} />
-          <path d="M30 12 v22 M62 18 v24" {...common} />
-          <rect x="7" y="13" width="78" height="5" fill={accent} opacity="0.35" />
-          <path d="M70 8 l8 -4" {...common} />
+        <svg viewBox="0 0 120 80">
+          {liquid('M10 30 H110 V66 H10 Z')}
+          <rect x="11" y="30" width="98" height="6" fill="#6b4f2a" opacity="0.35" />
+          <path d="M10 22 V66 H110 V22" {...L} />
+          {level(10, 110, 30)}
+          <path d="M38 22 V54 M78 36 V66" {...L} />
+          <circle cx="94" cy="31" r="4" {...L} />
+          <path d="M94 27 V14 h16" {...thin} />
+          <path d="M0 44 h10 M110 44 h10" {...L} />
         </svg>
       );
     case 'neutralisation':
     case 'precipitation':
+    case 'crReduction':
       return (
-        <svg viewBox="0 0 92 52">
-          <path d="M28 10 v30 q0 6 6 6 h24 q6 0 6 -6 v-30" {...common} />
-          <path d="M46 2 v30 M38 32 h16 M38 28 h16" {...common} />
-          <path d="M70 6 h12 v12" {...common} />
-          <path d="M78 14 l4 4 l4 -4" {...common} />
-          <circle cx="76" cy="30" r="7" {...common} />
-          <text x="76" y="33" textAnchor="middle" fontSize="8" fontFamily="var(--mono)" fill={INK}>{type === 'neutralisation' ? 'pH' : 'M'}</text>
-          <rect x="29" y="24" width="34" height="21" fill={accent} opacity="0.12" />
+        <svg viewBox="0 0 120 80">
+          {liquid('M38 26 H82 V64 Q82 72 74 72 H46 Q38 72 38 64 Z')}
+          <path d="M38 16 V64 Q38 72 46 72 H74 Q82 72 82 64 V16 Z" {...L} />
+          {level(38, 82, 26)}
+          {agitator(60, 14, 58)}
+          <path d="M42 30 V62 M78 30 V62" {...thin} />
+          <path d="M0 44 h38 M82 44 h38" {...L} />
+          <circle cx="96" cy="22" r="7" {...thin} />
+          <text x="96" y="25" textAnchor="middle" fontSize="7" fontFamily="var(--mono)" fill={INK}>{type === 'crReduction' ? 'ORP' : 'pH'}</text>
+          <path d="M89 22 H82" {...thin} strokeDasharray="2 2" />
         </svg>
       );
     case 'coagulation':
       return (
-        <svg viewBox="0 0 92 52">
-          <rect x="6" y="12" width="34" height="32" {...common} />
-          <rect x="44" y="12" width="42" height="32" {...common} />
-          <path d="M23 4 v24 M17 28 h12" {...common} />
-          <path d="M58 6 v22 M72 6 v22 M53 22 h10 M67 22 h10" {...common} />
-          <circle cx="54" cy="36" r="2" fill={accent} />
-          <circle cx="66" cy="38" r="3" fill={accent} />
-          <circle cx="78" cy="35" r="2.5" fill={accent} />
+        <svg viewBox="0 0 120 80">
+          {liquid('M10 28 H48 V70 H10 Z')}
+          {liquid('M52 28 H110 V70 H52 Z')}
+          <path d="M10 16 V70 H48 V16 M52 16 V70 H110 V16" {...L} />
+          {level(10, 48, 28)}
+          {level(52, 110, 28)}
+          {agitator(29, 14, 56)}
+          {agitator(81, 14, 52, 'paddle')}
+          <circle cx="70" cy="64" r="2" fill={accent} />
+          <circle cx="92" cy="62" r="3" fill={accent} />
+          <path d="M0 44 h10 M110 44 h10" {...L} />
         </svg>
       );
     case 'clarifier':
       return (
-        <svg viewBox="0 0 92 52">
-          <path d="M8 12 h76 v18 l-32 16 h-12 l-32 -16 z" {...common} />
-          <path d="M46 4 v36" {...common} />
-          <path d="M14 18 h64" stroke={accent} strokeWidth="1.2" strokeDasharray="3 3" />
-          <path d="M28 40 l18 6 l18 -6" fill="var(--sludge)" opacity="0.35" />
+        <svg viewBox="0 0 120 80">
+          {liquid('M12 24 H108 V48 L66 70 H54 L12 48 Z')}
+          <path d="M12 16 V48 L54 70 H66 L108 48 V16" {...L} />
+          <path d="M12 22 h8 v4 M108 22 h-8 v4" {...thin} />
+          <path d="M50 20 h20 v14 h-20 z" {...thin} />
+          <path d="M60 8 V64" {...L} />
+          <path d="M22 50 L60 62 L98 50" {...thin} />
+          <path d="M54 70 v6 h12 v-6" fill="var(--sludge)" opacity="0.45" stroke={INK} strokeWidth={1.1} />
+          <path d="M0 44 h12 M108 30 h12" {...L} />
         </svg>
       );
     case 'activatedSludge':
       return (
-        <svg viewBox="0 0 92 52">
-          <rect x="6" y="10" width="80" height="34" {...common} />
-          <rect x="7" y="16" width="78" height="27" fill={accent} opacity="0.12" />
-          <path d="M14 40 h64" {...common} />
-          {[18, 30, 42, 54, 66].map((x) => (
+        <svg viewBox="0 0 120 80">
+          {liquid('M8 26 H112 V70 H8 Z')}
+          <path d="M8 16 V70 H112 V16" {...L} />
+          {level(8, 112, 26)}
+          <path d="M16 64 H104" {...L} />
+          {[22, 38, 54, 70, 86, 100].map((x) => (
             <g key={x}>
-              <circle cx={x + 2} cy="34" r="2" fill="none" stroke={accent} strokeWidth="1.2" />
-              <circle cx={x + 5} cy="26" r="1.6" fill="none" stroke={accent} strokeWidth="1.2" />
-              <circle cx={x + 1} cy="20" r="1.3" fill="none" stroke={accent} strokeWidth="1.2" />
+              <path d={`M${x - 4} 64 h8`} stroke={INK} strokeWidth={3} />
+              <circle cx={x} cy="56" r="1.8" {...thin} stroke={accent} />
+              <circle cx={x + 2} cy="46" r="1.5" {...thin} stroke={accent} />
+              <circle cx={x - 1} cy="36" r="1.2" {...thin} stroke={accent} />
             </g>
           ))}
-        </svg>
-      );
-    case 'crReduction':
-      return (
-        <svg viewBox="0 0 92 52">
-          <path d="M28 10 v30 q0 6 6 6 h24 q6 0 6 -6 v-30" {...common} />
-          <path d="M46 2 v30 M38 32 h16" {...common} />
-          <rect x="29" y="22" width="34" height="23" fill="#3fa34d" opacity="0.25" />
-          <circle cx="77" cy="18" r="8" {...common} />
-          <text x="77" y="21" textAnchor="middle" fontSize="7" fontFamily="var(--mono)" fill={INK}>ORP</text>
-          <text x="14" y="30" textAnchor="middle" fontSize="8" fontFamily="var(--mono)" fill={INK}>Cr⁶</text>
-        </svg>
-      );
-    case 'carbon':
-      return (
-        <svg viewBox="0 0 92 52">
-          <rect x="30" y="4" width="32" height="44" rx="10" {...common} />
-          <rect x="31" y="14" width="30" height="26" fill="#222" opacity="0.75" />
-          <path d="M18 10 h12 M62 42 h12" {...common} />
+          <path d="M60 6 V16 M54 6 h12" {...L} />
+          <path d="M0 44 h8 M112 44 h8" {...L} />
         </svg>
       );
     case 'sandFilter':
       return (
-        <svg viewBox="0 0 92 52">
-          <rect x="22" y="6" width="48" height="40" rx="3" {...common} />
-          <rect x="23" y="22" width="46" height="18" fill="#d9c79a" opacity="0.55" />
-          {Array.from({ length: 18 }).map((_, i) => (
-            <circle key={i} cx={27 + (i % 9) * 5} cy={i < 9 ? 27 : 34} r="1" fill={INK} />
+        <svg viewBox="0 0 120 80">
+          <path d="M26 12 V70 H94 V12" {...L} />
+          {liquid('M27 20 H93 V36 H27 Z')}
+          {level(26, 94, 20)}
+          <rect x="27" y="36" width="66" height="18" fill="#d9c79a" opacity="0.6" />
+          <rect x="27" y="54" width="66" height="8" fill="#9aa1a8" opacity="0.5" />
+          {Array.from({ length: 22 }).map((_, i) => (
+            <circle key={i} cx={31 + (i % 11) * 6} cy={i < 11 ? 41 : 49} r="1" fill={INK} />
           ))}
-          <path d="M23 14 h46" stroke={accent} strokeWidth="1.2" strokeDasharray="3 3" />
+          <path d="M30 66 H90" {...thin} strokeDasharray="3 2" />
+          <path d="M0 26 h26 M94 66 h12 V44 h14" {...L} />
+        </svg>
+      );
+    case 'carbon':
+      return (
+        <svg viewBox="0 0 120 80">
+          <path d="M44 16 Q44 6 60 6 Q76 6 76 16 V64 Q76 74 60 74 Q44 74 44 64 Z" {...L} />
+          <rect x="45" y="22" width="30" height="38" fill="#2b2b2b" opacity="0.7" />
+          <path d="M45 22 h30 M45 60 h30" {...thin} />
+          <path d="M0 44 h20 V10 h40 v-4 M60 74 v4 h40 V44 h20" {...L} />
         </svg>
       );
   }
+  return nozzles;
 }
 
 export function NavIcon({ name }: { name: string }) {
