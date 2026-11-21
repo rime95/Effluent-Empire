@@ -18,7 +18,7 @@
 import { Stream, cloneStream, poolMass } from '../core/stream';
 import { MW, eqL_to_mgCaCO3, mgL_to_molL, molL_to_mgL } from '../core/units';
 import { Note, ProcessResult, result } from '../treatment/types';
-import { adjustPH, equilibrate } from './acidBase';
+import { adjustPH, equilibrate, solvePH } from './acidBase';
 import { REAGENTS } from './neutralisation';
 
 export type Coagulant = 'alum' | 'ferric' | 'pac';
@@ -80,6 +80,23 @@ export interface CoagulationInput {
   flocTime_min: number;
   /** optional pH control in the flash-mix tank (NaOH/H2SO4 trim to this set-point after coagulant dosing); 0 = off */
   pHset?: number;
+  /** anionic polyacrylamide flocculant aid, mg/L active (0 = none) */
+  polymer_mgL?: number;
+}
+
+/** verify: anionic PAM optimum ≈ 0.5–2 mg/L for metal-hydroxide / coagulant floc; price RM/kg (GAME MODEL) */
+// verify: polymer-aided hydroxide/coagulant floc typically settles at ≈ 1.5–4 m/h (chemistry review) → gain 0.4 gives ≈ 4.2 m/h
+// at the optimum with full flocculation time. Polymer mass itself (≈ 1 mg/L) is neglected in the solids balance.
+export const POLYMER = { optimum_mgL: 1.0, maxGain: 0.4, bridging: 0.8, priceRMkg: 14, label: 'Anionic polymer (PAM)' };
+
+/**
+ * Polymer bridging effectiveness (GAME MODEL): rises to 1 at the optimum dose and falls off when overdosed
+ * (excess polymer re-stabilises / carries over): eff = r·e^(1 − r), r = dose/optimum.
+ */
+export function polymerEffect(dose_mgL: number): number {
+  if (!(dose_mgL > 0)) return 0;
+  const r = dose_mgL / POLYMER.optimum_mgL;
+  return r * Math.exp(1 - r);
 }
 
 export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
@@ -104,40 +121,64 @@ export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
   let out = equilibrate(dosed);
   let trimSO4 = 0;
   const chemicals = [{ name: spec.label, kgPerDay: (s.Q * p.dose_mgL) / 1000, priceRMkg: spec.priceRMkg }];
+  if ((p.polymer_mgL ?? 0) > 0) chemicals.push({ name: POLYMER.label, kgPerDay: (s.Q * (p.polymer_mgL ?? 0)) / 1000, priceRMkg: POLYMER.priceRMkg });
+  // Al(OH)3(am) solubility (verify: log*Ks0 = 10.8; Al(OH)4− formation log*K = −12.1 relative to the solid; MWH Ch. 9 /
+  // Stumm & Morgan Fig. 6.6). Dissolved Al3+ adds +3 eq and aluminate −1 eq relative to the neutral solid (Cb bookkeeping).
+  // Solved properly (chemistry review 2026-11-22): the pH and the dissolved Al are found together by bisection on pH,
+  // instead of an undamped fixed-point loop that oscillated and stopped short of equilibrium.
+  const alAt = (pH: number) => {
+    const al3 = Math.pow(10, 10.8 - 3 * pH);
+    const alO4 = Math.pow(10, -12.1 + pH);
+    return { solMgL: molL_to_mgL(al3 + alO4, MW.Al), zbar: (3 * al3 - alO4) / (al3 + alO4) };
+  };
+  let ref = out; // reference state: all Al as neutral solid
+  if (p.coagulant !== 'ferric' && out.alDissolved > 0) {
+    ref = cloneStream(out);
+    ref.Cb -= mgL_to_molL(out.alDissolved, MW.Al) * alAt(out.pH).zbar;
+    ref.alSolid += out.alDissolved;
+    ref.alDissolved = 0;
+  }
+  const withAl = (pH: number): Stream => {
+    if (p.coagulant === 'ferric') return ref;
+    const total = ref.alSolid + ref.alDissolved;
+    const { solMgL, zbar } = alAt(pH);
+    const d = Math.min(total, solMgL);
+    const t = cloneStream(ref);
+    t.alDissolved = d;
+    t.alSolid = total - d;
+    t.Cb += mgL_to_molL(d, MW.Al) * zbar;
+    return t;
+  };
   if (p.pHset && p.pHset > 0) {
-    const adj = adjustPH(out, p.pHset, 'NaOH');
+    // pH controller holds the set-point: Al speciation at the set-point is known, so one exact dose (net, single reagent)
+    const adj = adjustPH(withAl(p.pHset), p.pHset, 'NaOH');
     out = equilibrate(adj.stream);
     const r = REAGENTS[adj.reagent];
-    if (adj.reagent === 'H2SO4') trimSO4 = adj.mol;
-    chemicals.push({ name: r.label, kgPerDay: (s.Q * adj.mol * r.mw * 1000) / 1000, priceRMkg: r.priceRMkg });
-  }
-
-  // Al(OH)3(am) solubility (verify: log*Ks0 = 10.8; Al(OH)4− formation log*K = −12.1 relative to the solid; MWH Ch. 9 /
-  // Stumm & Morgan Fig. 6.6). Dissolved Al3+ adds +3 eq and aluminate −1 eq relative to the neutral solid.
-  if (p.coagulant !== 'ferric') {
-    for (let i = 0; i < 4; i++) {
-      const totalAl = out.alSolid + out.alDissolved;
-      const al3 = Math.pow(10, 10.8 - 3 * out.pH);
-      const alO4 = Math.pow(10, -12.1 + out.pH);
-      const solMgL = molL_to_mgL(al3 + alO4, MW.Al);
-      const diss = Math.min(totalAl, solMgL);
-      const delta = diss - out.alDissolved;
-      if (Math.abs(delta) < 1e-6) break;
-      const zbar = (3 * al3 - alO4) / (al3 + alO4);
-      const t = cloneStream(out);
-      t.alDissolved = diss;
-      t.alSolid = totalAl - diss;
-      t.Cb += mgL_to_molL(delta, MW.Al) * zbar;
-      out = equilibrate(t);
+    if (adj.reagent === 'H2SO4') trimSO4 += adj.mol;
+    if (adj.mol > 0) chemicals.push({ name: r.label, kgPerDay: (s.Q * adj.mol * r.mw * 1000) / 1000, priceRMkg: r.priceRMkg });
+  } else if (p.coagulant !== 'ferric') {
+    // g(x) = pH solved with Al speciated at x, minus x: decreasing in x (more aluminate consumes base) → bisection
+    let lo = 1;
+    let hi = 13;
+    for (let i = 0; i < 50; i++) {
+      const mid = (lo + hi) / 2;
+      if (solvePH(withAl(mid)) > mid) lo = mid;
+      else hi = mid;
     }
-    if (out.alDissolved > 0.5) notes.push({ level: 'warn', code: 'coag.aluminate', text: `${out.alDissolved.toFixed(1)} mg/L Al stays dissolved at pH ${out.pH.toFixed(2)} — aluminium hydroxide is soluble outside pH ≈ 5.5–8.` });
+    out = equilibrate(withAl((lo + hi) / 2));
   }
+  if (p.coagulant !== 'ferric' && out.alDissolved > 0.5)
+    notes.push({ level: 'warn', code: 'coag.aluminate', text: `${out.alDissolved.toFixed(1)} mg/L Al stays dissolved at pH ${out.pH.toFixed(2)} — aluminium hydroxide is soluble outside pH ≈ 5.5–8.` });
 
   const fpH = pHFactor(out.pH, p.coagulant);
-  const E = destabilisation(x, fpH);
+  const alTot = out.alSolid + out.alDissolved;
+  const solidFrac = p.coagulant === 'ferric' || alTot <= 0 ? 1 : out.alSolid / alTot; // dissolved Al (aluminate) forms no floc
+  const E = destabilisation(x * solidFrac, fpH);
   // floc growth with flocculation time (GAME MODEL: first-order approach, τ = 8 min)
   const growth = 1 - Math.exp(-p.flocTime_min / 8);
-  const vFloc = 0.3 + 2.7 * growth;
+  // polymer bridging grows floc further (GAME MODEL): × (1 + 0.4·eff) → ≈ 4.2 m/h at the optimum with full flocculation time
+  const polyEff = polymerEffect(p.polymer_mgL ?? 0);
+  const vFloc = (0.3 + 2.7 * growth) * (1 + POLYMER.maxGain * polyEff);
 
   const moved = out.colloid * E;
   out.colloid -= moved;
@@ -146,6 +187,8 @@ export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
   out.v50.alFloc = vFloc;
   out.v50.feFloc = vFloc * 1.15;
   out.v50.precipitate = out.v50.precipitate * (1 - E) + vFloc * E;
+  // anionic polymer bridges hydroxide precipitate directly (no charge neutralisation needed). verify: bridging share 0.8
+  if (polyEff > 0) out.v50.precipitate += (vFloc - out.v50.precipitate) * POLYMER.bridging * Math.min(1, polyEff) * (1 - E);
   out.v50.organic = out.v50.organic * (1 - E) + vFloc * E;
   // emulsion breaking: destabilised emulsified oil becomes separable free oil (GAME MODEL, 70 % of E)
   const broken = out.OGemulsified * 0.7 * E;
@@ -157,6 +200,20 @@ export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
   else if (x > 1.6 && x < 3) notes.push({ level: 'warn', code: 'coag.restabilise', text: `Over-dosed into the restabilisation zone (${x.toFixed(1)}× optimum): particle charge reversed.` });
   else if (x >= 3) notes.push({ level: 'info', code: 'coag.sweep', text: `Sweep-floc regime (${x.toFixed(1)}× optimum): good removal but high sludge and chemical cost.` });
   if (fpH < 0.8) notes.push({ level: 'warn', code: 'coag.pH', text: `pH ${out.pH.toFixed(2)} is outside the ${spec.label} window (${spec.pHmin}–${spec.pHmax}).` });
+  // metals re-dissolved by the coagulant's acidity (precipitation undone before the clarifier)
+  for (const m of ['Ni', 'Cu', 'Zn', 'Cr'] as const) {
+    const back = out.dissolved[m] - s.dissolved[m];
+    if (back > 0.2 && back > 0.1 * (s.dissolved[m] + s.precipitated[m]))
+      notes.push({
+        level: 'error',
+        code: `coag.redissolve.${m}`,
+        text:
+          `${back.toFixed(1)} mg/L ${m} RE-DISSOLVED: the coagulant lowered the pH from ${s.pH.toFixed(2)} to ${out.pH.toFixed(2)}, where ${m}(OH)₂ is soluble. ` +
+          (p.coagulant === 'ferric' || s.pH <= COAGULANTS[p.coagulant].pHmax
+            ? `Set this unit's pH control set-point to ${s.pH.toFixed(1)}.`
+            : `Aluminium coagulants dissolve as aluminate above pH ≈ ${COAGULANTS[p.coagulant].pHmax} — switch to ferric with pH control at ${s.pH.toFixed(1)}, use polymer alone, or settle the hydroxide before any acidic coagulant.`),
+      });
+  }
   if (out.pH < s.pH - 1) notes.push({ level: 'warn', code: 'coag.alkalinity', text: `Coagulant consumed ${alkUsed.toFixed(0)} mg/L alkalinity as CaCO₃; pH fell from ${s.pH.toFixed(2)} to ${out.pH.toFixed(2)}.` });
 
   return result(out, {
@@ -170,6 +227,8 @@ export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
       alk: { label: 'Alkalinity consumed', value: alkUsed, unit: 'mg/L CaCO₃', digits: 0 },
       pH: { label: 'pH after dosing', value: out.pH, unit: '', digits: 2 },
       vFloc: { label: 'Floc settling velocity (v₅₀)', value: vFloc, unit: 'm/h', digits: 2 },
+      vPrec: { label: 'Precipitate settling velocity (v₅₀)', value: out.v50.precipitate, unit: 'm/h', digits: 2 },
+      ...(polyEff > 0 ? { poly: { label: 'Polymer effectiveness', value: polyEff * 100, unit: '%', digits: 0 } } : {}),
     },
   });
 }

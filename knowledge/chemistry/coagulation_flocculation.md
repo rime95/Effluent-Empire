@@ -48,7 +48,26 @@ The destabilised fraction E has these effects:
 - Precipitate and organic-particle v₅₀ shift towards the floc v₅₀.
 - 70 % × E of the emulsified oil becomes free, separable oil.
 
-Floc growth with flocculation time t: v₅₀,floc = 0.3 + 2.7·(1 − e^(−t/8 min)) m/h.
+Floc growth with flocculation time t: v₅₀,floc = (0.3 + 2.7·(1 − e^(−t/8 min)))·(1 + 0.4·eff_poly) m/h.
+
+## Polymer flocculant aid (anionic PAM) — GAME MODEL
+- Bridging effectiveness: eff = r·e^(1−r), with r = dose / optimum and optimum 1.0 mg/L. It peaks at the optimum and falls when overdosed, because excess polymer re-stabilises and carries over.
+  - 🟡 verify: an optimum of 0.5–2 mg/L for metal-hydroxide and coagulant floc.
+- Floc v₅₀ reaches about 4.2 m/h at the optimum with full flocculation time. 🟡 verify: polymer-aided hydroxide and coagulant floc typically settles at 1.5–4 m/h. The first draft's gain of 1.5 (about 7.5 m/h) was cut after chemistry review.
+- Polymer mass (about 1 mg/L) is neglected in the solids balance.
+- Anionic polymer also bridges hydroxide precipitate directly, without needing charge neutralisation: 80 %·eff of the remaining gap to the floc v₅₀.
+- Price RM 14/kg 🟡.
+
+## Aluminium speciation (fixed 2026-11-22, chemistry review)
+The pH and the dissolved Al(III) are solved together by bisection on pH. Al³⁺ (+3) and Al(OH)₄⁻ (−1) charge relative to the solid enters through Cb.
+- The earlier undamped fixed-point loop oscillated and left Al as solid where it should have dissolved: PAC 300 at pH 9.5 kept 27 mg/L as "floc".
+- Destabilisation now credits only Al that is actually solid, so aluminate makes no floc.
+- The flash-mix pH controller computes one exact net dose at its set-point, using the Al speciation known at that pH.
+
+## pH control order (fixed 2026-11-22)
+The flash-mix pH trim is applied *after* Al speciation. Aluminate formation at high pH consumes alkalinity, so the controller trims and re-speciates until it holds its set-point.
+
+Before this fix, PAC with a set-point of 9.5 drifted to pH 8.5 and re-dissolved Ni.
 
 ## Optional pH control
 The `pHset` parameter trims the pH with NaOH or H₂SO₄ after coagulant dosing. This is the usual way to keep metals precipitated while dosing acidic coagulants.

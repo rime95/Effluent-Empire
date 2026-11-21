@@ -98,6 +98,9 @@ Effect of the Ni correction: the model's Ni(OH)₂ solubility minimum moves from
 | ASM1 Arrhenius θ (μH 1.072, μA 1.103, bH 1.12, bA 1.04, kh 1.116) | 🟡 bH/kh from Henze 1987 Table 6 20/10 °C pairs; verify all against the report |
 | Heterotroph NH₄ switch K_NH,H 0.05 mg N/L | 🟡 ASM2d/ASM3 typical; added for N-deficient industrial feeds |
 | Incident rates, action costs, pH-loop tuning | GAME MODEL (see operations/scada.md) |
+| Unaided hydroxide pin-floc v₅₀ ceiling 0.6 m/h, concentration half-saturation 30 mg/L | 🟡 GAME MODEL; check against unaided metal-hydroxide clarifier SOR ≈ 0.5 m/h |
+| Anionic PAM optimum 1.0 mg/L, gain ×2.5, price RM 14/kg | 🟡 |
+| Lamella η 0.8 at 55°, RM 450/m² plate | 🟡 |
 
 ## Still needs a human with the books
 1. Metcalf & Eddy 5th ed. Table 8-14: heterotroph and nitrifier coefficients.

@@ -5,9 +5,13 @@
  *   ΔCb = requiredCb(target) − Cb
  * NaOH: 1 eq/mol; Ca(OH)2: 2 eq/mol (strong-ion change). H2SO4 adds sulfate; its dose is solved for the target pH because
  * HSO4− (pKa 1.99) takes back protons below pH ≈ 3 (see knowledge/chemistry/acid_base_chemistry.md).
- * Precipitate particle growth with reaction time — GAME MODEL: v50 = 0.05 + 0.25·(1 − e^(−HRT/20 min)) m/h (pin floc).
+ * Unaided precipitate growth (GAME MODEL, knowledge/chemistry/precipitation.md):
+ *   v50 = 0.05 + 0.55 · (1 − e^(−HRT/20 min)) · C/(C + 30 mg/L)   m/h
+ * Growth needs time AND particle collisions; orthokinetic collision frequency scales with particle concentration
+ * (Smoluchowski), so a dilute precipitate stays as pin floc. Ceiling ≈ 0.6 m/h, consistent with unaided metal-hydroxide
+ * clarifiers designed at ≈ 0.5 m/h overflow (verify).
  */
-import { METALS, Stream } from '../core/stream';
+import { METALS, Stream, poolMass } from '../core/stream';
 import { minimumSolubilityPH } from './solubility';
 import { MW, hrtDays } from '../core/units';
 import { Note, ProcessResult, result } from '../treatment/types';
@@ -30,6 +34,13 @@ export interface NeutralisationInput {
   volume_m3: number;
 }
 
+/** Unaided pin-floc growth: reaction time × collision (concentration) factor. GAME MODEL, see header.
+ *  verify: half-saturation 30 mg/L and ceiling 0.6 m/h (unaided metal-hydroxide clarifiers run at ≈ 0.3–0.6 m/h). */
+export function unaidedPrecipitateV50(hrt_min: number, precipitate_mgL: number): number {
+  const c = Math.max(0, precipitate_mgL);
+  return 0.05 + 0.55 * (1 - Math.exp(-Math.max(0, hrt_min) / 20)) * (c / (c + 30));
+}
+
 export function neutralise(s: Stream, p: NeutralisationInput): ProcessResult {
   const notes: Note[] = [];
   const adj = adjustPH(s, p.targetPH, p.base);
@@ -44,7 +55,8 @@ export function neutralise(s: Stream, p: NeutralisationInput): ProcessResult {
   const out = equilibrate(dosed);
 
   const hrt_min = hrtDays(p.volume_m3, s.Q * s.peakFactor) * 24 * 60;
-  out.v50.precipitate = 0.05 + 0.25 * (1 - Math.exp(-hrt_min / 20));
+  // collision partners: every settleable particle present (hydroxide, coagulant floc, mineral solids)
+  out.v50.precipitate = unaidedPrecipitateV50(hrt_min, poolMass(out, 'precipitate') + poolMass(out, 'feFloc') + poolMass(out, 'alFloc') + out.inert);
   if (hrt_min < 10) notes.push({ level: 'warn', code: 'neut.hrt', text: `Reaction time ${hrt_min.toFixed(0)} min at peak flow is short: pH control will be unstable and precipitates very fine.` });
   for (const m of METALS) {
     const total = out.dissolved[m] + out.precipitated[m];

@@ -107,6 +107,19 @@ function explainMetal(m: Metal, s: Stream, sim: SimResult | null, pass: boolean)
   const opt = minimumSolubilityPH(m, s.T);
   if (pass) return `Dissolved ${diss.toFixed(3)} + particulate ${part.toFixed(3)} mg/L.`;
   if (diss >= part) {
+    // which unit re-dissolved it? (largest rise in dissolved metal across a unit, after precipitation had happened)
+    let culprit: { tag: string; from: number; to: number; pHin: number; pHout: number } | null = null;
+    if (sim) {
+      for (const id of sim.order) {
+        const n = sim.nodes[id];
+        if (!n) continue;
+        const rise = n.result.out.dissolved[m] - n.inlet.dissolved[m];
+        if (rise > 0.2 && n.inlet.precipitated[m] > 0.2 && (!culprit || rise > culprit.to - culprit.from))
+          culprit = { tag: n.node.tag ?? n.node.kind, from: n.inlet.dissolved[m], to: n.result.out.dissolved[m], pHin: n.inlet.pH, pHout: n.result.out.pH };
+      }
+    }
+    if (culprit)
+      return `${m} was precipitated, then RE-DISSOLVED at ${culprit.tag}: pH fell ${culprit.pHin.toFixed(1)} → ${culprit.pHout.toFixed(1)} and dissolved ${m} rose ${culprit.from.toFixed(2)} → ${culprit.to.toFixed(2)} mg/L. Hold the pH there (pH control set-point) or remove the solids before any step that lowers the pH.`;
     const pH = maxProcessPH(sim);
     if (pH !== null && solubilityMgL(m, pH, s.T) < diss * 0.5)
       return `${m} was precipitated at pH ${pH.toFixed(1)} (solubility ${solubilityMgL(m, pH, s.T).toPrecision(2)} mg/L) but fine particles were carried over and re-dissolved when the pH was lowered afterwards (now pH ${s.pH.toFixed(1)}). Total ${m} counts against the limit: improve solids separation before final pH correction.`;

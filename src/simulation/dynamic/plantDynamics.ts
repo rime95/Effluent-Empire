@@ -8,7 +8,8 @@
  *                        wasting from the SRT set-point, secondary-clarifier carry-over from zone settling (Vesilind)
  *   every other unit   — quasi-steady: the Phase 1 process model on each step's inlet
  */
-import { Stream, blend, cloneStream, emptyStream, tss, METALS, MetalMap } from '../core/stream';
+import { Stream, blend, cloneStream, emptyStream, tss, METALS, MetalMap, poolMass } from '../core/stream';
+import { unaidedPrecipitateV50 } from '../chemistry/neutralisation';
 import { equilibrate, aeratedH2CO3 } from '../chemistry/acidBase';
 import { vesilind_mh } from '../physical/settling';
 import { CATALOGUE, UnitType } from '../treatment/catalogue';
@@ -342,7 +343,7 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
             reagent += (doseEq * (sign > 0 ? 40 : 49)) / 1000;
           }
           const u = uSum / sub;
-          st.contents.v50 = { ...st.contents.v50, precipitate: 0.05 + 0.25 * (1 - Math.exp(-((V / Math.max(inlet.Q, 1)) * 1440) / 20)) };
+          st.contents.v50 = { ...st.contents.v50, precipitate: unaidedPrecipitateV50((V / Math.max(inlet.Q, 1)) * 1440, poolMass(st.contents, 'precipitate')) };
           outlet = cloneStream(st.contents);
           outlet.Q = inlet.Q;
           units[id] = { pH: st.contents.pH, pHmeasured: measured, pump: 100 * u, sp };

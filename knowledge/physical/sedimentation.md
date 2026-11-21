@@ -22,8 +22,17 @@ Check (tested): for a narrow distribution, R = v/SOR when SOR > v, and R = 1 whe
 | colloid | 0.005 (does not settle) | — |
 | coagulated floc | 0.3–3.0 (grows with flocculation time) | 1 % |
 | particulate organics | 0.8 (3.0 after bioflocculation) | 5 % |
-| metal hydroxide pin floc | 0.05–0.3 (× floc after coagulation) | 2 % |
+| metal hydroxide pin floc | 0.05–0.6 (time × concentration, see `precipitation.md`); floc / polymer floc after coagulation | 2 % → 0.3 % as v₅₀ rises 0.5 → 5 m/h |
 | Al(OH)₃ / Fe(OH)₃ floc | floc / 1.15 × floc | 1 % |
+
+## Lamella (inclined-plate) clarifier
+The effective settling area is A_eff = max(A_plan, η·A_plates·cos θ), with θ = 55° and η = 0.8. The plates fill the settling zone, so the plan area is not added on top; the first draft double-counted it until chemistry review.
+- 🟡 verify: η 0.7–0.9 is typical.
+- SOR is evaluated on A_eff for discrete or flocculent settling.
+- Plates are ignored, with a warning, for mixed liquor, which settles as a zone and fouls the plates.
+- CAPEX is RM 450 per m² of projected plate 🟡.
+
+The clarifier reports a per-pool removal breakdown and the particulate metal carried over. It also flags pin floc when less than 80 % of the precipitate is captured.
 
 ## Secondary clarifier after activated sludge
 Discrete-particle theory does not describe mixed liquor at 2–5 g/L, which settles as a zone (hindered settling). The Vesilind relation gives:

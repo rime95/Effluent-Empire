@@ -63,17 +63,36 @@ export function separateOil(s: Stream, p: { area_m2: number }): ProcessResult {
 
 // ---------------------------------------------------------------- Clarifier
 /** GAME MODEL: non-settleable fines fraction per pool (dispersed particles that escape any ideal basin). */
+const POOL_LABEL: Record<Pool, string> = { grit: 'grit', inert: 'mineral solids', colloid: 'colloids', floc: 'floc', organic: 'organic particles', precipitate: 'metal hydroxide', alFloc: 'Al(OH)₃ floc', feFloc: 'Fe(OH)₃ floc', biomass: 'biomass' };
+
 const FINES: Record<Pool, number> = { grit: 0, inert: 0.01, colloid: 0, floc: 0.01, organic: 0.05, precipitate: 0.02, alFloc: 0.01, feFloc: 0.01, biomass: 0.01 };
 
-export function clarify(s: Stream, p: { area_m2: number; depth_m?: number }): ProcessResult {
+/** Non-settleable fines of the precipitate pool: 2 % for pin floc, falling to 0.3 % for well-flocculated precipitate (GAME MODEL). */
+export function precipitateFines(v50: number): number {
+  const t = Math.min(1, Math.max(0, Math.log(Math.max(v50, 0.5) / 0.5) / Math.log(10)));
+  return 0.02 + (0.003 - 0.02) * t;
+}
+
+/**
+ * Lamella plates fill the settling zone: effective area = η·A_plates·cosθ (θ = 55°, η = 0.8; verify), never less than the
+ * plan area (chemistry review: plates cover the plan area, so it must not be counted twice).
+ */
+export const LAMELLA = { angleDeg: 55, efficiency: 0.8 };
+export function effectiveSettlingArea(plan_m2: number, plate_m2: number): number {
+  return Math.max(plan_m2, LAMELLA.efficiency * Math.max(0, plate_m2) * Math.cos((LAMELLA.angleDeg * Math.PI) / 180));
+}
+
+export function clarify(s: Stream, p: { area_m2: number; depth_m?: number; plateArea_m2?: number }): ProcessResult {
   const depth = p.depth_m ?? 3.5;
   const Qpeak = s.Q * s.peakFactor;
-  const SOR = surfaceOverflowRate_mh(Qpeak, p.area_m2);
+  const plates = !s.ml ? Math.max(0, p.plateArea_m2 ?? 0) : 0; // lamella packs do not help zone-settling mixed liquor
+  const SOR = surfaceOverflowRate_mh(Qpeak, effectiveSettlingArea(p.area_m2, plates));
   const removal: Partial<Record<Pool, number>> = {};
-  for (const pool of POOLS) removal[pool] = (1 - FINES[pool]) * hazenRemoval(s.v50[pool], SOR);
+  for (const pool of POOLS) removal[pool] = (1 - (pool === 'precipitate' ? precipitateFines(s.v50.precipitate) : FINES[pool])) * hazenRemoval(s.v50[pool], SOR);
   const notes: Note[] = [];
   const calcs: ProcessResult['calcs'] = {
-    sor: { label: 'Surface overflow rate (peak)', value: SOR, unit: 'm/h', digits: 2 },
+    sor: { label: plates > 0 ? 'Surface overflow rate (peak, on effective lamella area)' : 'Surface overflow rate (peak)', value: SOR, unit: 'm/h', digits: 2 },
+    ...(plates > 0 ? { aeff: { label: 'Effective settling area', value: effectiveSettlingArea(p.area_m2, plates), unit: 'm²', digits: 0 } } : {}),
     sorD: { label: 'Surface overflow rate (avg)', value: (s.Q / p.area_m2), unit: 'm³/m²·d', digits: 1 },
     hrt: { label: 'Hydraulic retention (avg)', value: hrtDays(p.area_m2 * depth, s.Q) * 24, unit: 'h', digits: 1 },
   };
@@ -96,8 +115,19 @@ export function clarify(s: Stream, p: { area_m2: number; depth_m?: number }): Pr
     if (f > 0.8) notes.push({ level: 'error', code: 'clar.blanket', text: `Peak SOR ${SOR.toFixed(2)} m/h is close to the sludge zone-settling velocity ${vs.toFixed(2)} m/h — sludge blanket washes over the weir.` });
     if (slr > 9) notes.push({ level: 'warn', code: 'clar.slr', text: `Peak solids loading ${slr.toFixed(1)} kg/m²·h exceeds ~9 kg/m²·h: thickening-limited.` });
   }
+  if ((p.plateArea_m2 ?? 0) > 0 && s.ml) notes.push({ level: 'warn', code: 'clar.lamellaML', text: 'Lamella plates do not help a secondary clarifier: mixed liquor settles as a zone (hindered settling), and plates foul with biomass.' });
+  // per-pool removal breakdown (shown in the Studio inspector)
+  for (const pool of POOLS) {
+    if (poolMass(s, pool) < 0.5) continue;
+    calcs[`rm_${pool}`] = { label: `Removed: ${POOL_LABEL[pool]} (v₅₀ ${s.v50[pool].toFixed(2)} m/h)`, value: 100 * (removal[pool] ?? 0), unit: '%', digits: 0 };
+  }
+  const precMass = poolMass(s, 'precipitate');
+  if (!s.ml && precMass > 1 && (removal.precipitate ?? 0) < 0.8)
+    notes.push({ level: 'warn', code: 'clar.pinfloc', text: `Metal-hydroxide pin floc (v₅₀ ${s.v50.precipitate.toFixed(2)} m/h) settles far slower than the peak overflow rate ${SOR.toFixed(2)} m/h: only ${(100 * (removal.precipitate ?? 0)).toFixed(0)} % is captured. Add coagulant + polymer flocculant upstream, enlarge the clarifier, or add lamella plates.` });
   const { out, removed } = splitPools(s, removal);
   out.ml = undefined;
+  const carried = (['Ni', 'Cu', 'Zn', 'Cr'] as const).filter((m) => out.precipitated[m] > 0.05);
+  if (carried.length) calcs.metalCarry = { label: `Particulate metal carried over (${carried.join(', ')})`, value: carried.reduce((a, m) => a + out.precipitated[m], 0), unit: 'mg/L', digits: 2 };
   // scum skimming: free oil rises (Stokes) and is skimmed; emulsified oil enmeshed in floc settles with it
   const rOilC = hazenRemoval(-stokesVelocity_mh(FREE_OIL_D50_M, OIL_DENSITY, s.T), SOR, 1.0);
   removed.OGfree = s.OGfree * rOilC;

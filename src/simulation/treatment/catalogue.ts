@@ -130,8 +130,9 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
       { key: 'dose', label: 'Dose', unit: 'mg/L', min: 0, max: 2000, step: 5, default: () => 80 },
       { key: 'flocTime', label: 'Flocculation time', unit: 'min', min: 1, max: 60, step: 1, default: () => 20 },
       { key: 'pHset', label: 'pH control set-point (0 = off)', unit: '', min: 0, max: 11, step: 0.1, default: () => 0, help: 'Trims pH with NaOH/H₂SO₄ after coagulant dosing — keeps metals precipitated and the coagulant in its window.' },
+      { key: 'polymer', label: 'Polymer flocculant (anionic PAM)', unit: 'mg/L', min: 0, max: 10, step: 0.1, default: () => 1.0, help: 'Bridges floc and hydroxide precipitate into large, fast-settling flocs. Optimum ≈ 0.5–2 mg/L; overdosing hurts.' },
     ],
-    run: (s, p) => coagulate(s, { coagulant: p.coagulant as Coagulant, dose_mgL: n(p, 'dose'), flocTime_min: n(p, 'flocTime'), pHset: n(p, 'pHset') }),
+    run: (s, p) => coagulate(s, { coagulant: p.coagulant as Coagulant, dose_mgL: n(p, 'dose'), flocTime_min: n(p, 'flocTime'), pHset: n(p, 'pHset'), polymer_mgL: Number(p.polymer ?? 0) || 0 }),
     capex: (p, s) => scale(90_000, s.Q * s.peakFactor, 250) * (0.7 + 0.3 * (n(p, 'flocTime') / 20)) + 30_000 + (n(p, 'pHset') > 0 ? 25_000 : 0),
     footprint: (p) => 15 + n(p, 'flocTime') * 0.8,
   },
@@ -144,9 +145,11 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     params: [
       { key: 'area', label: 'Surface area', unit: 'm²', min: 1, max: 5000, step: 1, default: (Q) => round(Q / 24 / 0.5, 1), help: 'Chemical floc: ≤ 1.0–1.5 m/h; activated sludge: ≤ 0.7–1.2 m/h at peak.' },
       { key: 'depth', label: 'Side-water depth', unit: 'm', min: 2, max: 6, step: 0.5, default: () => 3.5 },
+      { key: 'plateArea', label: 'Lamella plate area (0 = conventional)', unit: 'm²', min: 0, max: 20000, step: 5, default: () => 0, help: 'Inclined plates at 55° multiply the settling area in the same footprint (chemical floc only). ≈ 8–12 m² of plate per m² of tank.' },
     ],
-    run: (s, p) => clarify(s, { area_m2: n(p, 'area'), depth_m: n(p, 'depth') }),
-    capex: (p) => scale(200_000, n(p, 'area') * (n(p, 'depth') / 3.5), 40),
+    run: (s, p) => clarify(s, { area_m2: n(p, 'area'), depth_m: n(p, 'depth'), plateArea_m2: Number(p.plateArea ?? 0) || 0 }),
+    // verify: lamella plate packs ≈ RM 450 per m² projected plate area installed (GAME MODEL)
+    capex: (p) => scale(200_000, n(p, 'area') * (n(p, 'depth') / 3.5), 40) + 450 * (Number(p.plateArea ?? 0) || 0),
     footprint: (p) => n(p, 'area') * 1.2,
   },
   activatedSludge: {
