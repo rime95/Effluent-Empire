@@ -26,7 +26,7 @@ export interface Stream {
   pH: number;
 
   // ---- acid-base totals (mol/L, eq/L) ----
-  /** net strong ions: Σ strong cations − Σ strong anions, eq/L (excludes H+, dissolved metals (incl. coagulant Al/Fe) and SULFATE). Includes NH4+ (treated as strong cation, valid pH < 8.5). */
+  /** net strong ions: Σ strong cations − Σ strong anions, eq/L (excludes H+, dissolved metals (incl. coagulant Al/Fe), SULFATE and AMMONIA — NH4N is total ammonia N, a weak base speciated NH4+/NH3 in the charge balance, pKa 9.25). NO3− is included (strong anion). */
   Cb: number;
   /** total inorganic carbon C_T = [H2CO3*]+[HCO3-]+[CO3 2-], mol/L */
   CT: number;

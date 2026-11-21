@@ -87,7 +87,12 @@ Nitrification consumes alkalinity, and VFA oxidation generates it, so reactor pH
 
 ## Assumptions and limits
 - Ideal solution (I → 0). Above ionic strength 0.1 M (brines, ZLD concentrate) errors exceed about 0.1 pH unit. Davies activity corrections are planned for later phases.
-- NH₄⁺ is treated as a strong cation (pKa 9.25), valid below pH ≈ 8.5.
+- **Ammonia** (since 2026-11-21, chem 2) is a weak base in the charge balance. `NH4N` is total ammonia N, and its NH₄⁺ share is N_T·[H⁺]/([H⁺] + K_a), with pKa = 0.09018 + 2729.92/T (Emerson et al. 1975): 9.25 at 25 °C, 9.09 at 30 °C. Cb excludes ammonia; NO₃⁻ stays in Cb as a strong anion.
+  - Below pH 8.5 nothing changes: nitrification still consumes 7.14 mg CaCO₃/mg N, and assimilation 3.57.
+  - At high pH, NH₃ is alkalinity. Nitrification starting from NH₃ releases 1 H⁺ per N, not 2, and assimilating NH₃ releases none.
+  - The earlier strong-cation treatment over-predicted the pH crash in aeration tanks fed above pH 9: pH 10.5 feed fell to 5.9 after nitrifying only 6 mg/L N.
+  - Old saves are migrated (`store.ts` `migrateAmmoniaCb`: Cb −= NH4N/14 007, so the pH is unchanged).
+  - NH₃ stripping by aeration at high pH is not yet modelled.
 - Metal hydroxo complexes are included through z̄. Sulfate and chloride complexes are neglected.
 
 ## Worked examples (`tests/simulation/acidBase.test.ts`)

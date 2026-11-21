@@ -7,11 +7,13 @@ Modules: `chemistry/neutralisation.ts` (the pH-adjustment unit and the precipita
 2. **Re-equilibration** follows every chemical change. Metals above solubility precipitate. Precipitates re-dissolve when under-saturated, e.g. after an acidic coagulant or the final pH correction lowers the pH.
 3. **Precipitation is at equilibrium** (hydroxides form quickly). **Particle size is the kinetic part.** GAME MODEL unaided growth (revised 2026-11-22):
 
-       v₅₀ = 0.05 + 0.55·(1 − e^(−HRT/20 min))·C/(C + 30 mg/L)   m/h
+       v₅₀ = 0.05 + 0.95·(1 − e^(−HRT/20 min))·C/(C + 10 mg/L)   m/h
 
    - C is the concentration of all settleable collision partners: hydroxide + Fe/Al floc + mineral solids.
    - Growth needs reaction time and particle collisions. Orthokinetic collision frequency scales with particle number concentration (Smoluchowski), so a dilute precipitate stays as pin floc.
-   - The ceiling is about 0.6 m/h. 🟡 verify against unaided metal-hydroxide clarifier design overflow rates of about 0.5 m/h.
+   - The ceiling is about 1.0 m/h, with half-saturation at 10 mg/L. 🟡 verify against unaided metal-hydroxide clarifiers, designed at about 0.3–0.6 m/h average, which still capture most of the hydroxide.
+   - Relaxed 2026-11-21 from 0.6 m/h / 30 mg/L at a practising engineer's request. The old curve gave 18 mg/L Ni (≈ 28 mg/L Ni(OH)₂) only ≈ 0.3 m/h, which demanded an absurdly large clarifier. It now gives ≈ 0.6 m/h at 30 min reaction time.
+   - Polymer remains the proper route to 98–99 % capture.
    - The old curve (ceiling 0.3 m/h, no concentration effect) gave only about 15 % capture in a default precipitation → clarifier train.
 4. **Unflocculated pin floc settles poorly.** Coagulation/flocculation raises v₅₀ towards the floc value.
 

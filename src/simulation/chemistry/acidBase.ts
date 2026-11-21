@@ -14,7 +14,7 @@
  */
 import { METALS, Metal, Stream, cloneStream } from '../core/stream';
 import { MW, eqL_to_mgCaCO3, mgL_to_molL, molL_to_mgL } from '../core/units';
-import { KH_CO2, PKA_HCRO4, PKA_HSO4, P_CO2_ATM, pK1, pK2, pKw } from './constants';
+import { KH_CO2, PKA_HCRO4, PKA_HSO4, P_CO2_ATM, pK1, pK2, pKaNH4, pKw } from './constants';
 import { coagDissolvedMgL, coagSolubility, meanCharge, solubilityMolL } from './solubility';
 
 export interface CarbonateMode {
@@ -119,7 +119,11 @@ export function requiredCb(s: Stream, pH: number, mode: CarbonateMode = { kind: 
     const f = coagSolubility('Fe', pH);
     metalCharge += Math.min(feT, f.molL) * f.zbar;
   }
-  return OH + carbonateCharge(H, c, s, mode) + A + chromate + sulfate - H - metalCharge;
+  // total ammonia N (NH4+ + NH3) is a weak base: only the NH4+ share carries charge (NH3 buffers above pH ≈ 8.5)
+  const nT = mgL_to_molL(s.NH4N, MW.N);
+  const kN = Math.pow(10, -pKaNH4(s.T));
+  const ammonium = nT > 0 ? (nT * H) / (H + kN) : 0;
+  return OH + carbonateCharge(H, c, s, mode) + A + chromate + sulfate - H - metalCharge - ammonium;
 }
 
 /** Solve pH from charge balance. */

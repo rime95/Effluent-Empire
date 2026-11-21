@@ -35,10 +35,12 @@ export interface NeutralisationInput {
 }
 
 /** Unaided pin-floc growth: reaction time × collision (concentration) factor. GAME MODEL, see header.
- *  verify: half-saturation 30 mg/L and ceiling 0.6 m/h (unaided metal-hydroxide clarifiers run at ≈ 0.3–0.6 m/h). */
+ *  verify: half-saturation 10 mg/L and ceiling 1.0 m/h (unaided metal-hydroxide clarifiers are designed at ≈ 0.3–0.6 m/h
+ *  average and still capture most of the hydroxide; relaxed 2026-11-21 from 30 mg/L / 0.6 m/h, which demanded oversize clarifiers
+ *  for ordinary 10–30 mg/L metal loads). */
 export function unaidedPrecipitateV50(hrt_min: number, precipitate_mgL: number): number {
   const c = Math.max(0, precipitate_mgL);
-  return 0.05 + 0.55 * (1 - Math.exp(-Math.max(0, hrt_min) / 20)) * (c / (c + 30));
+  return 0.05 + 0.95 * (1 - Math.exp(-Math.max(0, hrt_min) / 20)) * (c / (c + 10));
 }
 
 export function neutralise(s: Stream, p: NeutralisationInput): ProcessResult {

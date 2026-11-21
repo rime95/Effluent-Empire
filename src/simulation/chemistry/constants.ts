@@ -69,3 +69,8 @@ export const PKA_HCRO4 = 6.51;
 
 /** HSO4− ⇌ H+ + SO4 2−, pKa2 1.99 at 25 °C, I → 0 (Martell & Smith, Critical Stability Constants). Temperature dependence neglected. */
 export const PKA_HSO4 = 1.99;
+
+/** NH4+ ⇌ NH3 + H+: pKa = 0.09018 + 2729.92/T (Emerson et al. 1975, J. Fish. Res. Board Can. 32:2379) → 9.25 at 25 °C, 9.09 at 30 °C. */
+export function pKaNH4(T_C: number): number {
+  return 0.09018 + 2729.92 / (T_C + 273.15);
+}

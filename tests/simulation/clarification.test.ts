@@ -22,10 +22,10 @@ const clarNi = (g: ReturnType<typeof train>, s: ReturnType<typeof plating>) => {
 };
 
 describe('unaided pin floc', () => {
-  it('grows with reaction time and with precipitate concentration (collision-limited), ceiling ≈ 0.6 m/h', () => {
+  it('grows with reaction time and with precipitate concentration (collision-limited), ceiling ≈ 1.0 m/h', () => {
     expect(unaidedPrecipitateV50(30, 50)).toBeGreaterThan(unaidedPrecipitateV50(10, 50));
     expect(unaidedPrecipitateV50(30, 200)).toBeGreaterThan(unaidedPrecipitateV50(30, 10));
-    expect(unaidedPrecipitateV50(1e4, 1e6)).toBeCloseTo(0.6, 2);
+    expect(unaidedPrecipitateV50(1e4, 1e6)).toBeCloseTo(1.0, 2);
   });
   it('precipitation → clarifier removes only part of the Ni(OH)₂ and the clarifier says why (pin-floc note)', () => {
     const s = plating();

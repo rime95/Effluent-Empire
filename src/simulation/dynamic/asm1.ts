@@ -124,7 +124,8 @@ export function processes(x: AS1State, u: Pick<AS1Inputs, 'T' | 'inhibH' | 'inhi
     kh * (ratio / (p.KX + ratio)) * (mO + p.etaH * mOff * mNO) * XBH,
   ];
   const decayN = p.iXB - p.fP * p.iXP; // organic N of decayed biomass released straight to NH4 (ammonification lumped)
-  const withCb = (v: Partial<AS1State>): Partial<AS1State> => ({ ...v, Cb: ((v.SNH ?? 0) - (v.SNO ?? 0)) / N_EQ });
+  // Cb holds strong ions only; ammonia is speciated in the charge balance, so only NO3− changes Cb
+  const withCb = (v: Partial<AS1State>): Partial<AS1State> => ({ ...v, Cb: -(v.SNO ?? 0) / N_EQ });
   const nu: Partial<AS1State>[] = [
     withCb({ SS: -1 / p.YH, XBH: 1, SO: -(1 - p.YH) / p.YH, SNH: -p.iXB }),
     withCb({ SS: -1 / p.YH, XBH: 1, SNO: -(1 - p.YH) / (2.86 * p.YH), SNH: -p.iXB }),

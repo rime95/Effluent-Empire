@@ -44,6 +44,8 @@ export interface LedgerEntry {
 
 export interface GameState {
   version: 2;
+  /** chemistry convention of saved streams: 2 = ammonia speciated as a weak base (Cb excludes NH4+) */
+  chem?: number;
   companyName: string;
   cash: number;
   reputation: number;
@@ -96,6 +98,7 @@ function initial(name = 'Effluent Engineering Sdn Bhd'): GameState {
   const seed = 1000 + Math.floor(Math.random() * 1e6);
   const base: GameState = {
     version: 2,
+    chem: 2,
     companyName: name,
     cash: START_CASH,
     reputation: 0,
@@ -134,9 +137,29 @@ function refill(s: GameState): GameState {
 }
 
 /** Migrate a v1 save (single project, no staff) to v2. */
+/**
+ * Saves before chem 2 stored Cb with NH4+ counted as a strong cation. Ammonia is now a weak base speciated in the
+ * charge balance, so every saved stream gets Cb −= NH4N/14 007 (same pH below ≈ 8.5, as before).
+ */
+function migrateAmmoniaCb(node: unknown, seen = new Set<unknown>()): void {
+  if (!node || typeof node !== 'object' || seen.has(node)) return;
+  seen.add(node);
+  if (Array.isArray(node)) {
+    for (const x of node) migrateAmmoniaCb(x, seen);
+    return;
+  }
+  const o = node as Record<string, unknown>;
+  if (typeof o.Cb === 'number' && typeof o.NH4N === 'number' && typeof o.CT === 'number') o.Cb = o.Cb - o.NH4N / 14007;
+  for (const k of Object.keys(o)) migrateAmmoniaCb(o[k], seen);
+}
+
 export function migrate(raw: unknown): GameState | null {
   const s = raw as Record<string, unknown>;
   if (!s || typeof s !== 'object') return null;
+  if (Number(s.chem ?? 1) < 2) {
+    migrateAmmoniaCb(s);
+    s.chem = 2;
+  }
   if (s.version === 2) {
     const v = s as unknown as Partial<GameState>;
     if (typeof v.cash !== 'number' || typeof v.week !== 'number') return null;
@@ -164,6 +187,7 @@ export function migrate(raw: unknown): GameState | null {
   const fixProject = (p: Project): Project => ({ ...p, id: p.id ?? p.enquiry.id, labQueue: p.labQueue ?? [], building: p.building ?? null, omOffer: p.omOffer ?? null });
   return {
     version: 2,
+    chem: 2,
     companyName: old.companyName,
     cash: old.cash,
     reputation: old.reputation,

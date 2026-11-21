@@ -169,8 +169,11 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
     const uptakeN = N_PER_VSS * (bio.PxH + bio.Pxd + bio.PxN);
     out.NH4N = bio.Ne;
     out.NO3N = s.NO3N + bio.NOx;
-    // charge: NH4+ uptake removes a strong cation (−1 eq/mol N); nitrification NH4+ → NO3− (−2 eq/mol N)
-    out.Cb = s.Cb - (uptakeN + 2 * bio.NOx) / 1000 / MW.N;
+    // charge: ammonia is speciated in the charge balance (weak base), so uptake / nitrification remove it there; the strong-ion
+    // change is the NO3− formed (−1 eq/mol N). At pH < 8.5 this reproduces 2 H+ per N nitrified (7.14 mg CaCO3/mg N) and
+    // 1 per N assimilated; from NH3 at high pH, nitrification releases only 1 H+ per N and assimilation none.
+    void uptakeN;
+    out.Cb = s.Cb - bio.NOx / 1000 / MW.N;
 
     out.OGfree = s.OGfree * (1 - ogFrac);
     out.OGemulsified = s.OGemulsified * (1 - ogFrac);
