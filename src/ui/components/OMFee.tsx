@@ -7,7 +7,8 @@ export function OMFeeTable({ q, monthlyFee }: { q: FeeQuote; monthlyFee?: number
   const opexAtCost = q.reimbursables / (1 + OM.handling);
   const handling = q.reimbursables - opexAtCost;
   // your costs: operators (payroll), maintenance, CePIETSO, sampling, management; chemicals/power/sludge at cost
-  const yourCosts = q.costBase + opexAtCost;
+  // management is head-office overhead recovery, not a plant cost
+  const yourCosts = q.costBase - q.management + opexAtCost;
   const income = fee + q.reimbursables;
   const row = (label: string, v: number, sub?: string, strong = false) => (
     <tr>
@@ -28,7 +29,7 @@ export function OMFeeTable({ q, monthlyFee }: { q: FeeQuote; monthlyFee?: number
         {row('CePIETSO competent person', q.supervision, `${Math.round(OM.cepietsoFTE * 100)} % of a certified environmental professional (IER 2009)`)}
         {row('Preventive maintenance', q.maintenance, `${Math.round(OM.maintenanceFraction * 100)} % of CAPEX per year`)}
         {row('Compliance sampling', q.lab, `weekly grab sample, accredited lab, RM ${OM.labPerParam}/parameter`)}
-        {row('Management & insurance', q.management, `${Math.round(OM.managementFraction * 100)} % of the above`)}
+        {row('Management & insurance', q.management, `${Math.round(OM.managementFraction * 100)} % of the above — recovers your office overheads`)}
         {row('Cost base', q.costBase, undefined, true)}
         {row(`Margin (${Math.round(q.margin * 100)} %)`, fee - q.costBase, 'set by your reputation: 100–150 %')}
         {row('Fixed service fee / month', fee, `escalates ${Math.round(OM.escalation * 100)} % per contract year; −${Math.round(OM.deduction * 100)} % for each failed weekly sample`, true)}
@@ -40,8 +41,8 @@ export function OMFeeTable({ q, monthlyFee }: { q: FeeQuote; monthlyFee?: number
           <th colSpan={2}>Expected per month</th>
         </tr>
         {row('Income (fee + reimbursables)', income)}
-        {row('Your costs', -yourCosts, 'operators (payroll), maintenance, CePIETSO, sampling, management, chemicals/power/sludge')}
-        {row('Expected margin', income - yourCosts, `margin on the cost base + ${rm(handling)} handling; before repairs and fines`, true)}
+        {row('Your costs', -yourCosts, 'operators (payroll), maintenance, CePIETSO, sampling, chemicals/power/sludge')}
+        {row('Expected margin', income - yourCosts, `margin + management recovery + ${rm(handling)} handling; before repairs and fines`, true)}
       </tbody>
     </table>
   );

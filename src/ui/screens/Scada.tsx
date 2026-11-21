@@ -22,6 +22,7 @@ function tagVisible(n: PNode | undefined, key: string): boolean {
   return true;
 }
 import { fmt, INDUSTRY_LABEL, rm } from '../format';
+import type { Screen } from '../App';
 
 /* SCADA control room: dark mimic + trends + alarms. Ref: knowledge/operations/scada.md */
 const BG = '#050c14';
@@ -69,10 +70,11 @@ function alarmsOf(r: DynamicResult, plant: Plant): Alarm[] {
   return out;
 }
 
-export function Scada() {
+export function Scada({ go }: { go: (s: Screen) => void }) {
   const g = useGame();
   const operating = g.plants.filter((p) => p.status === 'operating');
-  const [sel, setSel] = useState<string | null>(null);
+  // opened from a plant's PFD or the Plants screen → start on that plant
+  const [sel, setSel] = useState<string | null>(g.studioPlantId ?? null);
   const plant = operating.find((p) => p.id === sel) ?? operating[0] ?? null;
   const [unitSel, setUnitSel] = useState<string | null>(null);
   const [result, setResult] = useState<DynamicResult | null>(null);
@@ -153,6 +155,8 @@ export function Scada() {
     <div className="page" style={{ background: BG, minHeight: '100%' }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
         <h1 style={{ marginBottom: 2 }}>SCADA Operations</h1>
+        <div className="row" style={{ gap: 8 }}>
+        <button className="btn sm" onClick={() => { g.openPlantStudio(plant.id); go('studio'); }} title="As-built PFD and P&ID; propose upgrades">View PFD / P&amp;ID</button>
         <select value={plant.id} onChange={(e) => setSel(e.target.value)} style={{ background: PANEL, color: '#fff', border: `1px solid ${LINE}`, padding: '5px 8px', borderRadius: 6 }}>
           {operating.map((p) => (
             <option key={p.id} value={p.id}>
@@ -160,6 +164,7 @@ export function Scada() {
             </option>
           ))}
         </select>
+        </div>
       </div>
       <p className="sub">48-hour replay of the plant as it runs this week{lastWeek ? ` (week ${lastWeek.week}, flow ×${fmt(lastWeek.flowFactor, 2)})` : ''} on its real influent with the diurnal production pattern: ASM1 biology, PI pH and DO loops, EQ level. Diagnose alarms from the trends, then act.</p>
 

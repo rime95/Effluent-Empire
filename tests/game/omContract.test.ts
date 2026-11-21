@@ -61,7 +61,9 @@ describe('O&M contract cash flow', () => {
     const o = operateWeek({ ...plant, commissionedWeek: 1, contract: contractFor(plant.contract!.quote, 150) }, 201, m, true);
     const h = o.plant.history[0];
     expect(h.flowFactor).toBeCloseTo(1.3, 6);
-    if (h.pass && !h.costs!.repairs) expect(o.cash).toBeGreaterThan(0.8 * (plant.contract!.monthlyFee - plant.contract!.quote.costBase) / WEEKS_PER_MONTH);
+    expect(h.pass).toBe(true);
+    // fee − (service costs + maintenance + chemicals at index 1.6) stays well positive; the client carries price and flow
+    expect(o.cash).toBeGreaterThan(0.8 * (plant.contract!.monthlyFee - plant.contract!.quote.costBase) / WEEKS_PER_MONTH - h.costs!.repairs);
   });
 
   it('a staffed reference plant nets about the margin on the cost base over a year (before payroll)', () => {
@@ -74,8 +76,8 @@ describe('O&M contract cash flow', () => {
       cash += o.cash;
     }
     const q = plant.contract!.quote;
-    // fixed fee − (cost base less operators, who are on payroll) + handling; minus repairs/fines/deductions
-    const expected = 12 * (q.monthlyFee - (q.costBase - q.staffing) + (q.reimbursables - q.reimbursables / (1 + OM.handling)));
+    // fixed fee − (maintenance + CePIETSO + sampling; operators are payroll, management is overhead recovery) + handling
+    const expected = 12 * (q.monthlyFee - (q.maintenance + q.supervision + q.lab) + (q.reimbursables - q.reimbursables / (1 + OM.handling)));
     expect(cash).toBeGreaterThan(0.75 * expected);
     expect(cash).toBeLessThan(1.15 * expected);
   });
@@ -86,6 +88,16 @@ describe('O&M contract cash flow', () => {
     const o = operateWeek(plant, 53, initialMarket(), true);
     expect(o.plant.contract!.monthlyFee).toBeCloseTo(f0 * (1 + OM.escalation), -1);
     expect(operateWeek(plant, 52, initialMarket(), true).plant.contract!.monthlyFee).toBe(f0);
+  });
+
+  it('no escalation in the contract\'s final week; plant service costs escalate with the fee', () => {
+    const { plant } = refPlant('plating', 10);
+    const c = contractFor(plant.contract!.quote, 1, 156);
+    const last = operateWeek({ ...plant, contract: c }, 157, initialMarket(), true);
+    expect(last.plant.history[0].fee).toBeCloseTo(c.monthlyFee / WEEKS_PER_MONTH, 6);
+    const y2 = operateWeek({ ...plant, contract: c }, 53, initialMarket(), true).plant.history[0];
+    const y1 = operateWeek({ ...plant, contract: c }, 52, initialMarket(), true).plant.history[0];
+    expect(y2.costs!.service / y1.costs!.service).toBeCloseTo(1 + OM.escalation, 6);
   });
 
   it('a failed sample deducts 5 % of the monthly fee', () => {

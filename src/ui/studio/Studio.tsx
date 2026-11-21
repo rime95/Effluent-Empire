@@ -16,7 +16,10 @@ import {
 } from '@xyflow/react';
 import { useActiveProject, useGame } from '../../game/store';
 import { designBasis } from '../../game/lab';
-import { constructionWeeks, makeNode, RETROFIT_PREMIUM } from '../../game/project';
+import { constructionWeeks, makeNode, retrofitCharge, RETROFIT_PREMIUM, type Project } from '../../game/project';
+import type { Plant } from '../../game/operations';
+import { currentInfluent, upgradeQuote, VO_MARKUP } from '../../game/upgrade';
+import { simulate } from '../../simulation/treatment/graph';
 import { CATALOGUE, PRICES, UnitType } from '../../simulation/treatment/catalogue';
 import { PNode, PortId, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
 import { evaluate, measure, STANDARDS } from '../../simulation/treatment/compliance';
@@ -79,9 +82,35 @@ function defaultPos(n: PNode, i: number) {
   return n.position ?? (n.kind === 'influent' ? { x: 0, y: 160 } : n.kind === 'discharge' ? { x: 1100, y: 160 } : { x: 160 + i * 190, y: 160 });
 }
 
+/**
+ * An operating plant shown in the Studio as a read-only project: the as-built drawing, or the upgrade draft
+ * (editable, status 'design') / upgrade under construction. Only the fields the Studio reads are filled.
+ */
+function plantAsProject(pl: Plant): Project {
+  const Q = Math.round(currentInfluent(pl).Q);
+  return {
+    id: pl.id,
+    status: pl.upgrade?.phase === 'draft' ? 'design' : 'completed',
+    graph: pl.upgrade?.graph ?? pl.graph,
+    built: pl.graph,
+    attempts: 0,
+    datasheet: { Q, peakFactor: Math.round(pl.trueStream.peakFactor * 10) / 10, T: pl.trueStream.T, pH: pl.trueStream.pH, COD: 0, TSS: 0, OG: 0 },
+    enquiry: { company: pl.company, standard: pl.standard, contractValue: 0, opexLimitRMd: Infinity },
+    spent: { lab: 0, capex: pl.capex },
+    labQueue: [],
+    reports: [],
+  } as unknown as Project;
+}
+
 function StudioInner({ go }: { go: (s: Screen) => void }) {
-  const p = useActiveProject();
-  const storeSetGraph = useGame((s) => s.setGraph);
+  const proj = useActiveProject();
+  const plant = useGame((s) => (s.studioPlantId ? (s.plants.find((x) => x.id === s.studioPlantId && x.status === 'operating') ?? null) : null));
+  const setUpgradeGraph = useGame((s) => s.setUpgradeGraph);
+  const plantGraphSetter = useCallback((g: ProcessGraph) => plant && setUpgradeGraph(plant.id, g), [plant?.id, setUpgradeGraph]); // eslint-disable-line react-hooks/exhaustive-deps
+  const plantProj = useMemo(() => (plant ? plantAsProject(plant) : null), [plant]);
+  const p = plantProj ?? proj;
+  const projSetGraph = useGame((s) => s.setGraph);
+  const storeSetGraph = plant ? plantGraphSetter : projSetGraph;
   const startConstruction = useGame((s) => s.startConstruction);
   const week = useGame((s) => s.week);
   const cash = useGame((s) => s.cash);
@@ -119,7 +148,10 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
   }, [draft, p, editable, flush]);
   useEffect(() => () => flush(), [flush]);
 
-  const basis = useMemo(() => (p ? designBasis(p.datasheet) : null), [p?.datasheet]); // eslint-disable-line react-hooks/exhaustive-deps
+  // an operating plant is shown on its real influent at today's production level; a project on the lab design basis
+  const plantBasis = useMemo(() => (plant ? { stream: currentInfluent(plant), assumptions: [] as string[] } : null), [plant?.trueStream, plant?.history.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const projBasis = useMemo(() => (proj ? designBasis(proj.datasheet) : null), [proj?.datasheet]); // eslint-disable-line react-hooks/exhaustive-deps
+  const basis = plant ? plantBasis : projBasis;
   const { sim, busy, error: simError } = useSimulation(p ? draft : null, basis?.stream ?? null);
   const report = useMemo(() => (sim?.effluent && p ? evaluate(sim.effluent, p.enquiry.standard, sim) : null), [sim, p?.enquiry.standard]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -381,20 +413,19 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
     [setDraft],
   );
 
-  if (!p || !basis) return <div className="page">No active project.</div>;
+  if (!p || !basis)
+    return (
+      <div className="page">
+        <h1>Engineering Studio</h1>
+        <p className="muted">No active project. Pick a project in the sidebar, or open an operating plant&apos;s PFD from Plants &amp; O&amp;M or the sidebar.</p>
+      </div>
+    );
 
   const single = selNodes.size === 1 ? draft.nodes.find((n) => selNodes.has(n.id)) : undefined;
   const singleEdge = selNodes.size === 0 && selEdges.size === 1 ? [...selEdges][0] : undefined;
   const selectedEdgeStream = singleEdge ? sim?.edges[singleEdge] : undefined;
   const weeks = constructionWeeks(p);
-  const capexToCharge = (() => {
-    if (!sim) return 0;
-    if (!p.built) return sim.capex;
-    return Object.entries(sim.nodes).reduce((a, [id, n]) => {
-      const prev = p.built!.nodes.find((b) => b.id === id);
-      return a + (!prev || prev.kind !== n.node.kind || JSON.stringify(prev.params) !== JSON.stringify(n.node.params) ? n.capex * RETROFIT_PREMIUM : 0);
-    }, 0);
-  })();
+  const capexToCharge = !sim ? 0 : !p.built ? sim.capex : retrofitCharge(p.built, draft, sim);
 
   const doCommission = () => {
     if (!sim?.ok) return;
@@ -605,6 +636,15 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
             <span>{companyName}</span>
           </div>
         </div>
+        {plant && (
+          <div className="note info" style={{ position: 'absolute', top: 52, left: 10, right: 10, zIndex: 5, background: '#fff', color: 'var(--ink)' }}>
+            {plant.upgrade?.phase === 'draft'
+              ? `Upgrade draft — ${plant.company}. Changed and new units are priced as plant modification works (${Math.round((RETROFIT_PREMIUM - 1) * 100)} % rework premium; added instruments only for the instruments). Shown on today's influent.`
+              : plant.upgrade?.phase === 'building'
+                ? `Upgrade under construction — ${plant.company}. Hand-over in week ${plant.upgrade.doneWeek}; the plant keeps running on the old design until then.`
+                : `Operating plant — ${plant.company}. As-built drawing, read-only, on today's influent. Use “Propose upgrade” to modify it.`}
+          </div>
+        )}
         {p.status === 'failed' && (
           <div className="note error" style={{ position: 'absolute', top: 52, left: 10, right: 10, zIndex: 5, background: '#fff', color: 'var(--ink)' }}>
             Retrofit mode — the last commissioning failed. Modified or new units are charged at a {Math.round((RETROFIT_PREMIUM - 1) * 100)} % rework premium.
@@ -634,6 +674,8 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
               Delete selection
             </button>
           </>
+        ) : plant ? (
+          <PlantPanel plant={plant} draft={draft} sim={sim} busy={busy} week={week} go={go} flush={flush} />
         ) : (
           <DesignSummary sim={sim} capexToCharge={capexToCharge} weeks={weeks} cash={cash} editable={editable} onCommission={doCommission} />
         )}
@@ -1071,5 +1113,100 @@ export function ComplianceTable({ checks }: { checks: ReturnType<typeof evaluate
           ))}
       </tbody>
     </table>
+  );
+}
+
+/** Inspector panel for an operating plant: as-built summary, upgrade proposal (variation order) and its quote. */
+function PlantPanel({ plant, draft, sim, busy, week, go, flush }: { plant: Plant; draft: ProcessGraph; sim: SimResult | null; busy: boolean; week: number; go: (s: Screen) => void; flush: () => void }) {
+  const startUpgrade = useGame((s) => s.startUpgrade);
+  const discardUpgrade = useGame((s) => s.discardUpgrade);
+  const submitUpgrade = useGame((s) => s.submitUpgrade);
+  const cash = useGame((s) => s.cash);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const u = plant.upgrade;
+  // the as-built plant on today's influent (once per plant state, not per edit)
+  const now = useMemo(() => simulate(plant.graph, currentInfluent(plant)), [plant.graph, plant.trueStream, plant.history.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // only quote on a simulation that is up to date with the draft (the worker result lags edits)
+  const quote = useMemo(() => (u?.phase === 'draft' && sim && !busy ? upgradeQuote(plant, draft, week, { next: sim }) : null), [u?.phase, sim, busy, draft, plant.graph, plant.incidentLog, plant.history.length, week]); // eslint-disable-line react-hooks/exhaustive-deps
+  const last = plant.history[plant.history.length - 1];
+  return (
+    <>
+      <h2>Operating plant</h2>
+      <div className="calc"><span>Client</span><span>{plant.company}</span></div>
+      <div className="calc"><span>O&amp;M fee</span><span>{plant.contract ? `${rm(plant.contract.monthlyFee)}/month` : '—'}</span></div>
+      <div className="calc"><span>Today's flow</span><span>{fmt(currentInfluent(plant).Q, 0)} m³/d (×{fmt(last?.flowFactor ?? 1, 2)})</span></div>
+      <div className="calc"><span>As-built on today's influent</span><span className={`pill ${now.ok && now.effluent && evaluate(now.effluent, plant.standard, now).pass ? 'pass' : 'fail'}`}>{now.ok && now.effluent && evaluate(now.effluent, plant.standard, now).pass ? 'PASS' : 'FAIL'}</span></div>
+      <div className="calc"><span>Last weekly sample</span><span>{last ? (last.pass ? 'compliant' : `failed: ${last.failed.join(', ')}`) : '—'}</span></div>
+      <div className="row" style={{ gap: 6, marginTop: 10 }}>
+        <button className="btn sm" onClick={() => go('scada')}>Open SCADA ▸</button>
+        <button className="btn sm ghost" onClick={() => go('plants')}>Plant economics</button>
+      </div>
+
+      {!u && (
+        <>
+          <h2 style={{ marginTop: 16 }}>Upgrade</h2>
+          <p className="muted" style={{ fontSize: 12 }}>
+            Add standby pumps, control loops or instruments you left out, change options, or add, resize and remove units. You pay the works when ordered. The client pays a variation order (cost + {Math.round((VO_MARKUP - 1) * 100)} %) at hand-over for the units needed to restore compliance after failed samples, and for instruments that remedy recent incidents on that unit; the rest is yours.
+          </p>
+          <button className="btn primary" style={{ width: '100%' }} onClick={() => startUpgrade(plant.id)}>
+            Propose upgrade ▸
+          </button>
+        </>
+      )}
+
+      {u?.phase === 'draft' && (
+        <>
+          <h2 style={{ marginTop: 16 }}>Upgrade quote</h2>
+          {!quote ? (
+            <p className="muted">{busy || !sim ? 'calculating…' : '—'}</p>
+          ) : (
+            <>
+              <div className="calc"><span>Changed / new</span><span>{quote.changed.length ? quote.changed.join(', ') : 'nothing yet'}</span></div>
+              {quote.removed.length > 0 && <div className="calc"><span>Removed</span><span>{quote.removed.join(', ')}</span></div>}
+              <div className="calc"><span>Works cost (paid when ordered)</span><span>{rm(quote.cost)}</span></div>
+              <div className="calc"><span>Client VO scope</span><span>{quote.clientFunded ? `${quote.clientUnits.join(', ')} — ${rm(quote.clientCost)}` : 'none'}</span></div>
+              <div className="calc"><span>Client pays at hand-over</span><span>{rm(quote.price)}</span></div>
+              <div className="calc"><span>Your net cost</span><span>{rm(quote.cost - quote.price)}</span></div>
+              <div className="calc"><span>Construction</span><span>{quote.weeks} weeks, plant stays in service</span></div>
+              <div className="calc"><span>Upgraded plant on today's influent</span><span className={`pill ${quote.draftPass ? 'pass' : 'fail'}`}>{quote.draftPass ? 'PASS' : 'FAIL'}</span></div>
+              <div className={`note ${quote.clientFunded ? 'info' : 'warn'}`} style={{ marginTop: 8 }}>
+                {quote.reason}
+              </div>
+              <div className="calc"><span>Cash + credit</span><span style={{ color: cash + 250_000 < quote.cost ? 'var(--alarm)' : undefined }}>{rm(cash + 250_000)}</span></div>
+              {quote.errors.map((e) => (
+                <div key={e} className="note error">{e}</div>
+              ))}
+            </>
+          )}
+          {msg && <div className={`note ${msg.ok ? 'info' : 'error'}`}>{msg.text}</div>}
+          <button
+            className="btn primary"
+            style={{ width: '100%', marginTop: 10 }}
+            disabled={!quote?.ok}
+            onClick={() => {
+              flush();
+              if (!quote || !confirm(`Order the upgrade works?\n\n${quote.changed.join(', ')}\nCost ${rm(quote.cost)} now · hand-over in week ${week + quote.weeks}\n${quote.clientFunded ? `Client pays ${rm(quote.price)} at hand-over.` : 'Funded by you.'}`)) return;
+              setMsg(submitUpgrade(plant.id));
+            }}
+          >
+            Order upgrade works ▸
+          </button>
+          <button className="btn sm ghost" style={{ width: '100%', marginTop: 6 }} onClick={() => { if (confirm('Discard this upgrade draft?')) discardUpgrade(plant.id); }}>
+            Discard draft
+          </button>
+          <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>Set-points are not works: change them in SCADA. The live SCADA set-points are kept at hand-over.</p>
+        </>
+      )}
+
+      {u?.phase === 'building' && (
+        <>
+          <h2 style={{ marginTop: 16 }}>Upgrade under construction</h2>
+          <div className="calc"><span>Hand-over</span><span>week {u.doneWeek}</span></div>
+          <div className="calc"><span>Works cost</span><span>{rm(u.cost ?? 0)}</span></div>
+          <div className="calc"><span>Variation order</span><span>{u.clientFunded ? `${rm(u.price ?? 0)} from the client` : 'operator-funded'}</span></div>
+          {u.reason && <p className="muted" style={{ fontSize: 12 }}>{u.reason}</p>}
+        </>
+      )}
+    </>
   );
 }

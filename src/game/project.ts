@@ -3,11 +3,13 @@ import { Stream, METALS, cloneStream, codTotal, tss, metalTotal } from '../simul
 import { setCbForPH } from '../simulation/chemistry/acidBase';
 import { CATALOGUE, defaultParams } from '../simulation/treatment/catalogue';
 import { ComplianceReport, evaluate } from '../simulation/treatment/compliance';
-import { PNode, ProcessGraph, simulate } from '../simulation/treatment/graph';
+import { PNode, ProcessGraph, SimResult, simulate } from '../simulation/treatment/graph';
+import { applicableInstruments, hasInst, instCapex } from '../simulation/treatment/instrumentation';
 import { Note } from '../simulation/treatment/types';
 import { Enquiry, PAYMENT } from './customers';
 import { Datasheet, LabTestId } from './lab';
 import { createRng } from './rng';
+import { SETPOINTS } from './incidents';
 import type { FeeQuote } from './operations';
 
 export type ProjectStatus = 'design' | 'building' | 'failed' | 'completed' | 'abandoned';
@@ -96,7 +98,55 @@ export function makeNode(kind: PNode['kind'], Q: number, existing: PNode[]): PNo
   return { id, kind, tag: `${def.tagPrefix}-${String(count).padStart(2, '0')}`, params: defaultParams(kind, Q) };
 }
 
-const sameNode = (a: PNode, b: PNode) => a.kind === b.kind && JSON.stringify(a.params) === JSON.stringify(b.params);
+/** Hardware parameters of a unit: everything except the operator set-points (a set-point change is not construction work). */
+function hardware(n: PNode): Record<string, unknown> {
+  const sp = new Set((SETPOINTS[n.kind] ?? []).map((d) => d.key));
+  return Object.fromEntries(Object.entries(n.params).filter(([k]) => !sp.has(k)).sort(([a], [b]) => a.localeCompare(b)));
+}
+const sameNode = (a: PNode, b: PNode) => a.kind === b.kind && JSON.stringify(hardware(a)) === JSON.stringify(hardware(b));
+const sameInst = (a: PNode, b: PNode) => instCapex(a) === instCapex(b) && applicableInstruments(a.kind, a.params).every((d) => hasInst(a, d.key) === hasInst(b, d.key));
+
+/**
+ * Rework charge for one unit when an existing plant is modified: a new unit or a changed unit (kind or sizing/options)
+ * is rebuilt at the full unit CAPEX × RETROFIT_PREMIUM. A unit whose only change is instrumentation or redundancy is
+ * charged for the added instruments/standby only (× premium). Removing an instrument is free.
+ */
+export function unitRetrofitCharge(prev: PNode | undefined, n: PNode, unitCapex: number): number {
+  if (!prev || !sameNode(prev, n)) return unitCapex * RETROFIT_PREMIUM;
+  if (sameInst(prev, n)) return 0;
+  return Math.max(0, instCapex(n) - instCapex(prev)) * RETROFIT_PREMIUM;
+}
+
+/** Total rework charge of a modified graph against the as-built one (units with flow and idle units; inlet flow meter). */
+export function retrofitCharge(built: ProcessGraph, graph: ProcessGraph, sim: SimResult): number {
+  let total = 0;
+  for (const [id, n] of Object.entries(sim.nodes)) total += unitRetrofitCharge(built.nodes.find((b) => b.id === id), n.node, n.capex);
+  for (const n of graph.nodes.filter((x) => x.kind === 'influent')) {
+    const prev = built.nodes.find((b) => b.id === n.id);
+    total += Math.max(0, instCapex(n) - (prev ? instCapex(prev) : 0)) * RETROFIT_PREMIUM;
+  }
+  return total;
+}
+
+/** Units new or changed in any way (sizing, options, instruments) vs the as-built graph. */
+/** Units of the as-built plant that are no longer in the modified graph (demolition: no charge, but construction time). */
+export function removedUnits(built: ProcessGraph, graph: ProcessGraph): PNode[] {
+  return built.nodes.filter((b) => b.kind !== 'influent' && b.kind !== 'discharge' && !graph.nodes.some((n) => n.id === b.id));
+}
+
+/** Has the pipework changed (new, removed or re-routed pipes)? */
+export function pipingChanged(built: ProcessGraph, graph: ProcessGraph): boolean {
+  const key = (g: ProcessGraph) => g.edges.map((e) => `${e.from}>${e.to}:${e.fromPort ?? 'out'}`).sort().join('|');
+  return key(built) !== key(graph);
+}
+
+export function changedUnits(built: ProcessGraph, graph: ProcessGraph): PNode[] {
+  const units = graph.nodes.filter((n) => n.kind !== 'discharge' && (n.kind === 'influent' || graph.edges.some((e) => e.from === n.id || e.to === n.id)));
+  return units.filter((u) => {
+    const b = built.nodes.find((x) => x.id === u.id);
+    return !b || !sameNode(b, u) || !sameInst(b, u);
+  });
+}
 
 /** Day-to-day variability of the real influent at commissioning (GAME MODEL ±8 %). */
 export function commissioningInfluent(trueS: Stream, seed: number): Stream {
@@ -123,9 +173,7 @@ export function constructionWeeks(p: Project): number {
   // units with no pipes are left out of the design (see simulate) and are not built
   const units = p.graph.nodes.filter((n) => n.kind !== 'influent' && n.kind !== 'discharge' && p.graph.edges.some((e) => e.from === n.id || e.to === n.id));
   if (!p.built) return 2 + Math.ceil(units.length * 0.8);
-  const builtNodes = p.built.nodes;
-  const changed = units.filter((u) => !builtNodes.some((b) => b.id === u.id && sameNode(b, u))).length;
-  return 1 + Math.ceil(changed * 0.6);
+  return 1 + Math.ceil(changedUnits(p.built, p.graph).length * 0.6);
 }
 
 export function commission(p: Project, week: number): CommissionReport {
@@ -135,14 +183,7 @@ export function commission(p: Project, week: number): CommissionReport {
   const messages: string[] = [];
   // CAPEX actually charged: full on first build; on retrofit, new or modified units at a 20 % rework premium
   let capexCharged = sim.capex;
-  if (p.built) {
-    capexCharged = 0;
-    for (const id of Object.keys(sim.nodes)) {
-      const n = sim.nodes[id];
-      const prev = p.built.nodes.find((b) => b.id === id);
-      if (!prev || !sameNode(prev, n.node)) capexCharged += n.capex * RETROFIT_PREMIUM;
-    }
-  }
+  if (p.built) capexCharged = retrofitCharge(p.built, p.graph, sim);
   const stages: StageRow[] = sim.order
     .filter((id) => sim.nodes[id])
     .map((id) => {

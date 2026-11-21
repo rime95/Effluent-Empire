@@ -135,11 +135,19 @@ export function axisDomain(values: number[], group: AxisGroup, refs: number[] = 
       hi = bh;
     }
   }
-  return niceTicks(lo, hi);
+  const ax = niceTicks(lo, hi);
+  if (group.bounds) {
+    // nice rounding can step past a physical bound (pH 0–15): clip ticks and domain back inside
+    const [bl, bh] = group.bounds;
+    ax.ticks = ax.ticks.filter((t) => t >= bl - 1e-9 && t <= bh + 1e-9);
+    ax.domain = [Math.max(bl, ax.domain[0]), Math.min(bh, ax.domain[1])];
+  }
+  return ax;
 }
 
 export function tickLabel(v: number, decimals: number): string {
-  if (Math.abs(v) >= 10_000 && decimals === 0) return `${+(v / 1000).toFixed(1)}k`;
+  // large values with thousands separators (exact, so neighbouring ticks never print the same)
+  if (Math.abs(v) >= 10_000 && decimals === 0) return Math.round(v).toLocaleString('en-US');
   return v.toFixed(decimals);
 }
 

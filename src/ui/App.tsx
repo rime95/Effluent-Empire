@@ -146,11 +146,40 @@ function Game({ onQuit }: { onQuit: () => void }) {
           </button>
         ))}
         {PROJECT.map((n) => (
-          <button key={n.id} className={`nav-item ${screen === n.id ? 'active' : ''}`} onClick={() => setScreen(n.id)} disabled={!p} style={{ paddingLeft: 22 }}>
+          <button
+            key={n.id}
+            className={`nav-item ${screen === n.id && !(n.id === 'studio' && g.studioPlantId) ? 'active' : ''}`}
+            onClick={() => {
+              g.openPlantStudio(null);
+              setScreen(n.id);
+            }}
+            disabled={!p}
+            style={{ paddingLeft: 22 }}
+          >
             <NavIcon name={n.icon} />
             {n.label}
           </button>
         ))}
+        {g.plants.some((x) => x.status === 'operating') && <div className="nav-section">Operating plants — PFD</div>}
+        {g.plants
+          .filter((x) => x.status === 'operating')
+          .map((x) => (
+            <button
+              key={x.id}
+              className={`nav-item ${screen === 'studio' && g.studioPlantId === x.id ? 'active' : ''}`}
+              onClick={() => {
+                g.openPlantStudio(x.id);
+                setScreen('studio');
+              }}
+              style={{ fontSize: 12 }}
+              title="Open the as-built PFD / P&ID; propose upgrades"
+            >
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.company}</span>
+              <span className={`pill ${x.upgrade?.phase === 'building' ? 'warn' : x.upgrade ? 'info' : 'pass'}`} style={{ fontSize: 9 }}>
+                {x.upgrade?.phase === 'building' ? `wk ${x.upgrade.doneWeek}` : x.upgrade ? 'upgrade' : 'O&M'}
+              </span>
+            </button>
+          ))}
         <div className="nav-section">Later phases</div>
         {LOCKED.map((n) => (
           <button key={n.label} className="nav-item" disabled title="Coming in a later development phase">
@@ -166,11 +195,11 @@ function Game({ onQuit }: { onQuit: () => void }) {
         {screen === 'lab' && <Laboratory go={setScreen} />}
         {screen === 'studio' && <Studio go={setScreen} />}
         {screen === 'commission' && <Commissioning go={setScreen} />}
-        {screen === 'plants' && <Plants />}
+        {screen === 'plants' && <Plants go={setScreen} />}
         {screen === 'staff' && <Staff />}
         {screen === 'finance' && <Finance />}
         {screen === 'book' && <Encyclopedia />}
-        {screen === 'scada' && <Scada />}
+        {screen === 'scada' && <Scada go={setScreen} />}
       </main>
       {g.toast && (
         <div className="toast" onClick={() => g.dismissToast()}>

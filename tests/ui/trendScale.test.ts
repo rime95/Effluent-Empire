@@ -61,7 +61,17 @@ describe('SCADA trend axes (knowledge/operations/scada.md)', () => {
     expect(groupByUnit(['DO', 'MLSS']).right?.group.id).toBe('MLSS'); // same unit, different magnitude → own axis
   });
 
+  it('large values and bound clipping (QA review)', () => {
+    const l = labels(10_000, 10_100);
+    expect(new Set(l).size).toBe(l.length);
+    const ph = axisDomain([1, 13], AXIS_GROUPS.pH);
+    expect(ph.domain[0]).toBeGreaterThanOrEqual(0);
+    expect(ph.domain[1]).toBeLessThanOrEqual(14);
+    expect(axisDomain([], AXIS_GROUPS.conc).domain).toEqual([0, 1]);
+  });
+
   it('replay clock labels', () => {
+    expect(clockLabel(24)).toBe('D2 00:00');
     expect(clockLabel(0)).toBe('D1 00:00');
     expect(clockLabel(6.25)).toBe('D1 06:15');
     expect(clockLabel(30.25)).toBe('D2 06:15');

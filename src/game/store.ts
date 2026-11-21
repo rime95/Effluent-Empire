@@ -9,8 +9,9 @@ import { LAB_TESTS, LabTestId, applyTest } from './lab';
 import { Market, initialMarket, stepMarket } from './market';
 import { INCIDENT_LABEL, availableActions, clampSetpoint } from './incidents';
 import { importLegacy, newSlotId, readSlot, summarize, writeSlot } from './saves';
-import { OM, Plant, omFeeQuote, operateWeek, recommendedMaintenance } from './operations';
+import { OM, Plant, contractFor, omFeeQuote, operateWeek, recommendedMaintenance } from './operations';
 import { simulate } from '../simulation/treatment/graph';
+import { completeUpgrade, upgradeQuote } from './upgrade';
 import { Project, ABANDON_PENALTY, commission, constructionWeeks, newProject } from './project';
 import { createRng } from './rng';
 import { Employee, founder, generateCandidates, labDiscount, labWeeks, operatorCapacity, payroll, projectSlots, salesBoost } from './staff';
@@ -65,6 +66,8 @@ export interface GameState {
   negativeWeeks: number;
   gameOver: boolean;
   toast: string | null;
+  /** Engineering Studio shows this operating plant (PFD / P&ID, upgrades) instead of the active project */
+  studioPlantId?: string | null;
 }
 
 interface Actions {
@@ -90,6 +93,13 @@ interface Actions {
   fire: (employeeId: string) => void;
   load: (json: string) => boolean;
   dismissToast: () => void;
+  /** open an operating plant's PFD in the Studio (null = back to the active project) */
+  openPlantStudio: (plantId: string | null) => void;
+  /** start / edit / discard / submit an upgrade (variation order) of an operating plant */
+  startUpgrade: (plantId: string) => void;
+  setUpgradeGraph: (plantId: string, g: ProcessGraph) => void;
+  discardUpgrade: (plantId: string) => void;
+  submitUpgrade: (plantId: string) => { ok: boolean; text: string };
 }
 
 const LIVE: Project['status'][] = ['design', 'building', 'failed'];
@@ -118,6 +128,7 @@ function initial(name = 'Effluent Engineering Sdn Bhd'): GameState {
     negativeWeeks: 0,
     gameOver: false,
     toast: null,
+    studioPlantId: null,
   };
   return refill(base);
 }
@@ -162,7 +173,7 @@ export function repriceLegacyContract(p: Plant, reputation: number): Plant {
   if (!p.contract || p.contract.quote) return p;
   const sim = simulate(p.graph, p.trueStream);
   const quote = omFeeQuote({ capex: p.capex, Q: p.trueStream.Q, std: p.standard, reputation, opexRMd: sim.opexRMd, graph: p.graph });
-  return { ...p, contract: { monthlyFee: quote.monthlyFee, quote, startWeek: p.contract.startWeek, endWeek: p.contract.endWeek } };
+  return { ...p, contract: { monthlyFee: quote.monthlyFee, quote, startWeek: p.contract.startWeek, endWeek: p.contract.endWeek, indexation: 1 } };
 }
 
 export function migrate(raw: unknown): GameState | null {
@@ -284,15 +295,28 @@ export function stepWeek(state: GameState): GameState {
   const plants: Plant[] = [];
   for (const pl of s.plants) {
     if (pl.status !== 'operating') {
-      plants.push(pl);
+      // contract ended while upgrade works were under way: works delivered to the client's plant are settled as a VO;
+      // operator-funded works are lost with the contract
+      if (pl.upgrade?.phase === 'building') {
+        if (pl.upgrade.clientFunded && pl.upgrade.price) s = book(s, `Variation order settled on contract end: ${pl.company}`, pl.upgrade.price, 'project');
+        plants.push({ ...pl, upgrade: null });
+      } else plants.push(pl.upgrade ? { ...pl, upgrade: null } : pl);
       continue;
     }
     const covered = capacity > 0;
     if (covered) capacity -= 1;
-    const out = operateWeek(pl, week, s.market, covered);
+    let cur = pl;
+    // upgrade works complete → the plant runs the new design from this week; a variation order is paid by the client
+    if (cur.upgrade?.phase === 'building' && (cur.upgrade.doneWeek ?? 0) <= week) {
+      const u = cur.upgrade;
+      cur = completeUpgrade(cur);
+      if (u.clientFunded && u.price) s = book(s, `Variation order paid: ${pl.company}`, u.price, 'project');
+      notices.push(`${pl.company}: upgrade works handed over${u.clientFunded ? ` — client paid the variation order (RM ${(u.price ?? 0).toLocaleString()})` : ''}. Service fee now RM ${cur.contract?.monthlyFee.toLocaleString() ?? '—'}/month.`);
+    }
+    const out = operateWeek(cur, week, s.market, covered);
     plants.push(out.plant);
     const rec = out.plant.history[out.plant.history.length - 1];
-    if (rec?.fee !== undefined) {
+    if (rec?.fee !== undefined && (rec.fee || rec.deduction || rec.reimbursed)) {
       s = book(s, `O&M service fee: ${pl.company}${rec.deduction ? ' (less performance deduction)' : ''}`, rec.fee - (rec.deduction ?? 0), 'om');
       if (rec.reimbursed) s = book(s, `Reimbursables billed (chemicals, power, sludge + ${Math.round(OM.handling * 100)} %): ${pl.company}`, rec.reimbursed, 'om');
       s = book(s, `Plant running costs: ${pl.company}`, out.cash - (rec.fee - (rec.deduction ?? 0)) - (rec.reimbursed ?? 0), 'opex');
@@ -324,7 +348,7 @@ export function stepWeek(state: GameState): GameState {
 
 /** Is anything scheduled (lab result, construction) or worth waking for? */
 function hasPendingEvent(s: GameState): boolean {
-  return s.projects.some((p) => p.labQueue.length > 0 || p.building !== null);
+  return s.projects.some((p) => p.labQueue.length > 0 || p.building !== null) || s.plants.some((p) => p.status === 'operating' && p.upgrade?.phase === 'building');
 }
 
 export const useGame = create<GameState & Actions>((set, get) => {
@@ -362,7 +386,41 @@ export const useGame = create<GameState & Actions>((set, get) => {
         return { ...next, projects: next.projects.map((p) => (p.id === e.id ? { ...p, paid: advance } : p)), toast: `Contract signed with ${e.company} — 30 % advance received.` };
       }),
     decline: (id) => set((s) => ({ enquiries: s.enquiries.filter((x) => x.id !== id) })),
-    setActiveProject: (id) => set({ activeProjectId: id }),
+    setActiveProject: (id) => set({ activeProjectId: id, studioPlantId: null }),
+    openPlantStudio: (plantId) => set({ studioPlantId: plantId }),
+    startUpgrade: (plantId) =>
+      set((s) => ({
+        plants: s.plants.map((p) => (p.id === plantId && p.status === 'operating' && !p.upgrade ? { ...p, upgrade: { graph: structuredClone(p.graph), phase: 'draft' } } : p)),
+      })),
+    setUpgradeGraph: (plantId, g) => set((s) => ({ plants: s.plants.map((p) => (p.id === plantId && p.upgrade?.phase === 'draft' ? { ...p, upgrade: { ...p.upgrade, graph: g } } : p)) })),
+    discardUpgrade: (plantId) => set((s) => ({ plants: s.plants.map((p) => (p.id === plantId && p.upgrade?.phase === 'draft' ? { ...p, upgrade: null } : p)) })),
+    submitUpgrade: (plantId) => {
+      const s = get();
+      const p = s.plants.find((x) => x.id === plantId);
+      if (s.gameOver || !p || p.status !== 'operating' || p.upgrade?.phase !== 'draft') return { ok: false, text: 'No upgrade draft.' };
+      const q = upgradeQuote(p, p.upgrade.graph, s.week);
+      if (!q.ok) return { ok: false, text: q.errors.join(' ') };
+      if (!p.contract || s.week + q.weeks >= p.contract.endWeek) return { ok: false, text: 'The O&M contract ends before the works would be handed over.' };
+      if (s.cash - q.cost < -CREDIT_LINE) return { ok: false, text: `Not enough cash or credit for RM ${q.cost.toLocaleString()} of works.` };
+      const doneWeek = s.week + q.weeks;
+      const next = book(s, `Upgrade works (${q.changed.join(', ')}): ${p.company}`, -q.cost, 'capex');
+      set({
+        ...next,
+        plants: next.plants.map((x) =>
+          x.id === plantId
+            ? {
+                ...x,
+                upgrade: { ...p.upgrade!, phase: 'building', cost: q.cost, price: q.price, clientFunded: q.clientFunded, reason: q.reason, doneWeek },
+                // an incident that justified a reliability VO cannot fund another one
+                incidentLog: (x.incidentLog ?? []).map((e) => (q.usedIncidents.includes(e.unitId) ? { ...e, used: true } : e)),
+              }
+            : x,
+        ),
+        news: [...next.news, { week: s.week, text: `${p.company}: upgrade works ordered (${q.changed.join(', ')}), RM ${q.cost.toLocaleString()}, hand-over week ${doneWeek}. ${q.reason}` }].slice(-60),
+        toast: `Upgrade ordered — works complete in week ${doneWeek}.`,
+      });
+      return { ok: true, text: q.reason };
+    },
     runTest: (t) =>
       set((s) => {
         const p = active(s);
@@ -437,7 +495,7 @@ export const useGame = create<GameState & Actions>((set, get) => {
           seed: p.enquiry.seed,
           capex,
           commissionedWeek: s.week,
-          contract: { monthlyFee: offer.quote.monthlyFee, quote: offer.quote, startWeek: s.week, endWeek: s.week + offer.weeks },
+          contract: contractFor(offer.quote, s.week, offer.weeks),
           condition: 100,
           maintenanceBudget: recommendedMaintenance(capex),
           satisfaction: 75,

@@ -3,6 +3,7 @@ import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer,
 import { useGame } from '../../game/store';
 import { OM, Plant, WEEKS_PER_MONTH, recommendedMaintenance } from '../../game/operations';
 import { OMFeeTable } from '../components/OMFee';
+import type { Screen } from '../App';
 import { operatorCapacity } from '../../game/staff';
 import { INDUSTRY_LABEL, rm } from '../format';
 
@@ -17,7 +18,7 @@ function ConditionBar({ value }: { value: number }) {
   );
 }
 
-export function Plants() {
+export function Plants({ go }: { go: (s: Screen) => void }) {
   const g = useGame();
   const [sel, setSel] = useState<string | null>(null);
   const operating = g.plants.filter((p) => p.status === 'operating');
@@ -84,17 +85,18 @@ export function Plants() {
           </table>
         </div>
       )}
-      {plant && <PlantDetail plant={plant} />}
+      {plant && <PlantDetail plant={plant} go={go} />}
     </div>
   );
 }
 
-function PlantDetail({ plant }: { plant: Plant }) {
+function PlantDetail({ plant, go }: { plant: Plant; go: (s: Screen) => void }) {
   const g = useGame();
   const rec = recommendedMaintenance(plant.capex);
   const data = plant.history.slice(-26).map((h) => ({ week: h.week, net: Math.round(h.revenue - h.cost), pass: h.pass }));
   // last 4 weeks ≈ one month of the plant's own economics
-  const recent = plant.history.slice(-4);
+  // the last 4 weeks on the fixed-fee model (older records have no cost split)
+  const recent = plant.history.filter((h) => h.fee !== undefined).slice(-4);
   const scale = recent.length ? WEEKS_PER_MONTH / recent.length : 0;
   const sum = (f: (h: Plant['history'][number]) => number) => recent.reduce((a, h) => a + f(h), 0) * scale;
   const month = {
@@ -114,7 +116,17 @@ function PlantDetail({ plant }: { plant: Plant }) {
   return (
     <div className="grid g2">
       <div className="panel">
-        <h2>{plant.company}</h2>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
+          <h2>{plant.company}</h2>
+          {plant.status === 'operating' && (
+            <div className="row" style={{ gap: 6 }}>
+              <button className="btn sm" onClick={() => { g.openPlantStudio(plant.id); go('studio'); }} title="As-built PFD and P&ID; propose upgrades">
+                View PFD / P&amp;ID{plant.upgrade ? (plant.upgrade.phase === 'building' ? ' · upgrade in progress' : ' · upgrade draft') : ''}
+              </button>
+              <button className="btn sm ghost" onClick={() => { g.openPlantStudio(plant.id); go('scada'); }}>SCADA</button>
+            </div>
+          )}
+        </div>
         {plant.breakdown && <div className="note error">Breakdown at {plant.breakdown.tag}: {plant.breakdown.description} — {plant.breakdown.weeksLeft} wk to repair.</div>}
         <div className="calc">
           <span>Equipment condition</span>
@@ -156,7 +168,7 @@ function PlantDetail({ plant }: { plant: Plant }) {
               <tr><td>Reimbursables billed</td><td className="num">{rm(month.reimbursed)}</td></tr>
               <tr><td>Chemicals, power, sludge (market prices)</td><td className="num">{rm(-month.opex)}</td></tr>
               <tr><td>Maintenance budget</td><td className="num">{rm(-month.maintenance)}</td></tr>
-              <tr><td>CePIETSO, sampling, management</td><td className="num">{rm(-month.service)}</td></tr>
+              <tr><td>CePIETSO supervision, compliance sampling</td><td className="num">{rm(-month.service)}</td></tr>
               {month.repairs > 0 && <tr><td>Repairs</td><td className="num">{rm(-month.repairs)}</td></tr>}
               {month.actions > 0 && <tr><td>SCADA field actions</td><td className="num">{rm(-month.actions)}</td></tr>}
               {month.fines > 0 && <tr><td>DOE fines</td><td className="num" style={{ color: '#ff9c9c' }}>{rm(-month.fines)}</td></tr>}

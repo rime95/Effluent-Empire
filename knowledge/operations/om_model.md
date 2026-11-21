@@ -9,20 +9,21 @@ After a successful commissioning, the customer offers a 3-year (156-week) O&M co
 
 | Cost-base item | RM/month | Notes |
 |---|---|---|
-| Plant operators | FTE × 3,500 × 1.40 on-costs | FTE = 0.5 (Q < 50 m³/d), 1 (< 300), 2 (≥ 300); +0.5 for activated sludge. On-costs cover EPF 13 %, SOCSO/EIS, leave and PPE. `verify:` salary |
-| CePIETSO competent person | 0.15 × 8,000 × 1.40 | Certified Environmental Professional, part-time supervision (Environmental Quality (Industrial Effluent) Regulations 2009). `verify:` |
+| Plant operators | FTE × 3,500 × 1.40 on-costs | FTE = 0.5 (Q < 50 m³/d), 1 (< 300), 2 (≥ 300); +0.5 for a piped-in activated-sludge unit. This assumes day-shift plants with alarm call-out, not 24/7 manning. Statutory on-costs are ≈ 15 % (EPF 13 %, SOCSO ≈ 1.75 %, EIS 0.2 %); the rest covers leave, overtime and PPE. `verify:` FTE rule, salary (RM 2.2–3.5k typical) |
+| CePIETSO competent person | 0.15 × 8,000 × 1.40 | Certified Environmental Professional, part-time supervision (Environmental Quality (Industrial Effluent) Regulations 2009). `verify:` regulation number, whether contractor part-time cover satisfies DOE, separate phys-chem/biological certificates, rate (RM 4–6k employed is typical) |
 | Preventive maintenance | 2 %/yr × CAPEX ÷ 12 | |
-| Compliance sampling | n_params × RM 25 × 52/12 | Weekly grab sample of every parameter the standard regulates. `verify:` lab price |
-| Management & insurance | 10 % of the above | |
+| Compliance sampling | n_params × RM 25 × 52/12 | Weekly grab sample of every parameter the standard regulates. The total (≈ RM 1.5k/month) is plausible, but the build-up is simplified: DOE reporting is usually monthly, BOD/O&G cost more and pH/T are field readings. `verify:` |
+| Management & insurance | 10 % of the above | Head-office overhead recovery: the company already pays office overheads, so this is **not** charged to the plant again. `verify:` |
 
-- **Margin:** 100–150 % on the cost base. It is 125 % at reputation 0, ±25 points per 50 reputation, clamped. This range was set by the player (2026-11-22).
+- **Margin:** 100–150 % on the cost base. It is 125 % at reputation 0, ±25 points per 50 reputation, clamped. This range was set by the player (2026-11-22) and is **game balance**; real O&M margins are about 10–30 % on cost.
+- **Realised margin is higher (known, 2026-11-22).** The fee bills operators per plant (1–2.5 FTE), but one hired operator covers 2–3 plants (`staff.ts`). The player's true staffing cost per plant is therefore lower than the billed staffing line. Making operator coverage consume FTE is an open option.
 - **Reimbursables:** chemicals, electricity and sludge disposal at **market prices** and actual flow, re-billed to the client at cost + 10 % handling. The client carries price and flow risk.
-- **Escalation:** the fixed fee rises 4 % each contract year. `verify:`
+- **Escalation:** the fixed fee and the plant's service costs (CePIETSO, sampling) rise 4 % each contract year, applied as `contract.indexation`. Not applied in the contract's final week. `verify:`
 - **Performance deduction:** each failed weekly sample deducts 5 % of the monthly fee. DOE fines remain the operator's.
 
 What the plant pays each week (`operateWeek`):
 - the maintenance budget;
-- CePIETSO, sampling and management (cost base ÷ 52/12);
+- CePIETSO and sampling (cost-base lines ÷ 52/12, escalated);
 - chemicals, power and sludge at market prices;
 - repairs, SCADA field actions and fines.
 
@@ -61,6 +62,36 @@ Operators are paid through company payroll. The ledger shows the service fee, th
 5. **Contract end.**
    - Satisfaction below 25 %: the customer terminates (−15 reputation).
    - Contract completes with satisfaction ≥ 70 %: +5 reputation.
+
+## Upgrades of operating plants: variation orders (added 2026-11-22, `src/game/upgrade.ts`)
+Player feedback: after O&M started, the PFD could no longer be opened and options left unticked at design (standby pumps, control loops, instruments) could never be added.
+
+- **Viewing.** An operating plant's as-built PFD and P&ID open in the Engineering Studio in read-only mode. They are reached from the sidebar ("Operating plants — PFD"), Plants & O&M, or SCADA. The plant is shown on **today's influent**: the design stream × the growth factor.
+- **Drafting.** "Propose upgrade" puts an editable copy of the as-built graph into `plant.upgrade` (phase `draft`). Units, options, sizes and instruments can all be changed.
+- **Price** (`retrofitCharge`, shared with failed-commissioning retrofits):
+  - A new unit, or one with changed kind/hardware parameters, is charged full unit CAPEX × 1.2 rework premium.
+  - A unit whose **only** change is instrumentation or redundancy is charged for the added instruments only, × 1.2.
+  - **Operator set-points** (the SCADA `SETPOINTS` keys) are not works and are never charged.
+  - Removals and re-piping are free but count as works (time).
+  - **Bug fixed:** retrofits used to ignore `inst`, so ticking an instrument in a retrofit cost RM 0.
+- **Duration:** 1 + ⌈0.6 × (changed + removed units)⌉ weeks, or 1 week for re-piping only. The plant keeps running on the old design until hand-over.
+- **Payment:** the operator pays the whole works cost when ordering.
+- **Funding scope is per unit**, like an instructed VO (wwtp-process-engineer review). The client pays (scope cost) × 1.25 at hand-over for:
+  1. **Compliance.** Applies when the as-built hardware fails its standard on today's influent, judged with the draft's set-points so a detuned set-point does not count. The plant must also have failed ≥ 2 of its last 4 weekly samples. In scope are the changed units without which the draft fails again: each is reverted, or bypassed if new, and re-simulated. A new unit that cannot simply be bypassed counts as needed.
+  2. **Reliability.** Instruments or standby added on a unit with an unused incident in the last 12 weeks, where the instrument remedies that incident kind (`INCIDENT_REMEDY`): standby for pump and blower trips, flow and level for slugs and surges, a DO loop for bulking. Only those instruments are in scope. Each incident funds one VO (`used`). Incidents absorbed by an existing standby are not logged.
+
+  Everything else in the draft is operator-funded. It pays back through fewer incidents: with a standby installed, a pump trip changes over automatically.
+- **Hand-over** (`completeUpgrade`):
+  - the graph is replaced, keeping the live SCADA set-points;
+  - asset CAPEX = the upgraded plant's CAPEX (the rework premium is a sunk project cost, not a maintenance base);
+  - the maintenance budget follows the new recommendation if it was at least the old one;
+  - **only a client-funded VO re-prices the fee:** new cost base at today's flow, the contract margin and its indexation, up or down.
+- **Gates:**
+  - the draft must meet the standard on today's influent;
+  - the contract must run past the hand-over week;
+  - if the contract still ends during the works (termination), a client-funded VO is settled and operator-funded works are lost.
+
+All GAME MODEL; `verify:` the VO markup (1.25) and the premium (1.2). The client pays 1.2 × 1.25 = 1.5 × new-build unit CAPEX, within the usual brownfield-plus-O&P range of about 1.3–1.6.
 
 ## Calibration (`tests/game/phase2.test.ts`)
 A staffed, maintained reference plant is more than 85 % compliant and profitable over a year. Typical results:

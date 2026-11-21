@@ -12,9 +12,10 @@ import { IndustryId } from './industries';
 import { Market, marketOpex } from './market';
 import { commissioningInfluent } from './project';
 import { createRng } from './rng';
-import { Incident, INCIDENT_LABEL, applyIncidentSteady, autoChangeover, incidentDisturbances, rollIncident } from './incidents';
+import { Incident, IncidentKind, INCIDENT_LABEL, applyIncidentSteady, autoChangeover, incidentDisturbances, rollIncident } from './incidents';
 import { hasInst } from '../simulation/treatment/instrumentation';
 import { runDynamic } from '../simulation/dynamic/plantDynamics';
+import type { PlantUpgrade } from './upgrade';
 
 export const OM = {
   contractWeeks: 156,
@@ -106,6 +107,8 @@ export interface OMContract {
   quote: FeeQuote;
   startWeek: number;
   endWeek: number;
+  /** cumulative escalation factor applied to the quote (1.04 per completed contract year) */
+  indexation?: number;
   /** legacy (pre-2026-11-22) lump-sum contracts: replaced by a re-priced contract on load */
   weeklyFee?: number;
 }
@@ -130,6 +133,10 @@ export interface Plant {
   breakdown: Breakdown | null;
   /** unresolved process incident (Phase 3 SCADA); absent on older saves */
   incident?: Incident | null;
+  /** upgrade (variation order) being drafted in the Studio or under construction */
+  upgrade?: PlantUpgrade | null;
+  /** units that had process incidents (week, unit) — reliability upgrades on them are client-funded */
+  incidentLog?: { week: number; unitId: string; kind?: IncidentKind; used?: boolean }[];
   history: WeekRecord[];
   status: 'operating' | 'handedOver' | 'terminated' | 'expired';
 }
@@ -138,10 +145,15 @@ export function recommendedMaintenance(capex: number): number {
   return Math.round((capex * OM.maintenanceFraction) / 52);
 }
 
-/** Operators needed: half a post for a very small plant, one up to 300 m³/d, two above; +0.5 for an activated-sludge plant (daily DO/MLSS/SVI checks, weekend cover). */
+/**
+ * Operators needed (GAME MODEL, verify: day-shift plant with alarm call-out, not 24/7 manning): half a post below
+ * 50 m³/d, one up to 300 m³/d, two above; +0.5 for an activated-sludge plant (daily DO/MLSS/SV30 checks, desludging,
+ * weekend cover). Only units that are piped in count (an unconnected block is not built).
+ */
 export function operatorFTE(Q: number, graph?: ProcessGraph): number {
   const base = Q < 50 ? 0.5 : Q < 300 ? 1 : 2;
-  return base + (graph?.nodes.some((n) => n.kind === 'activatedSludge') ? 0.5 : 0);
+  const piped = (id: string) => !!graph?.edges.some((e) => e.from === id || e.to === id);
+  return base + (graph?.nodes.some((n) => n.kind === 'activatedSludge' && piped(n.id)) ? 0.5 : 0);
 }
 
 /** Number of parameters in the weekly compliance sample (everything the standard regulates). */
@@ -184,13 +196,32 @@ export function omFeeQuote(o: { capex: number; Q: number; std: StandardId; reput
 }
 
 export function contractFor(quote: FeeQuote, startWeek: number, weeks = OM.contractWeeks): OMContract {
-  return { monthlyFee: quote.monthlyFee, quote, startWeek, endWeek: startWeek + weeks };
+  return { monthlyFee: quote.monthlyFee, quote, startWeek, endWeek: startWeek + weeks, indexation: 1 };
 }
 
-/** The plant's own weekly service costs that the fee's cost base covers and the plant pays (operators are on payroll). */
-export function weeklyServiceCost(q: FeeQuote): number {
-  return (q.supervision + q.lab + q.management) / WEEKS_PER_MONTH;
+/** Fixed fee of a quote at a given escalation factor, RM/month. */
+export function indexedFee(q: FeeQuote, indexation = 1): number {
+  return Math.round((q.monthlyFee * indexation) / 10) * 10;
 }
+
+/**
+ * The plant's own weekly service costs from the fee's cost base: CePIETSO supervision and compliance sampling,
+ * escalated with the contract. Operators are on payroll; management is head-office overhead recovery (the company
+ * already pays office overheads), so it is not charged again to the plant.
+ */
+export function weeklyServiceCost(q: FeeQuote, indexation = 1): number {
+  return ((q.supervision + q.lab) * indexation) / WEEKS_PER_MONTH;
+}
+
+/** Instruments that would have prevented or contained each incident kind (for reliability variation orders). */
+export const INCIDENT_REMEDY: Record<IncidentKind, string[]> = {
+  pumpTrip: ['standby'],
+  blowerTrip: ['standby'],
+  probeDrift: [],
+  toxicSlug: ['flow', 'level'],
+  hydraulicSurge: ['flow', 'level'],
+  bulking: ['doLoop'],
+};
 
 const BREAKDOWNS: Record<UnitType, { description: string; apply: (p: Params) => Params | 'bypass' }> = {
   eq: { description: 'EQ tank mixer failure — tank half-silted, little buffering', apply: (p) => ({ ...p, volume: Number(p.volume) * 0.3 }) },
@@ -257,9 +288,10 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   const costs = { maintenance: 0, repairs: 0, opex: 0, service: 0, actions: p.actionCost ?? 0, fines: 0 };
   p.actionCost = 0;
 
-  // 0. contract-year escalation of the fixed fee
-  if (p.contract && week > p.contract.startWeek && (week - p.contract.startWeek) % 52 === 0) {
-    p.contract = { ...p.contract, monthlyFee: Math.round((p.contract.monthlyFee * (1 + OM.escalation)) / 10) * 10 };
+  // 0. contract-year escalation of the fixed fee (not in the contract's final week)
+  if (p.contract && week > p.contract.startWeek && week < p.contract.endWeek && (week - p.contract.startWeek) % 52 === 0) {
+    const indexation = (p.contract.indexation ?? 1) * (1 + OM.escalation);
+    p.contract = { ...p.contract, indexation, monthlyFee: indexedFee(p.contract.quote, indexation) };
     messages.push(`${p.company}: contract anniversary — fixed fee escalated ${Math.round(OM.escalation * 100)} % to RM ${p.contract.monthlyFee.toLocaleString()}/month.`);
   }
 
@@ -269,9 +301,9 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   p.condition = Math.max(0, Math.min(100, p.condition - OM.wearPerWeek - (covered ? 0 : OM.uncoveredWear) + 0.9 * Math.min(care, 2)));
   cost += p.maintenanceBudget;
   costs.maintenance = p.maintenanceBudget;
-  // CePIETSO supervision, weekly compliance sampling, contract management (the fee's cost base; operators are on payroll)
+  // CePIETSO supervision and weekly compliance sampling (operators are on payroll, management is overhead recovery)
   if (p.contract) {
-    costs.service = weeklyServiceCost(p.contract.quote);
+    costs.service = weeklyServiceCost(p.contract.quote, p.contract.indexation ?? 1);
     cost += costs.service;
   }
 
@@ -305,6 +337,8 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
     }
   } else if (!p.breakdown && rng.chance(OM.incidentChance)) {
     p.incident = rollIncident(p.graph, week, rng);
+    // an incident the standby absorbed is not a reliability problem; the rest are logged for variation orders
+    if (p.incident?.unitId && !autoChangeover(p.graph, p.incident)) p.incidentLog = [...(p.incidentLog ?? []), { week, unitId: p.incident.unitId, kind: p.incident.kind }].slice(-30);
     if (p.incident && autoChangeover(p.graph, p.incident)) {
       const tag = p.incident.tag;
       messages.push(`${p.company} — ${INCIDENT_LABEL[p.incident.kind]} at ${tag}: standby took over automatically. Duty unit repaired (RM 500).`);
