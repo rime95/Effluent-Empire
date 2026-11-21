@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { CartesianGrid, Legend, Line, LineChart, ReferenceArea, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useGame } from '../../game/store';
-import { Plant } from '../../game/operations';
+import { Plant, degradedGraph } from '../../game/operations';
+import { commissioningInfluent } from '../../game/project';
+import { TrendChart, TrendRef, TrendSeries } from '../components/TrendChart';
+import { AXIS_GROUPS, clockLabel, groupByUnit, groupOf } from '../components/trendScale';
 import { SETPOINTS, availableActions, incidentDisturbances } from '../../game/incidents';
 import { cloneStream } from '../../simulation/core/stream';
 import { DynamicResult, runDynamic } from '../../simulation/dynamic/plantDynamics';
@@ -13,7 +15,8 @@ import type { PNode } from '../../simulation/treatment/graph';
 /** Tags a unit can show in SCADA: without the instrument there is no signal (knowledge/operations/instrumentation.md). */
 function tagVisible(n: PNode | undefined, key: string): boolean {
   if (!n) return true;
-  if (['pH', 'pHmeasured', 'pump', 'sp'].includes(key) && ['neutralisation', 'precipitation'].includes(n.kind)) return hasInst(n, 'pHLoop');
+  if (key === 'bypassed') return false;
+  if (['pH', 'pHmeasured', 'pump', 'sp'].includes(key) && ['neutralisation', 'precipitation', 'coagulation'].includes(n.kind)) return hasInst(n, 'pHLoop');
   if (['DO', 'blower'].includes(key) && n.kind === 'activatedSludge') return hasInst(n, 'doLoop');
   if (['level', 'overflow'].includes(key) && n.kind === 'eq') return hasInst(n, 'level');
   return true;
@@ -24,12 +27,18 @@ import { fmt, INDUSTRY_LABEL, rm } from '../format';
 const BG = '#050c14';
 const PANEL = '#0a1622';
 const LINE = '#16304a';
-const AXIS = { stroke: '#6f88a3', fontSize: 10, fontFamily: 'var(--mono)' };
 const CAT_COLOR: Record<string, string> = { chemical: 'var(--chem)', biological: 'var(--bio)', physical: 'var(--phys)' };
 const TAG_UNITS: Record<string, string> = { level: '%', outflow: 'm³/d', overflow: 'm³/d', pH: '', pHmeasured: '', pump: '%', sp: '', DO: 'mg/L', MLSS: 'mg/L', NH4: 'mg N/L', NO3: 'mg N/L', OUR: 'mg/L·h', blower: '%', carry: '%', TSS: 'mg/L', SOR: 'm/h' };
-const TAG_LABEL: Record<string, string> = { level: 'Level', outflow: 'Outflow', overflow: 'Overflow', pH: 'pH (true)', pHmeasured: 'pH (probe)', pump: 'Dosing pump', sp: 'Set-point', DO: 'DO', MLSS: 'MLSS', NH4: 'NH₄-N', NO3: 'NO₃-N', OUR: 'OUR', blower: 'Blower', carry: 'Solids carry-over', TSS: 'TSS', SOR: 'SOR' };
-/** compact axis ticks: no 1e-19 noise when a signal collapses to zero */
-const tick = (v: number) => (Math.abs(v) < 1e-3 ? '0' : Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(+v.toPrecision(3)));
+const TAG_LABEL: Record<string, string> = { level: 'Level', outflow: 'Outflow', overflow: 'Overflow', pH: 'pH (true)', pHmeasured: 'pH (probe)', pump: 'Dosing pump', sp: 'Set-point', DO: 'DO', MLSS: 'MLSS', NH4: 'NH₄-N', NO3: 'NO₃-N', OUR: 'OUR', blower: 'Blower', carry: 'Solids carry-over', TSS: 'TSS', SOR: 'SOR (peak)' };
+/** mimic labels (fit the 110 px faceplate) and display decimals per tag */
+const TAG_SHORT: Record<string, string> = { level: 'Level', outflow: 'Out Q', overflow: 'Overflow', pH: 'pH', pHmeasured: 'pH probe', pump: 'Pump', DO: 'DO', MLSS: 'MLSS', NH4: 'NH₄-N', NO3: 'NO₃-N', OUR: 'OUR', blower: 'Blower', carry: 'Carry-ov', TSS: 'TSS', SOR: 'SOR' };
+const TAG_DP: Record<string, number> = { pH: 2, pHmeasured: 2, DO: 2, NH4: 1, NO3: 1, carry: 1, SOR: 2, OUR: 1 };
+/** tags trended by default when a unit is selected */
+function defaultTags(kind: string, keys: string[]): string[] {
+  const pref: Record<string, string[]> = { neutralisation: ['pH', 'pHmeasured', 'pump'], precipitation: ['pH', 'pHmeasured', 'pump'], coagulation: ['pH', 'pHmeasured'], crReduction: ['pH', 'pHmeasured'], activatedSludge: ['DO', 'blower'], eq: ['level', 'outflow'], clarifier: ['TSS'] };
+  const want = (pref[kind] ?? keys.slice(0, 2)).filter((k) => keys.includes(k));
+  return want.length ? want : keys.slice(0, 1);
+}
 const SERIES = ['#22d3ee', '#f59e0b', '#a3e635', '#f472b6', '#c084fc', '#94a3b8', '#fb7185'];
 
 interface Alarm {
@@ -71,10 +80,13 @@ export function Scada() {
   const [cursor, setCursor] = useState(48);
   const [actionMsg, setActionMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [effParam, setEffParam] = useState('pH');
+  const [tagSel, setTagSel] = useState<Record<string, string[]>>({});
 
   const units = plant ? plant.graph.nodes.filter((n) => n.kind !== 'influent' && n.kind !== 'discharge') : [];
   const unit = units.find((u) => u.id === unitSel) ?? units.find((u) => u.kind === 'activatedSludge') ?? units.find((u) => ['neutralisation', 'precipitation'].includes(u.kind)) ?? units[0];
-  const runKey = plant ? JSON.stringify([plant.id, plant.graph.nodes.map((n) => n.params), plant.incident?.kind ?? '', plant.incident?.unitId ?? '']) : '';
+  const lastWeek = plant?.history[plant.history.length - 1];
+  // the replay is the plant as it runs THIS week: this week's influent, growth, breakdown and incident (same basis as the weekly sample)
+  const runKey = plant ? JSON.stringify([plant.id, lastWeek?.week ?? -1, plant.graph.nodes.map((n) => [n.params, n.inst ?? null]), plant.breakdown?.unitId ?? '', plant.incident?.kind ?? '', plant.incident?.unitId ?? '']) : '';
 
   const run = () => {
     if (!plant) return;
@@ -82,9 +94,9 @@ export function Scada() {
     // let the "simulating" state paint before the (≈0.5–2 s) integration
     setTimeout(() => {
       const last = plant.history[plant.history.length - 1];
-      const inf = cloneStream(plant.trueStream);
+      const inf = cloneStream(last ? commissioningInfluent(plant.trueStream, plant.seed * 97 + last.week) : plant.trueStream);
       inf.Q *= last?.flowFactor ?? 1;
-      const r = runDynamic(plant.graph, inf, plant.standard, { hours: 48, disturbances: incidentDisturbances(plant.incident ?? null), warmBase: plant.trueStream });
+      const r = runDynamic(degradedGraph(plant.graph, plant.breakdown), inf, plant.standard, { hours: 48, disturbances: incidentDisturbances(plant.incident ?? null), warmBase: plant.trueStream });
       setResult(r);
       setCursor(48);
       setBusy(false);
@@ -111,12 +123,30 @@ export function Scada() {
       </div>
     );
 
-  const unitData = result && unit ? result.points.map((p) => ({ t: p.t, ...(p.units[unit.id] ?? {}) })) : [];
-  const unitKeys = unitData.length ? Object.keys(unitData[0]).filter((k) => k !== 't' && k !== 'sp' && tagVisible(unit, k)) : [];
-  const hidden = unitData.length ? Object.keys(unitData[0]).filter((k) => k !== 't' && k !== 'sp' && !tagVisible(unit, k)) : [];
+  const unitData: Record<string, number>[] = result && unit ? result.points.map((p) => ({ t: p.t, ...(p.units[unit.id] ?? {}) })) : [];
+  // every tag that appears anywhere in the replay (a unit can start reporting a tag part-way through)
+  const allKeys = [...new Set(unitData.flatMap((d) => Object.keys(d)))].filter((k) => k !== 't' && k !== 'sp');
+  const unitKeys = allKeys.filter((k) => tagVisible(unit, k));
+  const hidden = allKeys.filter((k) => k !== 'bypassed' && !tagVisible(unit, k));
+  const bypassed = allKeys.includes('bypassed');
+  const chosen = unit ? (tagSel[unit.id] ?? defaultTags(unit.kind, unitKeys)).filter((k) => unitKeys.includes(k)) : [];
+  const layout = groupByUnit(chosen);
+  const unitSeries: TrendSeries[] = [...(layout.left?.tags ?? []), ...(layout.right?.tags ?? [])].map((k) => ({ key: k, label: TAG_LABEL[k] ?? k, unit: TAG_UNITS[k] ?? '', group: groupOf(k), color: SERIES[unitKeys.indexOf(k) % SERIES.length], dashed: k === 'pHmeasured', dp: TAG_DP[k] ?? 1 }));
+  const spVal = unitData.find((d) => d.sp !== undefined)?.sp;
+  const unitRefs: TrendRef[] = spVal !== undefined && tagVisible(unit, 'sp') && chosen.some((k) => groupOf(k).id === 'pH') ? [{ y: spVal, groupId: 'pH', color: '#cfe3f7', label: `SP ${fmt(spVal, 1)}` }] : [];
+  const toggleTag = (k: string) => unit && setTagSel({ ...tagSel, [unit.id]: chosen.includes(k) ? chosen.filter((x) => x !== k) : [...chosen, k] });
   const flowMeter = hasInst(plant.graph.nodes.find((n) => n.kind === 'influent'), 'flow');
   const effData = result ? result.points.map((p) => ({ t: p.t, v: p.effluent[effParam], Q: p.Qin })) : [];
   const lim = (limits as Record<string, { max?: number; min?: number }>)[effParam];
+  const effGroup = effParam === 'pH' ? AXIS_GROUPS.pH : { ...AXIS_GROUPS.conc, id: 'eff', label: `${effParam} mg/L` };
+  const effSeries: TrendSeries[] = [
+    { key: 'v', label: `Effluent ${effParam}`, unit: effParam === 'pH' ? '' : 'mg/L', group: effGroup, color: '#22d3ee', width: 2, dp: effParam === 'pH' ? 2 : 3 },
+    ...(flowMeter ? [{ key: 'Q', label: 'Influent Q', unit: 'm³/d', group: AXIS_GROUPS.flow, color: '#3d6f9e', width: 1, dp: 0 }] : []),
+  ];
+  const effRefs: TrendRef[] = [
+    ...(lim?.max !== undefined ? [{ y: lim.max, groupId: effGroup.id, color: 'var(--alarm)', label: `limit ${lim.max}`, shade: 'above' as const }] : []),
+    ...(lim?.min !== undefined ? [{ y: lim.min, groupId: effGroup.id, color: 'var(--alarm)', label: `limit ${lim.min}`, shade: 'below' as const }] : []),
+  ];
   const actions = availableActions(plant.graph, plant.incident ?? null);
 
   return (
@@ -131,7 +161,7 @@ export function Scada() {
           ))}
         </select>
       </div>
-      <p className="sub">48-hour replay of the plant on its real influent with the diurnal production pattern: ASM1 biology, PI pH and DO loops, EQ level. Diagnose alarms from the trends, then act.</p>
+      <p className="sub">48-hour replay of the plant as it runs this week{lastWeek ? ` (week ${lastWeek.week}, flow ×${fmt(lastWeek.flowFactor, 2)})` : ''} on its real influent with the diurnal production pattern: ASM1 biology, PI pH and DO loops, EQ level. Diagnose alarms from the trends, then act.</p>
 
       {/* incident banner */}
       {plant.incident ? (
@@ -158,7 +188,7 @@ export function Scada() {
       {/* mimic */}
       <div className="panel" style={{ background: PANEL, borderColor: LINE, marginBottom: 12, overflowX: 'auto' }}>
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-          <b style={{ color: '#cfe3f7' }}>Process mimic {at ? `— t = ${fmt(at.t, 2)} h` : ''}</b>
+          <b style={{ color: '#cfe3f7' }}>Process mimic {at ? `— ${clockLabel(at.t)}` : ''}</b>
           <div className="row" style={{ gap: 8 }}>
             <input type="range" min={0} max={48} step={0.25} value={cursor} onChange={(e) => setCursor(Number(e.target.value))} style={{ width: 220 }} disabled={!result} />
             <button className="btn sm" onClick={run} disabled={busy}>
@@ -183,7 +213,8 @@ export function Scada() {
             const cat = CATALOGUE[u.kind as UnitType]?.category ?? 'physical';
             const vals = at?.units[u.id] ?? {};
             const alarm = (vals.DO !== undefined && vals.DO < 0.5) || (vals.sp !== undefined && Math.abs(vals.pHmeasured - vals.sp) > 0.5) || (vals.level !== undefined && vals.level > 95);
-            const entries = Object.entries(vals).filter(([k]) => k !== 'sp' && tagVisible(u, k)).slice(0, 3);
+            const vis = Object.keys(vals).filter((k) => k !== 'sp' && tagVisible(u, k));
+            const entries = [...new Set([...defaultTags(u.kind, vis), ...vis])].slice(0, 3).map((k) => [k, vals[k]] as const);
             return (
               <g key={u.id} onClick={() => setUnitSel(u.id)} style={{ cursor: 'pointer' }}>
                 <line x1={x - 40} y1={60} x2={x} y2={60} stroke="var(--flow)" strokeWidth={2} markerEnd="url(#arr)" />
@@ -197,11 +228,23 @@ export function Scada() {
                 <text x={x + 104} y={33} fill="#8aa0b8" fontSize={9} textAnchor="end">
                   {CATALOGUE[u.kind as UnitType]?.name.split(' ')[0]}
                 </text>
-                {entries.map(([k, v], j) => (
-                  <text key={k} x={x + 6} y={56 + j * 18} fill="#cfe3f7" fontSize={10.5} fontFamily="var(--mono)">
-                    {(TAG_LABEL[k] ?? k).slice(0, 9).padEnd(9, ' ')} {fmt(v, k === 'pH' || k === 'pHmeasured' || k === 'DO' ? 2 : 0)}
+                {vals.bypassed ? (
+                  <text x={x + 6} y={60} fill="#f3c95a" fontSize={10.5} fontFamily="var(--mono)">
+                    BYPASSED
                   </text>
-                ))}
+                ) : (
+                  entries.map(([k, v], j) => (
+                    <g key={k}>
+                      <text x={x + 6} y={56 + j * 18} fill="#8aa0b8" fontSize={10} fontFamily="var(--mono)">
+                        {TAG_SHORT[k] ?? k}
+                      </text>
+                      <text x={x + 104} y={56 + j * 18} fill="#cfe3f7" fontSize={10.5} fontFamily="var(--mono)" textAnchor="end">
+                        {fmt(v, TAG_DP[k] ?? 0)}
+                        {TAG_UNITS[k] === '%' ? ' %' : ''}
+                      </text>
+                    </g>
+                  ))
+                )}
               </g>
             );
           })}
@@ -225,30 +268,29 @@ export function Scada() {
               </b>
               <span className="muted" style={{ fontSize: 11 }}>click a unit in the mimic to trend it</span>
             </div>
-            <div style={{ height: 220 }}>
-              {result ? (
-                <ResponsiveContainer>
-                  <LineChart data={unitData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-                    <CartesianGrid stroke={LINE} />
-                    <XAxis dataKey="t" type="number" domain={[0, 48]} ticks={[0, 6, 12, 18, 24, 30, 36, 42, 48]} {...AXIS} unit=" h" />
-                    {unitKeys.map((k, i) => (
-                      <YAxis key={k} yAxisId={k} hide={i > 0} {...AXIS} domain={['auto', 'auto']} tickFormatter={tick} width={44} />
-                    ))}
-                    <Tooltip contentStyle={{ background: '#0d1c2e', border: `1px solid ${LINE}` }} formatter={(v: number, n: string) => [`${fmt(v, 2)} ${TAG_UNITS[n] ?? ''}`, TAG_LABEL[n] ?? n]} labelFormatter={(l) => `t = ${l} h`} />
-                    <Legend formatter={(n: string) => TAG_LABEL[n] ?? n} wrapperStyle={{ fontSize: 11 }} />
-                    <ReferenceLine x={cursor} yAxisId={unitKeys[0]} stroke="#cfe3f7" strokeDasharray="2 3" />
-                    {unitKeys.map((k, i) => (
-                      <Line key={k} yAxisId={k} dataKey={k} stroke={SERIES[i % SERIES.length]} dot={false} strokeWidth={1.6} isAnimationActive={false} />
-                    ))}
-                  </LineChart>
-                </ResponsiveContainer>
+            {unitKeys.length > 0 && (
+              <div className="row" style={{ gap: 4, flexWrap: 'wrap', margin: '6px 0 2px' }}>
+                {unitKeys.map((k) => (
+                  <button key={k} className={`btn sm ${chosen.includes(k) ? 'primary' : 'ghost'}`} onClick={() => toggleTag(k)}>
+                    {TAG_LABEL[k] ?? k}
+                    {TAG_UNITS[k] ? ` (${TAG_UNITS[k]})` : ''}
+                  </button>
+                ))}
+              </div>
+            )}
+            {result ? (
+              bypassed ? (
+                <div className="muted" style={{ height: 220, fontSize: 12, paddingTop: 12 }}>Unit bypassed by the breakdown — no signals until it is repaired.</div>
               ) : (
-                <div className="muted">{busy ? 'Simulating…' : '—'}</div>
-              )}
-            </div>
+                <TrendChart data={unitData} series={unitSeries} refs={unitRefs} cursor={cursor} height={220} />
+              )
+            ) : (
+              <div className="muted" style={{ height: 220 }}>{busy ? 'Simulating…' : '—'}</div>
+            )}
             <p className="muted" style={{ fontSize: 11, margin: '4px 0 0' }}>
-              Each series has its own scale; hover for values.
-              {hidden.length > 0 && <b style={{ color: '#f3c95a' }}> No instrument for {hidden.join(', ')} — this loop runs by hand and is not alarmed.</b>}
+              Tags of one quantity share an axis (left = first picked, right = second); hover for values.
+              {layout.dropped.length > 0 && <span> Not plotted (would need a third axis): {layout.dropped.map((k) => TAG_LABEL[k] ?? k).join(', ')}.</span>}
+              {hidden.length > 0 && <b style={{ color: '#f3c95a' }}> No instrument for {hidden.map((k) => TAG_LABEL[k] ?? k).join(', ')} — this loop runs by hand and is not alarmed.</b>}
             </p>
           </div>
 
@@ -266,25 +308,7 @@ export function Scada() {
                   ))}
               </div>
             </div>
-            <div style={{ height: 200 }}>
-              {result && (
-                <ResponsiveContainer>
-                  <LineChart data={effData} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-                    <CartesianGrid stroke={LINE} />
-                    <XAxis dataKey="t" type="number" domain={[0, 48]} ticks={[0, 6, 12, 18, 24, 30, 36, 42, 48]} {...AXIS} unit=" h" />
-                    <YAxis yAxisId="v" {...AXIS} domain={['auto', 'auto']} tickFormatter={tick} width={44} />
-                    <YAxis yAxisId="Q" orientation="right" {...AXIS} tickFormatter={tick} width={44} />
-                    <Tooltip contentStyle={{ background: '#0d1c2e', border: `1px solid ${LINE}` }} formatter={(v: number, n: string) => [fmt(v, 2), n === 'v' ? effParam : 'Influent Q m³/d']} labelFormatter={(l) => `t = ${l} h`} />
-                    {lim?.max !== undefined && <ReferenceArea yAxisId="v" y1={lim.max} fill="var(--alarm)" fillOpacity={0.08} />}
-                    {lim?.max !== undefined && <ReferenceLine yAxisId="v" y={lim.max} stroke="var(--alarm)" strokeDasharray="4 3" />}
-                    {lim?.min !== undefined && <ReferenceLine yAxisId="v" y={lim.min} stroke="var(--alarm)" strokeDasharray="4 3" />}
-                    <ReferenceLine x={cursor} yAxisId="v" stroke="#cfe3f7" strokeDasharray="2 3" />
-                    {flowMeter && <Line yAxisId="Q" dataKey="Q" stroke="#3d6f9e" dot={false} strokeWidth={1} isAnimationActive={false} />}
-                    <Line yAxisId="v" dataKey="v" stroke="#22d3ee" dot={false} strokeWidth={2} isAnimationActive={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </div>
+            {result ? <TrendChart data={effData} series={effSeries} refs={effRefs} cursor={cursor} height={200} /> : <div style={{ height: 200 }} />}
             {result && (
               <div className="row" style={{ gap: 18, fontSize: 12, marginTop: 4 }}>
                 <span>
@@ -308,7 +332,7 @@ export function Scada() {
             {alarms.length === 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>No alarms in the replay.</div>}
             {alarms.map((a, i) => (
               <div key={i} style={{ fontSize: 12, fontFamily: 'var(--mono)', marginTop: 4, color: a.level === 'alarm' ? '#ff8a8a' : '#f3c95a', cursor: 'pointer' }} onClick={() => setCursor(a.t)}>
-                {String(Math.floor(a.t)).padStart(2, '0')}:{String(Math.round((a.t % 1) * 60)).padStart(2, '0')} {a.text}
+                {clockLabel(a.t)} {a.text}
               </div>
             ))}
           </div>

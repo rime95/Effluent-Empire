@@ -16,6 +16,18 @@ Modules: `src/simulation/dynamic/plantDynamics.ts`, `src/game/incidents.ts`, `sr
 
 **Compliance** is checked at every point against `standards.json`. The result also reports % time compliant, the worst exceedance, aeration kWh, reagent kg and overflow m³.
 
+**Replay basis (2026-11-22).** The SCADA screen replays the plant as it runs *this week*: that week's influent (`commissioningInfluent(seed·97 + week)`) × the growth factor, on the breakdown-degraded graph, with any incident applied. It is the same basis as the weekly grab sample, so the trend and the sample can no longer disagree. Replay times are shown as clock time, D1/D2 hh:mm.
+
+**Trend display rules (2026-11-22)** (`src/ui/components/trendScale.ts`, tests in `tests/ui/trendScale.test.ts`):
+- Tags of the same quantity share one labelled axis (pH true + probe + set-point; % for pump, blower, level; DO; MLSS; mg N/L…).
+- There are at most two axes, left and right. A third quantity is listed as "not plotted" rather than drawn against a hidden scale.
+- Each axis has a minimum span, so instrument-scale noise is drawn as a flat line: pH 1 unit, % 20, DO 2 mg/L, otherwise 20 % of the mean.
+- Set-points and discharge limits are always inside the range.
+- Ranges are clipped to physical bounds.
+- Tick decimals follow the tick step, so labels can never repeat.
+
+These replaced per-series hidden autoscaled axes, which had made a pH held at 9.50 ± 0.001 fill the chart with every tick labelled "9.5".
+
 ## Incidents (GAME MODEL probabilities, physics from the modules above)
 | Kind | Where | Dynamic disturbance | What the operator sees | Correct action |
 |---|---|---|---|---|
