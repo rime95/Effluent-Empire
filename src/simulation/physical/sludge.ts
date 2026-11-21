@@ -92,6 +92,8 @@ export const THICKENER = {
   chemical: { slr: 20, solids: 0.03, hlrMax: 24 },
   biological: { slr: 30, solids: 0.025, hlrMax: 8 },
   capture: 0.95,
+  /** limiting solids flux the underflow can carry, as a multiple of the design SLR (verify: M&E solids-flux analysis) */
+  fluxMax: 1.5,
 };
 
 /** Uniform capture of all particulates (and oil) into the removed stream. */
@@ -117,7 +119,11 @@ export function thicken(s: Stream, p: { area_m2: number }): ProcessResult {
   // hydraulic loading check (verify: chemical ≈ 15–30, WAS ≈ 4–8 m³/m²·d): too much water carries solids over the weir
   const hlr = s.Q / Math.max(p.area_m2, 1e-6);
   const h = hlr / d.hlrMax;
-  let capture = r <= 1 ? THICKENER.capture : THICKENER.capture / (1 + 0.6 * (r - 1) ** 2);
+  // solids-flux limit (GAME MODEL): the underflow carries the captured solids up to the limiting flux G_L·A; only the
+  // excess rises over the weir. Capture is therefore bounded instead of collapsing, and a recycle of the supernatant can
+  // only run away when the fresh solids alone exceed what the thickener can pass.
+  const capKgD = THICKENER.fluxMax * d.slr * p.area_m2;
+  let capture = Math.min(THICKENER.capture, capKgD / Math.max(dry, 1e-9));
   if (h > 1) {
     capture /= 1 + 0.5 * (h - 1) ** 2;
     notes.push({ level: 'warn', code: 'thick.hlr', text: `Hydraulic loading ${hlr.toFixed(1)} m³/m²·d exceeds ≈${d.hlrMax} for ${type} sludge: solids wash over the weir.` });
@@ -128,7 +134,7 @@ export function thicken(s: Stream, p: { area_m2: number }): ProcessResult {
     notes.push({ level: 'warn', code: 'thick.noThickening', text: `Feed is already ${(feedFrac * 100).toFixed(1)} % solids — the thickener adds almost nothing at this loading.` });
   }
   const { out, removed } = captureAll(s, capture);
-  if (r > 1.2) notes.push({ level: 'warn', code: 'thick.overload', text: `Solids loading ${slr.toFixed(0)} kg/m²·d is ${r.toFixed(1)}× the ${type} design value (${d.slr}): thin underflow (${(w * 100).toFixed(1)} %) and solids in the supernatant.` });
+  if (r > 1.2) notes.push({ level: dry * THICKENER.capture > capKgD ? 'error' : 'warn', code: 'thick.overload', text: `Solids loading ${slr.toFixed(0)} kg/m²·d is ${r.toFixed(1)}× the ${type} design value (${d.slr}): thin underflow (${(w * 100).toFixed(1)} %)${dry * THICKENER.capture > capKgD ? `, and ${(dry * THICKENER.capture - capKgD).toFixed(0)} kg/d of solids spill over the weir — if the supernatant returns to the plant they circulate and build up` : ' and solids in the supernatant'}. Needs ≈${Math.ceil(dry / d.slr)} m².` });
   if (s.Q > 0 && tss(s) < 2000) notes.push({ level: 'info', code: 'thick.dilute', text: `Feed is dilute (${(tss(s) / 10000).toFixed(2)} % solids) — a thickener is the right first step before dewatering.` });
   return result(out, {
     removed,

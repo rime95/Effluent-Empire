@@ -203,7 +203,7 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     tagPrefix: 'TH',
     category: 'sludge',
     summary: 'Gravity thickening of dilute sludge (≈1 %) to 2.5–3 %. Supernatant returns to the plant; underflow goes on to dewatering.',
-    params: [{ key: 'area', label: 'Surface area', unit: 'm²', min: 1, max: 2000, step: 1, default: () => 10, help: 'Sized on solids loading: ≈20 kg/m²·d for chemical sludge, ≈30 for biological.' }],
+    params: [{ key: 'area', label: 'Surface area', unit: 'm²', min: 1, max: 2000, step: 1, default: (Q) => Math.max(4, Math.ceil(Q / 8)), help: 'Sized on solids loading: ≈20 kg/m²·d for chemical sludge, ≈30 for biological.' }],
     run: (s, p) => thicken(s, { area_m2: n(p, 'area') }),
     capex: (p) => scale(120_000, n(p, 'area'), 20),
     footprint: (p) => n(p, 'area') * 1.3 + 5,

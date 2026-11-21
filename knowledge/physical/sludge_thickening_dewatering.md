@@ -65,6 +65,12 @@ GAME MODEL response to overload, with r = SLR / SLR_design:
 
 Supernatant leaves on the main outlet and underflow on the sludge port.
 
+**Solids-flux limit (2026-11-21, player report: clarifier underflow approaching half of Q).** The earlier capture law 0.95/(1+0.6(r−1)²) collapsed steeply under overload. With the supernatant returned to EQ, the escaping solids came back to the clarifier, raised the load further and snowballed until the clarifier underflow was 50–120 % of Q. A gravity thickener actually behaves as a flux-limited device: the underflow carries solids up to the limiting flux G_L·A and only the excess rises over the weir:
+
+    capture = min(0.95, G_L·A / M_in)      G_L = 1.5 × design SLR   (GAME MODEL, 🟡 verify against an M&E solids-flux analysis)
+
+A supernatant recycle can therefore only run away when the fresh solids alone exceed G_L·A, which is genuinely unworkable. When solids spill, the overload note is an error and gives the area needed, M/SLR. The default thickener area is now max(4, Q/8) m² rather than a fixed 10 m².
+
 ## Filter press (`filterPress`)
 Conditioning is either polymer or lime.
 

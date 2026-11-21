@@ -221,3 +221,30 @@ describe('review follow-ups (QA / process)', () => {
     expect(r.points.every((p) => Number.isFinite(p.effluent.Q) && p.effluent.Q > 0)).toBe(true);
   });
 });
+
+describe('thickener solids-flux limit (regression: clarifier underflow snowballing through the supernatant return)', () => {
+  function foodCoag(area?: number): ProcessGraph {
+    let e = generateEnquiry(11, 1, 0);
+    for (let s = 12; e.industry !== 'food'; s++) e = generateEnquiry(s, 1, 0);
+    const q = e.trueStream.Q;
+    const u = (id: string, kind: UnitType, over: Record<string, number | string> = {}): PNode => ({ id, kind, tag: id, params: { ...defaultParams(kind, q), ...over } });
+    const nodes: PNode[] = [{ id: 'in', kind: 'influent', params: {} }, u('eq', 'eq'), u('pr', 'precipitation'), u('cf', 'coagulation', { coagulant: 'ferric', dose: 200 }), u('cl', 'clarifier'), u('th', 'thickener', area ? { area } : {}), { id: 'sd', kind: 'disposal', tag: 'SD', params: {} }, { id: 'out', kind: 'discharge', params: {} }];
+    const edges = [pipe('in', 'eq'), pipe('eq', 'pr'), pipe('pr', 'cf'), pipe('cf', 'cl'), pipe('cl', 'out'), pipe('cl', 'th', 'sludge'), pipe('th', 'sd', 'sludge'), pipe('th', 'eq')];
+    return { nodes, edges };
+  }
+  const foodQ = () => { let e = generateEnquiry(11, 1, 0); for (let s = 12; e.industry !== 'food'; s++) e = generateEnquiry(s, 1, 0); return e.trueStream; };
+  it('an undersized thickener spills only its excess solids; the loop settles and the thickener says how big it must be', () => {
+    const st = foodQ();
+    const sim = simulate(foodCoag(10), st);
+    expect(sim.errors.some((x) => x.code === 'graph.recycle')).toBe(false);
+    expect(sim.edges['cl-th-sludge'].Q).toBeLessThan(0.2 * st.Q); // was > 0.5·Q before the flux limit
+    const note = sim.nodes['th'].result.notes.find((n) => n.code === 'thick.overload');
+    expect(note?.level).toBe('error');
+    expect(note?.text).toMatch(/Needs ≈\d+ m²/);
+  });
+  it('the default thickener (sized on flow) keeps the clarifier underflow a few % of Q', () => {
+    const st = foodQ();
+    const sim = simulate(foodCoag(), st);
+    expect(sim.edges['cl-th-sludge'].Q).toBeLessThan(0.06 * st.Q);
+  });
+});
