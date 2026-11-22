@@ -161,8 +161,9 @@ export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
   // anionic polymer bridges hydroxide precipitate directly (no charge neutralisation needed). verify: bridging share 0.8
   if (polyEff > 0) out.v50.precipitate += (vFloc - out.v50.precipitate) * POLYMER.bridging * Math.min(1, polyEff) * (1 - E);
   out.v50.organic = out.v50.organic * (1 - E) + vFloc * E;
-  // emulsion breaking: destabilised emulsified oil becomes separable free oil (GAME MODEL, 70 % of E)
-  const broken = out.OGemulsified * 0.7 * E;
+  // emulsion breaking: destabilised emulsified oil becomes separable free oil (GAME MODEL): 70 % of E with coagulant
+  // alone, up to 92 % of E when polymer bridges the micro-droplets into floc (chemically assisted DAF practice, verify)
+  const broken = out.OGemulsified * (0.7 + 0.22 * Math.min(1, polyEff)) * E;
   out.OGemulsified -= broken;
   out.OGfree += broken;
 

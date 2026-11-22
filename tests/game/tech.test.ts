@@ -1,6 +1,6 @@
 // Technology Tree rules, research cash, and enquiry generation with tech / names. Ref: knowledge/processes/technology_tree.md
 import { describe, expect, it } from 'vitest';
-import { TECH, TECH_ORDER, canResearch, isUnitUnlocked } from '../../src/game/tech';
+import { TECH, TECH_ORDER, UNIT_TECH, canResearch, isUnitUnlocked } from '../../src/game/tech';
 import { generateEnquiry } from '../../src/game/customers';
 import { GENERIC_NAMES } from '../../src/game/clientNames';
 import { useGame, migrate } from '../../src/game/store';
@@ -11,8 +11,10 @@ describe('technology tree rules', () => {
     for (const id of TECH_ORDER) for (const r of TECH[id].requires) expect(TECH[r].tier).toBeLessThanOrEqual(TECH[id].tier);
   });
 
-  it('every basic catalogue unit is unlocked with no research', () => {
-    for (const k of Object.keys(CATALOGUE)) expect(isUnitUnlocked(k, [])).toBe(true);
+  it('every basic catalogue unit is unlocked with no research; advanced units are locked until researched', () => {
+    for (const k of Object.keys(CATALOGUE)) expect(isUnitUnlocked(k, [])).toBe(!(k in UNIT_TECH));
+    for (const [k, t] of Object.entries(UNIT_TECH)) if (k in CATALOGUE) expect(isUnitUnlocked(k, [t])).toBe(true);
+    expect(isUnitUnlocked('daf', [])).toBe(false);
   });
 
   it('canResearch checks availability, prerequisites, reputation and cash', () => {

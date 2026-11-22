@@ -12,10 +12,11 @@ import { neutralise } from '../chemistry/neutralisation';
 import { reduceChromium } from '../chemistry/chromiumReduction';
 import { adsorb } from '../physical/carbon';
 import { clarify, equalise, filter, separateOil } from '../physical/units';
+import { flotate } from '../physical/flotation';
 import { ProcessResult } from './types';
 import { filterPress, passThrough, thicken } from '../physical/sludge';
 
-export type UnitType = 'eq' | 'oilSep' | 'crReduction' | 'neutralisation' | 'precipitation' | 'coagulation' | 'clarifier' | 'activatedSludge' | 'sandFilter' | 'carbon' | 'thickener' | 'filterPress' | 'splitter' | 'mixer';
+export type UnitType = 'eq' | 'oilSep' | 'daf' | 'crReduction' | 'neutralisation' | 'precipitation' | 'coagulation' | 'clarifier' | 'activatedSludge' | 'sandFilter' | 'carbon' | 'thickener' | 'filterPress' | 'splitter' | 'mixer';
 export type Category = 'physical' | 'chemical' | 'biological' | 'sludge' | 'hydraulic';
 export type ParamValue = number | string;
 export type Params = Record<string, ParamValue>;
@@ -75,6 +76,21 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     run: (s, p) => separateOil(s, { area_m2: n(p, 'area') }),
     capex: (p) => scale(80_000, n(p, 'area'), 10),
     footprint: (p) => n(p, 'area') * 1.3,
+  },
+  daf: {
+    type: 'daf',
+    name: 'Dissolved-Air Flotation (DAF)',
+    tagPrefix: 'DAF',
+    category: 'physical',
+    summary: 'Pressurised recycle releases micro-bubbles that float oil, grease and light floc; float is skimmed to the sludge line. Emulsions must be broken by coagulation first.',
+    params: [
+      { key: 'area', label: 'Flotation area', unit: 'm²', min: 1, max: 500, step: 0.5, default: (Q) => round((Q * 1.3) / 24 / 8, 0.5), help: 'Hydraulic loading (feed + recycle) 5–12 m/h.' },
+      { key: 'recycle', label: 'Pressurised recycle', unit: '% of Q', min: 5, max: 100, step: 5, default: () => 30, help: 'Sets the air-to-solids ratio: aim for A/S 0.02–0.04 mL/mg on oily feeds.' },
+      { key: 'pressure', label: 'Saturator pressure', unit: 'kPa(g)', min: 200, max: 700, step: 10, default: () => 450, help: '350–600 kPa(g) is typical; more pressure dissolves more air.' },
+    ],
+    run: (s, p) => flotate(s, { area_m2: n(p, 'area'), recycle_pct: n(p, 'recycle'), pressure_kPa: n(p, 'pressure') }),
+    capex: (p) => scale(250_000, n(p, 'area'), 10) + 60_000,
+    footprint: (p) => n(p, 'area') * 1.6 + 8,
   },
   crReduction: {
     type: 'crReduction',

@@ -7,6 +7,8 @@
 import { Params, UnitType, defaultParams } from '../simulation/treatment/catalogue';
 import { IndustryId } from './industries';
 import { Stream } from '../simulation/core/stream';
+import { optimumMetalDose_mmol } from '../simulation/chemistry/coagulation';
+import { MW } from '../simulation/core/units';
 
 export type TrainSpec = { kind: UnitType; params: Params }[];
 
@@ -21,6 +23,24 @@ export const metalTrain = (Q: number, crVI = false): TrainSpec => [
   u('sandFilter', Q),
   u('neutralisation', Q, { targetPH: 7.5 }),
 ];
+
+/**
+ * Emulsified-oil food plant (DAF variant): EQ → emulsion breaking (ferric at the jar-test optimum × 1.1, pH-trimmed,
+ * polymer) → DAF → activated sludge.
+ */
+export const dafFoodTrain = (s: Stream): TrainSpec => {
+  const Q = s.Q;
+  const ferric = Math.ceil((optimumMetalDose_mmol(s, 'ferric') * MW.FeCl3 * 1.1) / 10) * 10;
+  return [
+  u('eq', Q),
+  u('coagulation', Q, { coagulant: 'ferric', dose: ferric, pHset: 7, polymer: 1 }),
+  u('daf', Q, { area: Math.max(1, Math.ceil(((Q * 2.2 + Q * 0.6) / 24 / 8) * 2) / 2), recycle: 60, pressure: 550 }),
+  // ferric emulsion breaking consumes alkalinity: hold the aeration tank at pH 7 so nitrification is not lost
+  u('activatedSludge', Q, { volume: Math.ceil(Q * 3.5), srt: 15, control: 'srt', alkPH: 7, alkReagent: 'NaOH' }),
+  u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.4) }),
+  u('sandFilter', Q),
+  ];
+};
 
 export const foodTrain = (Q: number): TrainSpec => [
   u('oilSep', Q, { area: Math.ceil((Q * 2.2) / 24 / 1.0) }),

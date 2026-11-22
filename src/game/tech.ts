@@ -44,7 +44,7 @@ export const TIER_REPUTATION = { 1: 10, 2: 25, 3: 40, 4: 60 } as const;
 export const TECH: Record<TechId, TechDef> = {
   daf: {
     id: 'daf', name: 'Dissolved-air flotation (DAF)', tier: 1, category: 'physical', costRM: 120_000, reputation: TIER_REPUTATION[1], requires: [], units: ['daf'],
-    blurb: 'Micro-bubbles float oil, grease and light floc; float scraped to the sludge line.', clients: ['Emulsified-oil food and edible-oil refineries'], available: false,
+    blurb: 'Micro-bubbles float oil, grease and light floc; float scraped to the sludge line.', clients: ['Emulsified-oil food and edible-oil refineries'], available: true,
   },
   dryer: {
     id: 'dryer', name: 'Sludge dryer', tier: 1, category: 'sludge', costRM: 150_000, reputation: TIER_REPUTATION[1], requires: [], units: ['dryer'],

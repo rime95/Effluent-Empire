@@ -6,7 +6,7 @@
  */
 import { Stream } from '../simulation/core/stream';
 import { IndustryId } from './industries';
-import { TrainSpec } from './referenceDesigns';
+import { TrainSpec, dafFoodTrain } from './referenceDesigns';
 import { Rng } from './rng';
 import { TechId } from './tech';
 
@@ -22,8 +22,8 @@ export interface ClientVariant {
   overlay: (s: Stream, rng: Rng) => Stream;
   /** reference design (with the advanced technology) used to price the job */
   reference: (s: Stream) => TrainSpec;
-  /** force Standard A (tight limits are often the reason the technology is needed) */
-  standardA?: boolean;
+  /** force a discharge standard (tight limits are often the reason the technology is needed) */
+  standard?: 'A' | 'B';
 }
 
 /** Chance that an enquiry is a tough job when at least one variant is open. */
@@ -32,7 +32,24 @@ export const VARIANT_CHANCE = 0.4;
 export const VARIANT_PREMIUM = 1.15;
 
 /** Registered as each technology's engineering model lands. */
-export const VARIANTS: ClientVariant[] = [];
+export const VARIANTS: ClientVariant[] = [
+  {
+    id: 'emulsifiedOil',
+    industry: 'food',
+    requires: ['daf'],
+    label: 'Edible-oil refinery — emulsified oil',
+    brief: 'Refinery and frying-line wastewater: most of the oil is emulsified (soapstock, detergents). A gravity separator barely touches it — break the emulsion and float it.',
+    overlay: (s, rng) => {
+      const og = rng.range(200, 500);
+      const free = rng.range(0.2, 0.4);
+      s.OGfree = og * free;
+      s.OGemulsified = og * (1 - free);
+      return s;
+    },
+    reference: (s) => dafFoodTrain(s),
+    standard: 'B',
+  },
+];
 
 export function eligibleVariants(industry: IndustryId, tech: readonly TechId[]): ClientVariant[] {
   return VARIANTS.filter((v) => v.industry === industry && v.requires.every((r) => tech.includes(r)));

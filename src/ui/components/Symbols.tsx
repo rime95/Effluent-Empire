@@ -43,6 +43,28 @@ export function UnitSymbol({ type, accent }: { type: UnitType; accent: string })
           <path d="M0 44 h10 M110 44 h10" {...L} />
         </svg>
       );
+    case 'daf':
+      return (
+        <svg viewBox="0 0 120 80">
+          {liquid('M10 30 H110 V64 H10 Z')}
+          <rect x="11" y="30" width="98" height="5" fill="#6b4f2a" opacity="0.4" />
+          <path d="M10 20 V64 H110 V20" {...L} />
+          {level(10, 110, 30)}
+          {[22, 34, 46, 58, 70, 82].map((x) => (
+            <g key={x}>
+              <circle cx={x} cy={56} r={1.6} {...thin} />
+              <circle cx={x + 4} cy={47} r={1.3} {...thin} />
+              <circle cx={x + 1} cy={39} r={1.1} {...thin} />
+            </g>
+          ))}
+          <path d="M16 26 h70" {...thin} />
+          <path d="M20 22 l6 4 l-6 4 M44 22 l6 4 l-6 4 M68 22 l6 4 l-6 4" {...thin} />
+          <rect x="88" y="66" width="18" height="10" rx="2" {...thin} />
+          <path d="M97 66 V60" {...thin} />
+          <text x="88" y="16" fontSize="7" fontFamily="var(--mono)" fill={INK}>AIR</text>
+          <path d="M0 44 h10 M110 44 h10" {...L} />
+        </svg>
+      );
     case 'neutralisation':
     case 'precipitation':
     case 'crReduction':

@@ -63,7 +63,7 @@ verify: these windows are typical published operating ranges, not hard limits. F
 The destabilised fraction E has these effects:
 - E of the colloids moves into the floc pool.
 - Precipitate and organic-particle v₅₀ shift towards the floc v₅₀.
-- 70 % × E of the emulsified oil becomes free, separable oil.
+- 70 % × E of the emulsified oil becomes free, separable oil with coagulant alone, rising to 92 % × E with polymer at its optimum (+22 % × polymer effect). Polymer bridging enmeshes the destabilised micro-droplets into floc, which is why chemically assisted DAF reaches 90–97 % O&G removal on refinery and food emulsions. GAME MODEL, `verify:` (2026-11-22, DAF stage).
 
 Floc growth with flocculation time t: v₅₀,floc = (0.3 + 2.7·(1 − e^(−t/8 min)))·(1 + 0.4·eff_poly) m/h.
 

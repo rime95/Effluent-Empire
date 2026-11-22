@@ -80,7 +80,7 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
     if (open.length && vr.chance(VARIANT_CHANCE)) {
       variant = vr.pick(open);
       ww.stream = variant.overlay(ww.stream, vr);
-      if (variant.standardA) standard = 'A';
+      if (variant.standard) standard = variant.standard;
     }
   }
   const refTrain = variant ? variant.reference(ww.stream) : REFERENCE[industry](ww.stream);

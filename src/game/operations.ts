@@ -240,6 +240,7 @@ export const INCIDENT_REMEDY: Record<IncidentKind, string[]> = {
 const BREAKDOWNS: Record<UnitType, { description: string; apply: (p: Params) => Params | 'bypass' }> = {
   eq: { description: 'EQ tank mixer failure — tank half-silted, little buffering', apply: (p) => ({ ...p, volume: Number(p.volume) * 0.3 }) },
   oilSep: { description: 'Oil skimmer failure — separator overloaded', apply: (p) => ({ ...p, area: Number(p.area) * 0.3 }) },
+  daf: { description: 'DAF recycle pump / saturator failure — no micro-bubbles', apply: (p) => ({ ...p, recycle: 5, pressure: 200 }) },
   crReduction: { description: 'Metabisulfite dosing pump failure — no reduction', apply: () => 'bypass' },
   neutralisation: { description: 'pH dosing pump failure — no pH correction', apply: () => 'bypass' },
   precipitation: { description: 'Caustic dosing pump failure — no precipitation', apply: () => 'bypass' },

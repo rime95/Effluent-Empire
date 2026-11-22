@@ -36,7 +36,7 @@ import { useSimulation } from './useSimulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
 
-const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'coagulation', 'activatedSludge', 'thickener', 'filterPress', 'splitter', 'mixer'];
+const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'daf', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'coagulation', 'activatedSludge', 'thickener', 'filterPress', 'splitter', 'mixer'];
 /** kinds that may receive a sludge line */
 const SLUDGE_RECEIVERS: PNode['kind'][] = ['thickener', 'filterPress', 'disposal', 'mixer'];
 const GRID = 20;

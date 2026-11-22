@@ -19,7 +19,7 @@ export type NodeKind = UnitType | 'influent' | 'discharge' | 'disposal';
 export const isLiquidHaul = (n: { kind: string; params?: Record<string, unknown> }) => n.kind === 'disposal' && n.params?.liquid === 'yes';
 export type PortId = 'out' | 'sludge' | 'a' | 'b' | 'ras';
 /** unit kinds with a sludge draw-off port */
-export const SLUDGE_PORT_KINDS: NodeKind[] = ['clarifier', 'oilSep', 'sandFilter', 'thickener', 'filterPress'];
+export const SLUDGE_PORT_KINDS: NodeKind[] = ['clarifier', 'oilSep', 'daf', 'sandFilter', 'thickener', 'filterPress'];
 
 export interface PNode {
   id: string;

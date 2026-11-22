@@ -30,7 +30,10 @@ export function Enquiries({ go }: { go: (s: Screen) => void }) {
                 </span>
                 <span className="pill std">Standard {e.standard}</span>
               </div>
-              <div className="company">{e.company}</div>
+              <div className="company">
+                {e.company}
+                {e.variant && <span className="pill warn" style={{ marginLeft: 6, fontSize: 9 }}>TOUGH JOB</span>}
+              </div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {t.description}
               </div>
@@ -76,6 +79,11 @@ export function Enquiries({ go }: { go: (s: Screen) => void }) {
                 <dd>week {e.expiresWeek}</dd>
               </dl>
               {e.difficult && <div className="note warn">Demanding client: tight deadline and a squeezed budget.</div>}
+              {e.variant && (
+                <div className="note info">
+                  <b>Tough job — {e.variant.label}.</b> {e.variant.brief}
+                </div>
+              )}
               <div className="row">
                 <button
                   className="btn primary"
