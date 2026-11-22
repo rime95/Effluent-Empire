@@ -142,3 +142,13 @@ Filter-press chamber utilisation uses the cake volume at normal capture, even wh
 
 ## Mass balance
 A connected sludge stream is a normal pipe. Only disposal points (and unconnected sludge ports) take mass out of the system, so the system balance is: in = effluent + disposal + unconnected sludge + gas/consumed − produced.
+
+## Liquid scheduled-waste haulage (added 2026-11-22)
+A sludge-disposal point can be placed in **liquid mode** ("Liquid Waste Haulage", tag LH-xx). It stands for a licensed scheduled-waste contractor tankering liquid off site, and is meant for **small volumes of concentrated liquor**. Typical case: a vacuum evaporator on a segregated nickel drag-out stream, with the Ni concentrate hauled away.
+
+- **Inlets:** accepts process, concentrate, brine or sludge lines (a normal sludge disposal point still accepts only sludge).
+- **Cost:** per m³ hauled (GAME MODEL, `verify:` current Malaysian scheduled-waste tanker rates).
+  - Metal-bearing liquor, total heavy metals > 5 mg/L: RM 900/m³.
+  - General liquid scheduled waste: RM 350/m³.
+- **Mass balance:** the stream leaves the system boundary as hauled waste. It is **not a discharge**, so it is not tested against the effluent standard and does not break zero liquid discharge. Cost goes to the sludge/disposal OPEX.
+- **Volume check:** above one tanker load per day (10 m³/d) the design warns that haulage is uneconomic and the stream should be concentrated first.

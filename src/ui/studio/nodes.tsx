@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getSmoothStepPath, Handle, Position, type EdgeProps, type Node, type NodeProps, type Edge } from '@xyflow/react';
 import { CATALOGUE, UnitType } from '../../simulation/treatment/catalogue';
-import { DisposalSymbol, UnitSymbol } from '../components/Symbols';
+import { DisposalSymbol, TankerSymbol, UnitSymbol } from '../components/Symbols';
 
 export const CATEGORY_COLOR = { physical: 'var(--phys)', chemical: 'var(--chem)', biological: 'var(--bio)', sludge: 'var(--sludge)', hydraulic: '#5b6b7c' } as const;
 
@@ -22,7 +22,7 @@ export type UnitNodeData = {
   /** secondary clarifier after activated sludge: offers a RAS (return activated sludge) nozzle */
   rasPort?: boolean;
 };
-export type TerminalNodeData = { kind: 'influent' | 'discharge' | 'disposal'; label: string; sub: string; tag?: string };
+export type TerminalNodeData = { kind: 'influent' | 'discharge' | 'disposal'; label: string; sub: string; tag?: string; liquid?: boolean };
 
 const STATUS_COLOR = { ok: 'var(--ok)', warn: 'var(--warn)', error: 'var(--alarm)', idle: '#9aa7b4' };
 /** symbol is 120×80 drawn below an 18 px tag row; nozzle heights (symbol y) per unit kind */
@@ -112,7 +112,7 @@ function TerminalNodeImpl({ data, selected }: NodeProps<Node<TerminalNodeData>>)
     return (
       <div className={`pfd-eq ${selected ? 'selected' : ''}`}>
         <div className="pfd-tag">{data.tag}</div>
-        <DisposalSymbol />
+        {data.liquid ? <TankerSymbol /> : <DisposalSymbol />}
         <Handle type="target" position={Position.Left} style={{ top: TAG_H + 30 }} />
         <div className="pfd-name">{data.label}</div>
         <div className="pfd-duty">{data.sub}</div>

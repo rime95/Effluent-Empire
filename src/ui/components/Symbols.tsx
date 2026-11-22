@@ -200,6 +200,24 @@ export function DisposalSymbol() {
   );
 }
 
+/** Liquid scheduled-waste tanker (haulage of concentrated liquor). */
+export function TankerSymbol() {
+  const L = { fill: 'none', stroke: INK, strokeWidth: 1.7, strokeLinejoin: 'round' as const };
+  return (
+    <svg viewBox="0 0 120 80" width="120" height="80">
+      <rect x="10" y="30" width="72" height="30" rx="14" {...L} />
+      <path d="M18 50 Q46 44 74 50 V52 Q46 58 18 52 Z" fill="var(--chem)" opacity="0.45" />
+      <path d="M82 38 H100 L108 48 V60 H82 Z" {...L} />
+      <path d="M88 40 H99 L104 47 H88 Z" {...L} />
+      <circle cx="28" cy="66" r="5" {...L} />
+      <circle cx="64" cy="66" r="5" {...L} />
+      <circle cx="98" cy="66" r="5" {...L} />
+      <path d="M0 40 h10" {...L} />
+      <text x="46" y="44" textAnchor="middle" fontSize="8" fontFamily="var(--mono)" fill={INK}>SW</text>
+    </svg>
+  );
+}
+
 export function NavIcon({ name }: { name: string }) {
   const p = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
   const paths: Record<string, JSX.Element> = {

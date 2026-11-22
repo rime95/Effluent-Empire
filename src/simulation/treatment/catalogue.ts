@@ -265,4 +265,8 @@ export const PRICES = {
   sludgeDisposal_kg: { metal: 1.2, other: 0.3 },
   /** verify: disposal gate price per WET kg at a disposal point (metal sludge = scheduled waste SW 204). GAME MODEL */
   disposalWet_kg: { metal: 0.18, other: 0.06 },
+  /** verify: licensed scheduled-waste tanker haulage of LIQUID waste per m³ (metal-bearing liquor vs general). GAME MODEL */
+  liquidHaul_m3: { metal: 900, other: 350 },
+  /** tanker load used for the "loads per day" check, m³ */
+  tanker_m3: 10,
 };

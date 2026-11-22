@@ -7,7 +7,7 @@
  * - recycle loops are solved by successive substitution on tear streams (knowledge/design/recycle_streams.md).
  */
 import { BalanceCheck, Components, addComponents, checkMassBalance, components, zeroComponents } from '../core/massBalance';
-import { POOLS, Stream, blend, cloneStream, codTotal, emptyStream, poolMass, tss } from '../core/stream';
+import { METALS, POOLS, Stream, blend, cloneStream, codTotal, emptyStream, metalTotal, poolMass, tss } from '../core/stream';
 import { effectiveParams, instCapex, type InstKey } from './instrumentation';
 import { BACKWASH_FRACTION, defaultSludgeFraction, removedDryKgD, splitSludge } from '../physical/sludge';
 import { equilibrate } from '../chemistry/acidBase';
@@ -15,6 +15,8 @@ import { CATALOGUE, PRICES, Params, UnitType } from './catalogue';
 import { Note, ProcessResult } from './types';
 
 export type NodeKind = UnitType | 'influent' | 'discharge' | 'disposal';
+/** A disposal point in liquid mode: licensed tanker haulage of concentrated liquid waste (accepts any line). */
+export const isLiquidHaul = (n: { kind: string; params?: Record<string, unknown> }) => n.kind === 'disposal' && n.params?.liquid === 'yes';
 export type PortId = 'out' | 'sludge' | 'a' | 'b' | 'ras';
 /** unit kinds with a sludge draw-off port */
 export const SLUDGE_PORT_KINDS: NodeKind[] = ['clarifier', 'oilSep', 'sandFilter', 'thickener', 'filterPress'];
@@ -79,7 +81,7 @@ export interface SimResult {
   tears: string[];
   iterations: number;
   /** sludge disposal points: wet and dry mass, cost */
-  disposal: { id: string; wetKgD: number; dryKgD: number; costRMd: number; metal: boolean }[];
+  disposal: { id: string; wetKgD: number; dryKgD: number; costRMd: number; metal: boolean; liquid?: boolean; m3d?: number }[];
 }
 
 function sumPartial(...xs: Partial<Components>[]): Components {
@@ -105,7 +107,7 @@ export function validateGraph(g: ProcessGraph): Note[] {
     if (to.kind === 'influent') errs.push({ level: 'error', code: 'graph.influentInlet', text: 'The raw-wastewater inlet cannot receive a pipe.' });
     if (e.fromPort === 'sludge' && !SLUDGE_PORT_KINDS.includes(from.kind)) errs.push({ level: 'error', code: 'graph.noSludgePort', text: `${from.tag ?? from.kind} has no sludge outlet.` });
     const sludgeLine = isSludgeEdge(g, e);
-    if (to.kind === 'disposal' && !sludgeLine) errs.push({ level: 'error', code: 'graph.disposalWater', text: `Only sludge lines can go to ${to.tag ?? 'sludge disposal'} — treated water must go to the final discharge.` });
+    if (to.kind === 'disposal' && !sludgeLine && !isLiquidHaul(to)) errs.push({ level: 'error', code: 'graph.disposalWater', text: `Only sludge lines can go to ${to.tag ?? 'sludge disposal'} — treated water must go to the final discharge.` });
     if (sludgeLine && to.kind === 'discharge') errs.push({ level: 'error', code: 'graph.sludgeToRiver', text: `Sludge from ${from.tag ?? from.kind} reaches the final discharge — send it to a thickener, filter press or sludge disposal.` });
     if (sludgeLine && e.fromPort !== 'ras' && !['thickener', 'filterPress', 'disposal', 'mixer', 'splitter'].includes(to.kind)) errs.push({ level: 'warn', code: 'graph.sludgeIntoProcess', text: `Sludge is piped into ${to.tag ?? to.kind} — treatment units are not designed for 1 % solids feed.` });
   }
@@ -179,6 +181,8 @@ function emptyResult(errors: Note[]): SimResult {
 }
 
 const isMetalSludge = (s: Stream) => s.precipitated.Ni + s.precipitated.Cu + s.precipitated.Zn + s.precipitated.Cr > 0;
+/** liquid waste is classed as metal-bearing (scheduled waste) above this total heavy-metal content, mg/L (GAME MODEL, verify) */
+const METAL_LIQUOR_MGL = 5;
 
 /** One pass over the (tear-broken) flowsheet in topological order. */
 function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Set<string>, tearIn: Map<string, Stream>): SimResult {
@@ -206,6 +210,20 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
     }
     if (node.kind === 'discharge') {
       res.effluent = inlet;
+      sysOut = addComponents(sysOut, components(inlet));
+      continue;
+    }
+    if (node.kind === 'disposal' && isLiquidHaul(node)) {
+      // liquid scheduled-waste haulage: small volumes of concentrated liquor, priced per m³ hauled (not discharged)
+      const m3d = inlet.Q;
+      const metalMgL = METALS.reduce((a, m) => a + metalTotal(inlet, m), 0) + (inlet.CrVI ?? 0);
+      const metal = metalMgL > METAL_LIQUOR_MGL;
+      const costRMd = m3d * (metal ? PRICES.liquidHaul_m3.metal : PRICES.liquidHaul_m3.other);
+      const dryKgD = (inlet.Q * (POOLS.reduce((a, p) => a + poolMass(inlet, p), 0) + inlet.OGfree + inlet.OGemulsified)) / 1000;
+      res.disposal.push({ id, wetKgD: m3d * 1000, dryKgD, costRMd, metal, liquid: true, m3d });
+      res.opexSplit.sludge += costRMd;
+      res.opexRMd += costRMd;
+      if (m3d > PRICES.tanker_m3) res.errors.push({ level: 'warn', code: 'haul.volume', text: `${node.tag ?? 'Liquid haulage'}: ${m3d.toFixed(1)} m³/d is ${Math.ceil(m3d / PRICES.tanker_m3)} tanker loads a day — haulage suits small concentrated streams; concentrate it first (evaporator, RO brine reduction) or treat it.` });
       sysOut = addComponents(sysOut, components(inlet));
       continue;
     }

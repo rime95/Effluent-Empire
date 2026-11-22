@@ -20,12 +20,12 @@ import { designBasis } from '../../game/lab';
 import { constructionWeeks, makeNode, retrofitCharge, RETROFIT_PREMIUM, type Project } from '../../game/project';
 import type { Plant } from '../../game/operations';
 import { currentInfluent, upgradeQuote, VO_MARKUP } from '../../game/upgrade';
-import { simulate } from '../../simulation/treatment/graph';
+import { isLiquidHaul, simulate } from '../../simulation/treatment/graph';
 import { CATALOGUE, PRICES, UnitType } from '../../simulation/treatment/catalogue';
 import { PNode, PortId, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
 import { evaluate, measure, STANDARDS } from '../../simulation/treatment/compliance';
 import { Stream } from '../../simulation/core/stream';
-import { DisposalSymbol, UnitSymbol } from '../components/Symbols';
+import { DisposalSymbol, TankerSymbol, UnitSymbol } from '../components/Symbols';
 import { CATEGORY_COLOR, edgeTypes, nodeTypes, type DosingTag, type UnitNodeData } from './nodes';
 import { NumberField } from './NumberField';
 import { PidSheet } from './PidSheet';
@@ -178,7 +178,9 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       if (n.kind === 'disposal') {
         type = 'terminal';
         const d = sim?.disposal.find((x) => x.id === n.id);
-        data = { kind: 'disposal', tag: n.tag ?? 'SD', label: 'Sludge disposal', sub: d ? `${fmt(d.wetKgD, 0)} kg/d wet · ${rm(d.costRMd)}/d` : 'connect a sludge line' };
+        data = isLiquidHaul(n)
+          ? { kind: 'disposal', liquid: true, tag: n.tag ?? 'LH', label: 'Liquid waste haulage', sub: d ? `${fmt(d.m3d ?? 0, (d.m3d ?? 0) < 10 ? 2 : 0)} m³/d · ${rm(d.costRMd)}/d` : 'connect a concentrate line' }
+          : { kind: 'disposal', tag: n.tag ?? 'SD', label: 'Sludge disposal', sub: d ? `${fmt(d.wetKgD, 0)} kg/d wet · ${rm(d.costRMd)}/d` : 'connect a sludge line' };
       } else if (isTerminal(n)) {
         type = 'terminal';
         data = { kind: n.kind, label: n.kind === 'influent' ? 'RAW WASTEWATER' : 'FINAL DISCHARGE', sub: n.kind === 'influent' ? `${p.datasheet.Q} m³/d` : `Standard ${p.enquiry.standard}` };
@@ -306,16 +308,20 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       if (c.sourceHandle === 'ras') return to.kind === 'activatedSludge';
       const sludge = c.sourceHandle === 'sludge';
       if (sludge) return SLUDGE_RECEIVERS.includes(to.kind);
-      return to.kind !== 'disposal';
+      return to.kind !== 'disposal' || isLiquidHaul(to);
     },
     [draft.nodes],
   );
 
   const addUnit = useCallback(
-    (kind: UnitType | 'disposal', position?: { x: number; y: number }) => {
+    (kind: UnitType | 'disposal' | 'liquidHaul', position?: { x: number; y: number }) => {
       if (!p || !editable || !isUnitUnlocked(kind, tech)) return;
-      const node = makeNode(kind, p.datasheet.Q, draft.nodes);
-      const isSludgeKind = (k: string) => k === 'disposal' || CATALOGUE[k as UnitType]?.category === 'sludge';
+      const node = kind === 'liquidHaul' ? makeNode('disposal', p.datasheet.Q, draft.nodes) : makeNode(kind, p.datasheet.Q, draft.nodes);
+      if (kind === 'liquidHaul') {
+        node.params = { liquid: 'yes' };
+        node.tag = `LH-${String(draft.nodes.filter((x) => isLiquidHaul(x)).length + 1).padStart(2, '0')}`;
+      }
+      const isSludgeKind = (k: string) => k === 'disposal' || k === 'liquidHaul' || CATALOGUE[k as UnitType]?.category === 'sludge';
       // process units go along the main line, sludge units along a second row; each row spaced so nozzles never overlap
       const units = draft.nodes.filter((n) => !isNonUnit(n) && !isSludgeKind(n.kind)).length;
       const sludgeUnits = draft.nodes.filter((n) => isSludgeKind(n.kind)).length;
@@ -390,7 +396,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
-    const kind = e.dataTransfer.getData('application/ee-unit') as UnitType | 'disposal';
+    const kind = e.dataTransfer.getData('application/ee-unit') as UnitType | 'disposal' | 'liquidHaul';
     if (!kind) return;
     addUnit(kind, rf.screenToFlowPosition({ x: e.clientX - 60, y: e.clientY - 40 }));
   };
@@ -456,6 +462,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
               <PaletteItem key={t} type={t} editable={editable} locked={!isUnitUnlocked(t, tech)} onAdd={addUnit} />
             ))}
             {cat === 'sludge' && <DisposalPaletteItem editable={editable} onAdd={() => addUnit('disposal')} />}
+            {cat === 'sludge' && <DisposalPaletteItem liquid editable={editable} onAdd={() => addUnit('liquidHaul')} />}
           </div>
         ))}
         <div style={{ marginTop: 12 }}>
@@ -840,27 +847,47 @@ const PaletteItem = memo(function PaletteItem({ type, editable, locked, onAdd }:
   );
 });
 
-function DisposalPaletteItem({ editable, onAdd }: { editable: boolean; onAdd: () => void }) {
+function DisposalPaletteItem({ editable, onAdd, liquid }: { editable: boolean; onAdd: () => void; liquid?: boolean }) {
   return (
     <div
       className="palette-item"
       draggable={editable}
       onDragStart={(e) => {
-        e.dataTransfer.setData('application/ee-unit', 'disposal');
+        e.dataTransfer.setData('application/ee-unit', liquid ? 'liquidHaul' : 'disposal');
         e.dataTransfer.effectAllowed = 'move';
       }}
       onClick={onAdd}
-      title="Where sludge or cake leaves site — costed per wet tonne (dewatering pays off here)."
+      title={liquid ? 'Licensed tanker haulage of small volumes of concentrated liquid waste (e.g. nickel concentrate) — costed per m³; not a discharge.' : 'Where sludge or cake leaves site — costed per wet tonne (dewatering pays off here).'}
       style={{ background: '#f4f6f8', color: 'var(--ink)', opacity: editable ? 1 : 0.5 }}
     >
-      <DisposalSymbol />
-      Sludge Disposal
+      {liquid ? <TankerSymbol /> : <DisposalSymbol />}
+      {liquid ? 'Liquid Waste Haulage' : 'Sludge Disposal'}
     </div>
   );
 }
 
 function DisposalInspector({ id, tag, sim }: { id: string; tag: string; sim: SimResult | null }) {
   const d = sim?.disposal.find((x) => x.id === id);
+  if (d?.liquid || tag.startsWith('LH'))
+    return (
+      <>
+        <div className="mono" style={{ fontSize: 11, color: 'var(--chem)', textTransform: 'uppercase' }}>
+          liquid waste
+        </div>
+        <h2 style={{ marginBottom: 4 }}>Liquid Waste Haulage — {tag}</h2>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          A licensed scheduled-waste contractor tankers the liquid off site ({rm(PRICES.liquidHaul_m3.metal)}/m³ for metal-bearing liquor, {rm(PRICES.liquidHaul_m3.other)}/m³ otherwise). It is not a discharge, so it does not count against the standard or zero-liquid-discharge — but it only pays for small, concentrated streams such as an evaporator&apos;s nickel concentrate.
+        </p>
+        {!d && <p className="muted">Pipe a concentrate, brine or sludge line here.</p>}
+        {d && (
+          <>
+            <div className="calc"><span>Volume</span><span>{fmt(d.m3d ?? 0, 2)} m³/d · {fmt((d.m3d ?? 0) / PRICES.tanker_m3, 2)} tanker loads/d</span></div>
+            <div className="calc"><span>Classification</span><span>{d.metal ? 'Scheduled waste (metal-bearing)' : 'Scheduled waste (general)'}</span></div>
+            <div className="calc"><span>Haulage cost</span><span>{rm(d.costRMd)}/d</span></div>
+          </>
+        )}
+      </>
+    );
   return (
     <>
       <div className="mono" style={{ fontSize: 11, color: 'var(--sludge)', textTransform: 'uppercase' }}>

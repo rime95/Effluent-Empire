@@ -7,7 +7,8 @@ import { memo } from 'react';
 import type { PNode, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
 import { hasInst } from '../../simulation/treatment/instrumentation';
 import { UnitType } from '../../simulation/treatment/catalogue';
-import { DisposalSymbol, UnitSymbol } from '../components/Symbols';
+import { DisposalSymbol, TankerSymbol, UnitSymbol } from '../components/Symbols';
+import { isLiquidHaul } from '../../simulation/treatment/graph';
 
 const INK = '#1a2633';
 const W = 120;
@@ -149,7 +150,7 @@ export const PidSheet = memo(function PidSheet({ graph, sim, onSelect, docNo }: 
                 {n.tag}
               </text>
               <g transform={`translate(0,${TAG_H})`}>
-                <DisposalSymbol />
+                {isLiquidHaul(n) ? <TankerSymbol /> : <DisposalSymbol />}
               </g>
             </g>
           );
