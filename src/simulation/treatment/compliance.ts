@@ -4,7 +4,7 @@
  * Ref: knowledge/regulations/malaysia_environmental_quality.md
  */
 import standardsJson from '../regulations/standards.json';
-import { METALS, Metal, Stream, bod5, codTotal, metalTotal, oilGrease, poolMass, tss, POOLS, Pool } from '../core/stream';
+import { METALS, Metal, Stream, bod5, codTotal, metalSoluble, metalTotal, oilGrease, poolMass, tss, POOLS, Pool } from '../core/stream';
 import { minimumSolubilityPH, solubilityMgL } from '../chemistry/solubility';
 import { SimResult } from './graph';
 
@@ -47,7 +47,7 @@ export function measure(s: Stream): Record<ParamId, number> {
     CrVI: s.CrVI,
     CrIII: metalTotal(s, 'Cr'),
     MetalsTotal: METALS.reduce((a, m) => a + metalTotal(s, m), 0),
-    MetalsSoluble: METALS.reduce((a, m) => a + s.dissolved[m], 0),
+    MetalsSoluble: METALS.reduce((a, m) => a + metalSoluble(s, m), 0),
   };
 }
 
@@ -105,7 +105,11 @@ function explainMetal(m: Metal, s: Stream, sim: SimResult | null, pass: boolean)
   const diss = s.dissolved[m];
   const part = s.precipitated[m];
   const opt = minimumSolubilityPH(m, s.T);
-  if (pass) return `Dissolved ${diss.toFixed(3)} + particulate ${part.toFixed(3)} mg/L.`;
+  const cx = s.complexed?.[m] ?? 0;
+  const sf = s.sulfide?.[m] ?? 0;
+  if (pass) return `Dissolved ${diss.toFixed(3)} + particulate ${part.toFixed(3)} mg/L${cx > 0.001 ? ` + complexed ${cx.toFixed(3)}` : ''}${sf > 0.001 ? ` + sulfide floc ${sf.toFixed(3)}` : ''}.`;
+  if (cx >= Math.max(diss, part, sf)) return `${cx.toFixed(2)} mg/L of the ${m} is held in solution by complexing agents (citrate/lactate/ammonia from electroless baths) — raising the pH cannot precipitate it as hydroxide. Sulfide precipitation (NaHS) breaks the complex; follow it with coagulation + polymer to catch the fine sulfide.`;
+  if (sf >= Math.max(diss, part)) return `${sf.toFixed(2)} mg/L of the ${m} leaves as fine metal-sulfide particles — sulfide precipitate is colloidal: coagulate and flocculate it (with polymer) before the clarifier, then filter.`;
   if (diss >= part) {
     // which unit re-dissolved it? (largest rise in dissolved metal across a unit, after precipitation had happened)
     let culprit: { tag: string; from: number; to: number; pHin: number; pHout: number } | null = null;

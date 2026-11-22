@@ -58,6 +58,26 @@ export const dafFoodTrain = (s: Stream): TrainSpec => {
   ];
 };
 
+/**
+ * Electroless-nickel plater (sulfide variant): hydroxide precipitation, then NaHS at 1.25× the sulfide demand of the
+ * metal still in solution (complexed + residual free), ferric + polymer to catch the colloidal sulfide.
+ */
+export const sulfideMetalTrain = (s: Stream): TrainSpec => {
+  const Q = s.Q;
+  const cxMol = (['Ni', 'Cu', 'Zn'] as const).reduce((a, m) => a + (s.complexed?.[m] ?? 0) / MW[m] / 1000, 0);
+  const nahs = Math.max(5, Math.ceil((cxMol + 0.02e-3) * 56.06 * 1000 * 1.3));
+  return [
+    u('eq', Q),
+    ...(s.CrVI > 0.05 ? [u('crReduction', Q)] : []),
+    u('precipitation', Q, { targetPH: 9.8 }),
+    u('sulfide', Q, { dose: nahs, volume: Math.max(1, Math.ceil(Q / 48)) }),
+    u('coagulation', Q, { coagulant: 'ferric', dose: 75, pHset: 9.8, polymer: 1 }),
+    u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.7) }),
+    u('sandFilter', Q),
+    u('neutralisation', Q, { targetPH: 7.5 }),
+  ];
+};
+
 export const foodTrain = (Q: number): TrainSpec => [
   u('oilSep', Q, { area: Math.ceil((Q * 2.2) / 24 / 1.0) }),
   u('eq', Q),

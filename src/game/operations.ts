@@ -244,6 +244,7 @@ const BREAKDOWNS: Record<UnitType, { description: string; apply: (p: Params) => 
   crReduction: { description: 'Metabisulfite dosing pump failure — no reduction', apply: () => 'bypass' },
   neutralisation: { description: 'pH dosing pump failure — no pH correction', apply: () => 'bypass' },
   precipitation: { description: 'Caustic dosing pump failure — no precipitation', apply: () => 'bypass' },
+  sulfide: { description: 'NaHS dosing pump failure — no sulfide precipitation', apply: () => 'bypass' },
   coagulation: { description: 'Coagulant dosing pump failure — no coagulation', apply: () => 'bypass' },
   clarifier: { description: 'Clarifier scraper drive failure — sludge blanket rising', apply: (p) => ({ ...p, area: Number(p.area) * 0.45 }) },
   activatedSludge: { description: 'Aeration blower failure — DO collapsed', apply: (p) => ({ ...p, do: 0.3 }) },

@@ -6,7 +6,7 @@
  *   consumed  — mass destroyed by a documented transformation (e.g. COD oxidised by O2, NH4-N nitrified is NOT consumed: it becomes NO3-N)
  * Water (Q) is a component too: sludge underflow water is neglected in Phase 1 (documented).
  */
-import { METALS, Stream, codTotal, nitrogenTotal, oilGrease } from './stream';
+import { METALS, Stream, codTotal, metalTotal, nitrogenTotal, oilGrease } from './stream';
 import { MW, kgPerDay } from './units';
 
 export const COMPONENTS = ['Q', 'Ni', 'Cu', 'Zn', 'Cr', 'Al', 'Fe', 'SO4', 'COD', 'N', 'OG', 'mineral'] as const;
@@ -22,7 +22,7 @@ export function components(s: Stream, includeWater = true): Components {
   const k = (c: number) => kgPerDay(s.Q, c);
   const c = zeroComponents();
   c.Q = includeWater ? s.Q : 0;
-  for (const m of METALS) c[m] = k(s.dissolved[m] + s.precipitated[m]);
+  for (const m of METALS) c[m] = k(metalTotal(s, m));
   c.Cr += k(s.CrVI ?? 0);
   c.SO4 = k((s.SO4T ?? 0) * MW.SO4 * 1000);
   c.Al = k(s.alSolid + s.alDissolved);

@@ -56,7 +56,7 @@ export const TECH: Record<TechId, TechDef> = {
   },
   sulfide: {
     id: 'sulfide', name: 'Sulfide precipitation', tier: 2, category: 'chemical', costRM: 140_000, reputation: TIER_REPUTATION[2], requires: [], units: ['sulfide'],
-    blurb: 'NaHS precipitates metal sulfides, orders of magnitude less soluble than hydroxides.', clients: ['Standard A high-nickel platers'], available: false,
+    blurb: 'NaHS precipitates metal sulfides, orders of magnitude less soluble than hydroxides.', clients: ['Electroless-nickel platers (complexed Ni)'], available: true,
   },
   ionExchange: {
     id: 'ionExchange', name: 'Ion exchange (chelating resin)', tier: 2, category: 'chemical', costRM: 180_000, reputation: TIER_REPUTATION[2], requires: [], units: ['ionExchange'],

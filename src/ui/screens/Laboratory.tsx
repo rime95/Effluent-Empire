@@ -48,6 +48,7 @@ export function Laboratory({ go }: { go: (s: Screen) => void }) {
     { label: 'Zinc', unit: 'mg/L', declared: decl.Zn, measured: p.testsDone.includes('metals') ? ds.Zn : undefined, measuredBy: 'metals' },
     { label: 'Chromium (III)', unit: 'mg/L', declared: decl.Cr, measured: p.testsDone.includes('metals') ? ds.Cr : undefined, measuredBy: 'metals' },
     { label: 'Chromium (VI)', unit: 'mg/L', declared: decl.CrVI, measured: p.testsDone.includes('metals') ? ds.CrVI : undefined, measuredBy: 'metals' },
+    { label: 'Complexed Ni + Cu + Zn (soluble at pH 10)', unit: 'mg/L', declared: undefined, measured: p.testsDone.includes('metals') ? (ds.complexed?.Ni ?? 0) + (ds.complexed?.Cu ?? 0) + (ds.complexed?.Zn ?? 0) : undefined, measuredBy: 'metals' },
   ];
 
   return (

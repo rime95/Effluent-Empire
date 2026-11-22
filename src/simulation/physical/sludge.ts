@@ -26,6 +26,7 @@ export function splitSludge(out: Stream, removed: Stream, inletQ: number, Qs: nu
   const k = main.Q > 0 ? out.Q / main.Q : 1;
   for (const f of PART_SCALARS) (main[f] as number) = (out[f] as number) * k;
   for (const m of METALS) main.precipitated[m] = out.precipitated[m] * k;
+  for (const m of METALS) main.sulfide![m] = (out.sulfide?.[m] ?? 0) * k;
 
   const sludge = cloneStream(out); // dissolved species at the outlet concentration
   sludge.Q = q;
@@ -34,6 +35,7 @@ export function splitSludge(out: Stream, removed: Stream, inletQ: number, Qs: nu
   const r = q > 0 ? inletQ / q : 0;
   for (const f of PART_SCALARS) (sludge[f] as number) = (removed[f] as number) * r;
   for (const m of METALS) sludge.precipitated[m] = removed.precipitated[m] * r;
+  for (const m of METALS) sludge.sulfide![m] = (removed.sulfide?.[m] ?? 0) * r;
   // settling data travels with the solids (out.v50 = the unit's inlet settling characteristics)
   return { main, sludge };
 }

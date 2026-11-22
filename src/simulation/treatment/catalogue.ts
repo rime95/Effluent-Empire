@@ -14,10 +14,11 @@ import { adsorb } from '../physical/carbon';
 import { clarify, equalise, filter, separateOil } from '../physical/units';
 import { flotate } from '../physical/flotation';
 import { dry } from '../physical/dryer';
+import { precipitateSulfide } from '../chemistry/sulfide';
 import { ProcessResult } from './types';
 import { filterPress, passThrough, thicken } from '../physical/sludge';
 
-export type UnitType = 'eq' | 'oilSep' | 'daf' | 'crReduction' | 'neutralisation' | 'precipitation' | 'coagulation' | 'clarifier' | 'activatedSludge' | 'sandFilter' | 'carbon' | 'thickener' | 'filterPress' | 'dryer' | 'splitter' | 'mixer';
+export type UnitType = 'eq' | 'oilSep' | 'daf' | 'crReduction' | 'neutralisation' | 'precipitation' | 'sulfide' | 'coagulation' | 'clarifier' | 'activatedSludge' | 'sandFilter' | 'carbon' | 'thickener' | 'filterPress' | 'dryer' | 'splitter' | 'mixer';
 export type Category = 'physical' | 'chemical' | 'biological' | 'sludge' | 'hydraulic';
 export type ParamValue = number | string;
 export type Params = Record<string, ParamValue>;
@@ -137,6 +138,20 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     run: (s, p) => neutralise(s, { targetPH: n(p, 'targetPH'), base: p.base as 'NaOH' | 'lime', volume_m3: n(p, 'volume') }),
     capex: (p) => scale(70_000, n(p, 'volume'), 30) + 40_000,
     footprint: (p) => n(p, 'volume') / 3.5 + 10,
+  },
+  sulfide: {
+    type: 'sulfide',
+    name: 'Sulfide Precipitation',
+    tagPrefix: 'SF',
+    category: 'chemical',
+    summary: 'NaHS dosing precipitates Ni, Cu and Zn as metal sulfides — far less soluble than hydroxides, and it breaks the metal complexes (citrate, ammonia) that hydroxide cannot touch. The fine sulfide must be coagulated afterwards.',
+    params: [
+      { key: 'dose', label: 'NaHS dose (as 100 %)', unit: 'mg/L', min: 0, max: 500, step: 1, default: () => 20, help: 'About 1 mg/L NaHS per mg/L metal (≈ 0.95 mg NaHS per mg Ni); dose 1.1–1.3× stoichiometric.' },
+      { key: 'volume', label: 'Reactor volume', unit: 'm³', min: 0.5, max: 2000, step: 0.5, default: (Q) => round(Q / 48, 0.5), help: '15–30 min reaction time.' },
+    ],
+    run: (s, p) => precipitateSulfide(s, { dose_mgL: n(p, 'dose'), volume_m3: n(p, 'volume') }),
+    capex: (p) => scale(70_000, n(p, 'volume'), 10) + 55_000,
+    footprint: (p) => n(p, 'volume') / 2.5 + 10,
   },
   coagulation: {
     type: 'coagulation',

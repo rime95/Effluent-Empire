@@ -6,7 +6,7 @@
  */
 import { Stream } from '../simulation/core/stream';
 import { IndustryId } from './industries';
-import { TrainSpec, dafFoodTrain, metalTrain, sludgeLineGraph } from './referenceDesigns';
+import { TrainSpec, dafFoodTrain, metalTrain, sludgeLineGraph, sulfideMetalTrain } from './referenceDesigns';
 import { ProcessGraph, SimResult, linearGraph } from '../simulation/treatment/graph';
 import { Requirements } from './requirements';
 import { defaultParams } from '../simulation/treatment/catalogue';
@@ -77,6 +77,22 @@ export const VARIANTS: ClientVariant[] = [
       ]);
     },
     requirements: (ref) => ({ sludgeCapRMd: Math.round(ref.opexSplit.sludge * 1.3) }),
+    standard: 'B',
+  },
+  {
+    id: 'complexedNi',
+    industry: 'plating',
+    requires: ['sulfide'],
+    label: 'Electroless-nickel plater — complexed nickel',
+    brief: 'Electroless-nickel and alkaline copper baths carry citrate, lactate and ammonia: much of the nickel is complexed and stays dissolved however high you raise the pH. The metals panel shows the complexed share.',
+    overlay: (s, rng) => {
+      const ni = rng.range(15, 40);
+      const f = rng.range(0.45, 0.75);
+      s.dissolved = { ...s.dissolved, Ni: ni * (1 - f) };
+      s.complexed = { ...(s.complexed ?? { Ni: 0, Cu: 0, Zn: 0, Cr: 0 }), Ni: ni * f };
+      return s;
+    },
+    reference: (s) => sulfideMetalTrain(s),
     standard: 'B',
   },
 ];

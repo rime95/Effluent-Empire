@@ -39,6 +39,13 @@ export interface Stream {
   // ---- metals, mg/L as metal ----
   dissolved: MetalMap;
   precipitated: MetalMap;
+  /**
+   * dissolved metal held by complexing ligands (citrate, lactate, ammonia in electroless baths), mg/L as metal: stays in
+   * solution at any pH (no hydroxide precipitation); sulfide breaks the complex. Absent on older saves.
+   */
+  complexed?: MetalMap;
+  /** metal bound as metal sulfide (NiS, CuS, ZnS), mg/L as metal: insoluble at any pH (not re-equilibrated). Absent on older saves. */
+  sulfide?: MetalMap;
   /** coagulant-derived solids, mg/L as metal (Al in Al(OH)3, Fe in Fe(OH)3) */
   alSolid: number;
   feSolid: number;
@@ -98,7 +105,7 @@ export const DEFAULT_V50: Record<Pool, number> = {
   biomass: 3.0,
 };
 
-const zeroMetals = (): MetalMap => ({ Ni: 0, Cu: 0, Zn: 0, Cr: 0 });
+export const zeroMetals = (): MetalMap => ({ Ni: 0, Cu: 0, Zn: 0, Cr: 0 });
 
 export function emptyStream(Q = 0): Stream {
   return {
@@ -113,6 +120,8 @@ export function emptyStream(Q = 0): Stream {
     weakAcidPKa: 4.76,
     dissolved: zeroMetals(),
     precipitated: zeroMetals(),
+    complexed: zeroMetals(),
+    sulfide: zeroMetals(),
     alSolid: 0,
     feSolid: 0,
     alDissolved: 0,
@@ -141,6 +150,8 @@ export function cloneStream(s: Stream): Stream {
     ...s,
     dissolved: { ...s.dissolved },
     precipitated: { ...s.precipitated },
+    complexed: { ...(s.complexed ?? zeroMetals()) },
+    sulfide: { ...(s.sulfide ?? zeroMetals()) },
     v50: { ...s.v50 },
     ml: s.ml ? { ...s.ml } : undefined,
     feDissolved: s.feDissolved ?? 0,
@@ -149,6 +160,8 @@ export function cloneStream(s: Stream): Stream {
 }
 
 const HYDROXIDE_MW: Record<Metal, number> = { Ni: MW.NiOH2, Cu: MW.CuOH2, Zn: MW.ZnOH2, Cr: MW.CrOH3 };
+/** molar masses of the metal sulfides (Cr does not form a sulfide in water: Cr2S3 hydrolyses to Cr(OH)3) */
+const SULFIDE_MW: Record<Metal, number> = { Ni: MW.Ni + 32.06, Cu: MW.Cu + 32.06, Zn: MW.Zn + 32.06, Cr: MW.CrOH3 };
 
 /** Dry-solids mass of each pool, mg/L. */
 export function poolMass(s: Stream, p: Pool): number {
@@ -165,7 +178,7 @@ export function poolMass(s: Stream, p: Pool): number {
       // particulate organics: COD -> VSS (GAME MODEL: VSS/TSS = 1 for organic particulates)
       return (s.XS + s.XI) / COD_PER_VSS;
     case 'precipitate':
-      return METALS.reduce((a, m) => a + (s.precipitated[m] * HYDROXIDE_MW[m]) / MW[m], 0);
+      return METALS.reduce((a, m) => a + (s.precipitated[m] * HYDROXIDE_MW[m]) / MW[m] + ((s.sulfide?.[m] ?? 0) * SULFIDE_MW[m]) / MW[m], 0);
     case 'alFloc':
       return (s.alSolid * MW.AlOH3) / MW.Al;
     case 'feFloc':
@@ -198,7 +211,12 @@ export function bod5(s: Stream): number {
 }
 
 export function metalTotal(s: Stream, m: Metal): number {
-  return s.dissolved[m] + s.precipitated[m];
+  return s.dissolved[m] + s.precipitated[m] + (s.complexed?.[m] ?? 0) + (s.sulfide?.[m] ?? 0);
+}
+
+/** Metal in solution: free (hydroxide-controlled) plus complexed, mg/L. */
+export function metalSoluble(s: Stream, m: Metal): number {
+  return s.dissolved[m] + (s.complexed?.[m] ?? 0);
 }
 
 export function oilGrease(s: Stream): number {
@@ -227,6 +245,8 @@ export function blend(streams: Stream[]): Stream {
   for (const m of METALS) {
     out.dissolved[m] = w((s) => s.dissolved[m]);
     out.precipitated[m] = w((s) => s.precipitated[m]);
+    out.complexed![m] = w((s) => s.complexed?.[m] ?? 0);
+    out.sulfide![m] = w((s) => s.sulfide?.[m] ?? 0);
   }
   const scalarKeys = ['SO4T', 'alSolid', 'feSolid', 'alDissolved', 'feDissolved', 'CrVI', 'SS', 'SI', 'XS', 'XI', 'biomass', 'OGfree', 'OGemulsified', 'OGfloc', 'NH4N', 'NO3N', 'grit', 'inert', 'colloid', 'floc'] as const;
   for (const k of scalarKeys) out[k] = w((s) => s[k] ?? 0);
@@ -260,6 +280,8 @@ export function splitPools(s: Stream, removal: Partial<Record<Pool, number>>): {
     for (const m of METALS) {
       removed.precipitated[m] = s.precipitated[m] * x;
       out.precipitated[m] = s.precipitated[m] * k;
+      removed.sulfide![m] = (s.sulfide?.[m] ?? 0) * x;
+      out.sulfide![m] = (s.sulfide?.[m] ?? 0) * k;
     }
   });
   take('alFloc', (k, x) => ((removed.alSolid = s.alSolid * x), (out.alSolid = s.alSolid * k)));

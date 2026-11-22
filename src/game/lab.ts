@@ -15,7 +15,7 @@ import { Rng } from './rng';
 export type LabTestId = 'metals' | 'titration' | 'fractionation' | 'oil' | 'jar';
 
 export const LAB_TESTS: Record<LabTestId, { name: string; cost: number; weeks: number; reveals: string }> = {
-  metals: { name: 'Heavy metals panel (ICP-OES) + Cr(VI)', cost: 4_000, weeks: 1, reveals: 'Accurate Ni, Cu, Zn, Cr(III) and hexavalent chromium — including metals the customer did not declare.' },
+  metals: { name: 'Heavy metals panel (ICP-OES) + Cr(VI)', cost: 4_000, weeks: 1, reveals: 'Accurate Ni, Cu, Zn, Cr(III) and hexavalent chromium — including metals the customer did not declare — and the complexed share (soluble after a pH-10 jar precipitation).' },
   titration: { name: 'Acid–base titration + sulfate (IC)', cost: 2_500, weeks: 1, reveals: 'Alkalinity, acidity, sulfate and the full titration curve (buffer capacity → true chemical dose).' },
   fractionation: { name: 'COD fractionation + BOD₅ + NH₄-N', cost: 6_000, weeks: 2, reveals: 'Biodegradable vs inert COD, soluble vs particulate, ammoniacal nitrogen.' },
   oil: { name: 'Oil & grease characterisation', cost: 1_500, weeks: 1, reveals: 'Free vs emulsified oil.' },
@@ -40,6 +40,8 @@ export interface Datasheet {
   Cr?: number;
   /** hexavalent chromium, mg/L as Cr */
   CrVI?: number;
+  /** complexed (non-precipitable at pH 10) metal per metal, mg/L — from the metals panel */
+  complexed?: Partial<Record<Metal, number>>;
   alkalinity_mgCaCO3?: number;
   acidity_mgCaCO3?: number;
   /** sulfate (ion chromatography), mg/L as SO4 */
@@ -76,6 +78,8 @@ export function applyTest(ds: Datasheet, test: LabTestId, trueS: Stream, rng: Rn
     case 'metals':
       for (const m of METALS) out[m] = Math.round(acc(metalTotal(trueS, m)) * 100) / 100;
       out.CrVI = Math.round(acc(trueS.CrVI) * 100) / 100;
+      // soluble metal left after a pH-10 jar precipitation + 0.45 µm filtration = complexed (chelated) metal
+      out.complexed = Object.fromEntries(METALS.map((m) => [m, Math.round(acc(trueS.complexed?.[m] ?? 0) * 100) / 100])) as Partial<Record<Metal, number>>;
       break;
     case 'titration':
       out.alkalinity_mgCaCO3 = Math.round(acc(alkalinity(trueS)));
@@ -129,7 +133,11 @@ export function designBasis(ds: Datasheet): { stream: Stream; assumptions: strin
   const free = ds.ogFreeFraction ?? (a.push('Oil assumed 60 % free / 40 % emulsified.'), ASSUMED.ogFreeFraction);
   s.OGfree = ds.OG * free;
   s.OGemulsified = ds.OG * (1 - free);
-  for (const m of METALS) s.dissolved[m as Metal] = ds[m as Metal] ?? 0;
+  for (const m of METALS) {
+    const cx = Math.min(ds.complexed?.[m as Metal] ?? 0, ds[m as Metal] ?? 0);
+    s.dissolved[m as Metal] = (ds[m as Metal] ?? 0) - cx;
+    s.complexed![m as Metal] = cx;
+  }
   s.CrVI = ds.CrVI ?? 0;
   if (ds.sulfate_mgL !== undefined) s.SO4T = ds.sulfate_mgL / 96_060;
   else if (ds.pH < 4) a.push('Sulfate unknown (assumed 0) — below pH 4 bisulfate buffering changes acid and caustic doses. Run the titration + IC test.');

@@ -67,6 +67,7 @@ export function UnitSymbol({ type, accent }: { type: UnitType; accent: string })
       );
     case 'neutralisation':
     case 'precipitation':
+    case 'sulfide':
     case 'crReduction':
       return (
         <svg viewBox="0 0 120 80">

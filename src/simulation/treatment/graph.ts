@@ -180,7 +180,7 @@ function emptyResult(errors: Note[]): SimResult {
   return { ok: false, errors, order: [], nodes: {}, edges: {}, effluent: null, capex: 0, footprint: 0, opexRMd: 0, opexSplit: { chemicals: 0, energy: 0, sludge: 0 }, energy_kWhd: 0, sludgeKgD: 0, chemicals: [], balance: null, tears: [], iterations: 0, disposal: [] };
 }
 
-const isMetalSludge = (s: Stream) => s.precipitated.Ni + s.precipitated.Cu + s.precipitated.Zn + s.precipitated.Cr > 0;
+const isMetalSludge = (s: Stream) => METALS.some((m) => s.precipitated[m] + (s.sulfide?.[m] ?? 0) > 0);
 /** liquid waste is classed as metal-bearing (scheduled waste) above this total heavy-metal content, mg/L (GAME MODEL, verify) */
 const METAL_LIQUOR_MGL = 5;
 
