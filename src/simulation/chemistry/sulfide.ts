@@ -14,8 +14,17 @@ export const SULFIDE_KSP: Partial<Record<Metal, number>> = { Cu: 6e-37, Zn: 2e-2
 /** H2S pKa values (pK2 13.9: the basis of the Ksp set above) */
 export const H2S_PK1 = 7.0;
 export const H2S_PK2 = 13.9;
-/** fraction of a metal complex broken per pass when sulfide is in excess (strong EDTA chelates resist), verify */
+/**
+ * Complex breaking for the weak ligands of electroless baths (citrate, lactate, gluconate, ammonia): 98 % of the complexed
+ * metal is broken when sulfide is in excess, down to an achievable residual of 0.15 mg/L per metal (verify; field data
+ * 0.1–0.5 mg/L Ni). Ni/Zn–EDTA is NOT broken by sulfide (conditional log K ≈ 18): not modelled — EN baths use weak ligands.
+ */
 export const COMPLEX_BREAK = 0.98;
+export const COMPLEX_RESIDUAL_MGL = 0.15;
+/** time constant of hydroxide → sulfide conversion of existing M(OH)2 solids, min (GAME MODEL, verify) */
+export const HYDROXIDE_CONV_TAU_MIN = 20;
+/** at most half of the hydroxide solids convert within a normal reaction time (surface conversion), GAME MODEL */
+export const HYDROXIDE_CONV_MAX = 0.5;
 /** settling velocity of fresh metal-sulfide precipitate, m/h (colloidal), verify */
 export const SULFIDE_V50 = 0.05;
 export const NAHS_PRICE_RMKG = 3.5;
@@ -41,7 +50,9 @@ export function precipitateSulfide(s: Stream, p: { dose_mgL: number; volume_m3: 
   for (const m of ORDER) {
     // free metal first, then the complexed share (broken at COMPLEX_BREAK efficiency)
     const free = mgL_to_molL(out.dissolved[m], MW[m]);
-    const cx = mgL_to_molL(cxMap[m], MW[m]) * COMPLEX_BREAK;
+    // breakable share: 98 %, but never below the achievable residual
+    const cxBreakable = Math.max(0, Math.min(cxMap[m] * COMPLEX_BREAK, cxMap[m] - COMPLEX_RESIDUAL_MGL));
+    const cx = mgL_to_molL(cxBreakable, MW[m]);
     const xFree = Math.min(free, left);
     left -= xFree;
     const xCx = Math.min(cx, left);
@@ -53,11 +64,33 @@ export function precipitateSulfide(s: Stream, p: { dose_mgL: number; volume_m3: 
     sfMap[m] += mg + mgCx;
     taken[m] = mg + mgCx;
   }
+  // remaining sulfide converts existing hydroxide solids (M(OH)2 is unstable against MS with excess HS−): a GAME MODEL
+  // surface-conversion fraction that grows with reaction time — sulfide dosed on unclarified water pays for the solids
+  const hrtMin = (p.volume_m3 / Math.max(s.Q, 1e-9)) * 1440;
+  const convFrac = HYDROXIDE_CONV_MAX * (1 - Math.exp(-hrtMin / HYDROXIDE_CONV_TAU_MIN));
+  let convertedMol = 0;
+  for (const m of ORDER) {
+    if (left <= 0) break;
+    const solid = mgL_to_molL(out.precipitated[m], MW[m]) * convFrac;
+    const x = Math.min(solid, left);
+    left -= x;
+    convertedMol += x;
+    const mg = molL_to_mgL(x, MW[m]);
+    out.precipitated[m] -= mg;
+    sfMap[m] += mg;
+    taken[m] = (taken[m] ?? 0) + mg;
+  }
   const excess = Math.max(0, left);
-  // charge: Na+ added for every mol NaHS; metal removed from solution leaves the metal charge balance (H+ released)
-  out.Cb += S;
-  // excess sulfide: assumed oxidised to sulfate downstream (GAME MODEL; keeps S in the balance, acid-forming like HS− + 2O2)
-  out.SO4T = (out.SO4T ?? 0) + excess;
+  // charge (process review 2026-11-22):
+  //  • Na+ +1 eq for every mol NaHS;
+  //  • free metal: M2+ leaves the metal charge balance (−2) → net −1 eq/mol (the H+ released) — automatic in equilibrate;
+  //  • complexed metal carries no charge in the model: the freed ligand keeps the metal's former 2 eq as an anion → −2 eq;
+  //  • hydroxide converted: M(OH)2 + HS− → MS + OH− + H2O → the OH− (+1 eq) offsets the H+ that free metal would release;
+  //  • excess HS− stays as residual sulfide (weak acid, outside the strong-ion balance): pH-neutral above pH 8.
+  const cxMolBroken = ORDER.reduce((a, m) => a + mgL_to_molL((s.complexed?.[m] ?? 0) - cxMap[m], MW[m]), 0);
+  out.Cb += S - excess - 2 * cxMolBroken + 2 * convertedMol;
+  // excess NaHS: Na+ is balanced by the HS− anion it came with (pH-neutral above ~pH 8; GAME MODEL: H2S formation below pKa1 not counted)
+  out.sulfideS = (out.sulfideS ?? 0) + excess;
   // fresh sulfide is colloidal: precipitate-pool v50 becomes the mass-weighted mix of old precipitate and new sulfide
   const newSulfideMass = ORDER.reduce((a, m) => a + ((taken[m] ?? 0) * (MW[m] + 32.06)) / MW[m], 0);
   const oldMass = poolMass(s, 'precipitate');
@@ -67,10 +100,11 @@ export function precipitateSulfide(s: Stream, p: { dose_mgL: number; volume_m3: 
   // residual (Ksp-limited) dissolved metal where sulfide is in excess: effectively nil — reported, not applied
   const H = Math.pow(10, -eq.pH);
   const a2 = Math.pow(10, -H2S_PK1 - H2S_PK2) / (H * H + Math.pow(10, -H2S_PK1) * H + Math.pow(10, -H2S_PK1 - H2S_PK2));
-  const s2 = excess * a2;
+  void a2;
   const h2sFrac = H / (H + Math.pow(10, -H2S_PK1));
   const ratio = demand > 0 ? S / demand : Infinity;
   if (excess > 0 && eq.pH < 8) notes.push({ level: 'warn', code: 'sulf.h2s', text: `Excess sulfide at pH ${eq.pH.toFixed(1)}: ${(100 * h2sFrac).toFixed(0)} % of it is H₂S — toxic off-gas. Keep pH ≥ 8 in the sulfide tank and ventilate.` });
+  if (excess * 32060 > 0.5) notes.push({ level: 'warn', code: 'sulf.residual', text: `${(excess * 32060).toFixed(1)} mg/L sulfide left over — the discharge limit is 0.5 mg/L. Ferric coagulant downstream scavenges it (FeS + S⁰) and aeration oxidises it; otherwise trim the dose.` });
   if (demand > 0 && ratio > 1.5) notes.push({ level: 'info', code: 'sulf.over', text: `Dose is ${ratio.toFixed(1)}× stoichiometric — the excess is wasted reagent and residual sulfide (odour, toxicity). 1.1–1.3× is typical.` });
   if (demand > 0 && ratio < 1) {
     const left2 = ORDER.filter((m) => eq.dissolved[m] + (eq.complexed?.[m] ?? 0) > 0.05);
@@ -83,15 +117,14 @@ export function precipitateSulfide(s: Stream, p: { dose_mgL: number; volume_m3: 
   return result(eq, {
     notes,
     chemicals: kg > 0 ? [{ name: 'Sodium hydrosulfide (NaHS)', kgPerDay: kg, priceRMkg: NAHS_PRICE_RMKG }] : [],
-    energy_kWhd: p.volume_m3 * 0.01 * 24,
-    produced: { SO4: (s.Q * excess * MW.SO4 * 1000) / 1000 },
+    energy_kWhd: p.volume_m3 * 0.03 * 24,
     calcs: {
       demand: { label: 'Sulfide demand (Ni+Cu+Zn, free + complexed)', value: demand * 1000, unit: 'mmol/L', digits: 3 },
       ratio: { label: 'Dose ÷ stoichiometric', value: Number.isFinite(ratio) ? ratio : 0, unit: '×', digits: 2 },
       bound: { label: 'Metal bound as sulfide', value: ORDER.reduce((a, m) => a + (taken[m] ?? 0), 0), unit: 'mg/L', digits: 2 },
       cxLeft: { label: 'Complexed metal remaining', value: ORDER.reduce((a, m) => a + (eq.complexed?.[m] ?? 0), 0), unit: 'mg/L', digits: 3 },
       excess: { label: 'Excess sulfide (as S)', value: excess * 32060, unit: 'mg/L', digits: 1 },
-      s2: { label: 'Free S²⁻ (excess · α₂)', value: s2 * 32060, unit: 'mg/L', digits: 6 },
+      conv: { label: 'Hydroxide solids converted to sulfide', value: convertedMol * 1000, unit: 'mmol/L', digits: 3 },
       h2s: { label: 'H₂S share of excess sulfide', value: excess > 0 ? 100 * h2sFrac : 0, unit: '%', digits: 0 },
       hrt: { label: 'Reaction time', value: hrt, unit: 'min', digits: 0 },
     },

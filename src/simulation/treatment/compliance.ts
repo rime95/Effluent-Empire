@@ -9,7 +9,7 @@ import { minimumSolubilityPH, solubilityMgL } from '../chemistry/solubility';
 import { SimResult } from './graph';
 
 export type StandardId = 'A' | 'B';
-export type ParamId = 'T' | 'pH' | 'BOD5' | 'COD' | 'TSS' | 'OG' | 'NH3N' | 'Ni' | 'Cu' | 'Zn' | 'Al' | 'Fe' | 'CrVI' | 'CrIII' | 'MetalsTotal' | 'MetalsSoluble';
+export type ParamId = 'T' | 'pH' | 'BOD5' | 'COD' | 'TSS' | 'OG' | 'NH3N' | 'Ni' | 'Cu' | 'Zn' | 'Al' | 'Fe' | 'CrVI' | 'CrIII' | 'MetalsTotal' | 'MetalsSoluble' | 'Sulphide';
 
 interface Limit {
   min?: number;
@@ -48,6 +48,7 @@ export function measure(s: Stream): Record<ParamId, number> {
     CrIII: metalTotal(s, 'Cr'),
     MetalsTotal: METALS.reduce((a, m) => a + metalTotal(s, m), 0),
     MetalsSoluble: METALS.reduce((a, m) => a + metalSoluble(s, m), 0),
+    Sulphide: (s.sulfideS ?? 0) * 32060,
   };
 }
 
@@ -221,6 +222,11 @@ export function evaluate(effluent: Stream, std: StandardId, sim: SimResult | nul
           : `Regulation 11(2) caps the SUM of Cu, Mn, Ni, Sn and Zn when two or more are present (${parts} mg/L) — each metal can pass its own limit and the plant still fails. Remove ${param === 'MetalsSoluble' ? 'dissolved metal (precipitation pH, avoid re-dissolution by final pH correction)' : 'metal more completely (precipitation pH and solids separation)'}.`;
         break;
       }
+      case 'Sulphide':
+        why = pass
+          ? 'Within limit.'
+          : 'Residual sulfide from NaHS overdosing — dose closer to stoichiometric (1.1–1.3×), let ferric coagulant scavenge it (FeS + S⁰) or oxidise it in aeration. Below pH 8 much of it is toxic H₂S.';
+        break;
       case 'CrVI':
         why = pass
           ? 'Within limit.'

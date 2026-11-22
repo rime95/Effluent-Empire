@@ -120,6 +120,16 @@ export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
   const metalMgL = molMetal * 1000 * (p.coagulant === 'ferric' ? MW.Fe : MW.Al);
   if (p.coagulant === 'ferric') dosed.feSolid += metalMgL;
   else dosed.alSolid += metalMgL;
+  // ferric scavenges residual sulfide: 2 Fe³⁺ + 3 HS⁻ → 2 FeS + S⁰ + 3 H⁺ (per mol S: ⅔ mol Fe, 1 H⁺). The FeS + S⁰ joins
+  // the mineral solids; Fe stays counted in the iron balance (sulfide review 2026-11-22)
+  let scavenged = 0;
+  if (p.coagulant === 'ferric' && (dosed.sulfideS ?? 0) > 0) {
+    const feMol = mgL_to_molL(dosed.feSolid, MW.Fe);
+    scavenged = Math.min(dosed.sulfideS ?? 0, 1.5 * feMol);
+    dosed.sulfideS = (dosed.sulfideS ?? 0) - scavenged;
+    dosed.Cb -= scavenged;
+    dosed.inert += scavenged * 32060; // sulfur of the FeS + S⁰ (mg/L); its Fe stays counted in feSolid
+  }
   let out = equilibrate(dosed);
   let trimSO4 = 0;
   const chemicals = [{ name: spec.label, kgPerDay: (s.Q * p.dose_mgL) / 1000, priceRMkg: spec.priceRMkg }];
@@ -194,7 +204,7 @@ export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
   if (out.pH < s.pH - 1) notes.push({ level: 'warn', code: 'coag.alkalinity', text: `Coagulant consumed ${alkUsed.toFixed(0)} mg/L alkalinity as CaCO₃; pH fell from ${s.pH.toFixed(2)} to ${out.pH.toFixed(2)}.` });
 
   return result(out, {
-    produced: { [p.coagulant === 'ferric' ? 'Fe' : 'Al']: (s.Q * metalMgL) / 1000, SO4: (s.Q * ((p.coagulant === 'alum' ? 3 * molProduct : 0) + trimSO4) * MW.SO4 * 1000) / 1000 },
+    produced: { [p.coagulant === 'ferric' ? 'Fe' : 'Al']: (s.Q * metalMgL) / 1000, SO4: (s.Q * ((p.coagulant === 'alum' ? 3 * molProduct : 0) + trimSO4) * MW.SO4 * 1000) / 1000, mineral: (s.Q * scavenged * 32060) / 1000 },
     chemicals,
     notes,
     calcs: {

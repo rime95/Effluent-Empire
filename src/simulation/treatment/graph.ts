@@ -248,6 +248,11 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
       const def = CATALOGUE[node.kind];
       const clarifierFollows = mainEdges.length > 0 && mainEdges.every((e) => byId.get(e.to)?.kind === 'clarifier');
       const r = def.run(inlet, effectiveParams(node), { clarifierFollows });
+      // residual sulfide below pH 8 is largely H2S (pKa1 ≈ 7): flag the toxic off-gas wherever it happens
+      if ((r.out.sulfideS ?? 0) * 32060 > 0.5 && r.out.pH < 8 && !r.notes.some((x) => x.code === 'sulf.h2s')) {
+        const h2s = 1 / (1 + Math.pow(10, r.out.pH - 7));
+        r.notes.push({ level: 'warn', code: 'sulf.h2s', text: `${((r.out.sulfideS ?? 0) * 32060).toFixed(1)} mg/L residual sulfide at pH ${r.out.pH.toFixed(1)}: ${(100 * h2s).toFixed(0)} % is H₂S — toxic off-gas. Scavenge or oxidise the sulfide before lowering the pH.` });
+      }
       const sludge = r.removed ? components(r.removed, false) : zeroComponents();
       const balance = checkMassBalance({
         in: components(inlet),
@@ -345,7 +350,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
 /** Loads (mass flows) that must settle before a recycle is converged: water, solids, COD, metals, NH₄, sulfate. */
 function tearLoads(s: Stream | undefined): number[] {
   if (!s) return [0, 0, 0, 0, 0, 0, 0, 0];
-  const m = (k: 'Ni' | 'Cu' | 'Zn' | 'Cr') => s.Q * (s.dissolved[k] + s.precipitated[k]);
+  const m = (k: 'Ni' | 'Cu' | 'Zn' | 'Cr') => s.Q * metalTotal(s, k);
   return [s.Q, s.Q * tss(s), s.Q * codTotal(s), m('Ni'), m('Cu'), m('Zn'), s.Q * s.NH4N, s.Q * (s.SO4T ?? 0) * 1e5];
 }
 function tearDelta(a: Stream | undefined, b: Stream | undefined): number {
@@ -363,7 +368,7 @@ const INTENSIVE = new Set(['Q', 'pH', 'T', 'peakFactor', 'weakAcidPKa']);
 function toVec(s: Stream): number[] {
   const v = [s.Q];
   for (const [k, val] of Object.entries(s)) if (typeof val === 'number' && !INTENSIVE.has(k)) v.push(s.Q * val);
-  for (const m of ['Ni', 'Cu', 'Zn', 'Cr'] as const) v.push(s.Q * s.dissolved[m], s.Q * s.precipitated[m]);
+  for (const m of ['Ni', 'Cu', 'Zn', 'Cr'] as const) v.push(s.Q * s.dissolved[m], s.Q * s.precipitated[m], s.Q * (s.complexed?.[m] ?? 0), s.Q * (s.sulfide?.[m] ?? 0));
   return v;
 }
 function fromVec(template: Stream, v: number[]): Stream {
@@ -376,6 +381,8 @@ function fromVec(template: Stream, v: number[]): Stream {
   for (const m of ['Ni', 'Cu', 'Zn', 'Cr'] as const) {
     out.dissolved[m] = c(v[i++]);
     out.precipitated[m] = c(v[i++]);
+    out.complexed![m] = c(v[i++]);
+    out.sulfide![m] = c(v[i++]);
   }
   return out;
 }

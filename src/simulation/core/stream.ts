@@ -46,6 +46,8 @@ export interface Stream {
   complexed?: MetalMap;
   /** metal bound as metal sulfide (NiS, CuS, ZnS), mg/L as metal: insoluble at any pH (not re-equilibrated). Absent on older saves. */
   sulfide?: MetalMap;
+  /** residual dissolved sulfide H2S + HS− (S2− negligible), mol/L as S — regulated (Sulphide 0.5 mg/L); absent on older saves */
+  sulfideS?: number;
   /** coagulant-derived solids, mg/L as metal (Al in Al(OH)3, Fe in Fe(OH)3) */
   alSolid: number;
   feSolid: number;
@@ -122,6 +124,7 @@ export function emptyStream(Q = 0): Stream {
     precipitated: zeroMetals(),
     complexed: zeroMetals(),
     sulfide: zeroMetals(),
+    sulfideS: 0,
     alSolid: 0,
     feSolid: 0,
     alDissolved: 0,
@@ -152,6 +155,7 @@ export function cloneStream(s: Stream): Stream {
     precipitated: { ...s.precipitated },
     complexed: { ...(s.complexed ?? zeroMetals()) },
     sulfide: { ...(s.sulfide ?? zeroMetals()) },
+    sulfideS: s.sulfideS ?? 0,
     v50: { ...s.v50 },
     ml: s.ml ? { ...s.ml } : undefined,
     feDissolved: s.feDissolved ?? 0,
@@ -248,7 +252,7 @@ export function blend(streams: Stream[]): Stream {
     out.complexed![m] = w((s) => s.complexed?.[m] ?? 0);
     out.sulfide![m] = w((s) => s.sulfide?.[m] ?? 0);
   }
-  const scalarKeys = ['SO4T', 'alSolid', 'feSolid', 'alDissolved', 'feDissolved', 'CrVI', 'SS', 'SI', 'XS', 'XI', 'biomass', 'OGfree', 'OGemulsified', 'OGfloc', 'NH4N', 'NO3N', 'grit', 'inert', 'colloid', 'floc'] as const;
+  const scalarKeys = ['SO4T', 'alSolid', 'feSolid', 'alDissolved', 'feDissolved', 'CrVI', 'SS', 'SI', 'XS', 'XI', 'biomass', 'OGfree', 'OGemulsified', 'OGfloc', 'sulfideS', 'NH4N', 'NO3N', 'grit', 'inert', 'colloid', 'floc'] as const;
   for (const k of scalarKeys) out[k] = w((s) => s[k] ?? 0);
   // settling velocity: mass-weighted average per pool
   for (const p of POOLS) {

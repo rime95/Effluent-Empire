@@ -18,7 +18,8 @@
     "CrVI": { "label": "Chromium, hexavalent", "unit": "mg/L" },
     "CrIII": { "label": "Chromium, trivalent", "unit": "mg/L" },
     "MetalsTotal": { "label": "Cu+Mn+Ni+Sn+Zn total (Reg. 11(2))", "unit": "mg/L" },
-    "MetalsSoluble": { "label": "Cu+Mn+Ni+Sn+Zn soluble (Reg. 11(2))", "unit": "mg/L" }
+    "MetalsSoluble": { "label": "Cu+Mn+Ni+Sn+Zn soluble (Reg. 11(2))", "unit": "mg/L" },
+    "Sulphide": { "label": "Sulphide (as S)", "unit": "mg/L" }
   },
   "standards": {
     "A": {
@@ -37,7 +38,8 @@
         "Al": { "max": 10 },
         "Fe": { "max": 1.0 },
         "CrVI": { "max": 0.05 },
-        "CrIII": { "max": 0.2 }
+        "CrIII": { "max": 0.2 },
+        "Sulphide": { "max": 0.5 }
       }
     },
     "B": {
@@ -56,7 +58,8 @@
         "Al": { "max": 15 },
         "Fe": { "max": 5.0 },
         "CrVI": { "max": 0.05 },
-        "CrIII": { "max": 1.0 }
+        "CrIII": { "max": 1.0 },
+        "Sulphide": { "max": 0.5 }
       }
     }
   },

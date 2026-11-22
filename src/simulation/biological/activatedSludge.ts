@@ -183,6 +183,9 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
     out.OGfree = s.OGfree * (1 - ogFrac);
     out.OGemulsified = s.OGemulsified * (1 - ogFrac);
     out.OGfloc = (s.OGfloc ?? 0) * (1 - ogFrac);
+    // residual sulfide is oxidised to sulfate in the aerated basin (HS− + 2 O2 → SO4 2− + H+): SO4T carries the charge
+    out.sulfideS = 0;
+    out.SO4T = (s.SO4T ?? 0) + (s.sulfideS ?? 0);
 
     // CO2: respiration produces it, the aeration air strips it (steady-state balance, aeration.ts / acidBase.ts)
     const heteroO2 = bio.washout ? 0 : S0 - bio.S - COD_PER_VSS * (bio.PxH + bio.Pxd); // g/m³
@@ -277,7 +280,7 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
   return result(out, {
     consumed: { COD: kg(codConsumed), OG: kg(ogDeg) },
     // degraded oil enters the COD balance as substrate; nitrifiers fix COD from CO2
-    produced: { COD: kg(COD_PER_VSS * bio.PxN + KINETICS.COD_PER_OG * ogDeg), ...(limeInert > 0 ? { mineral: kg(limeInert) } : {}) },
+    produced: { COD: kg(COD_PER_VSS * bio.PxN + KINETICS.COD_PER_OG * ogDeg), ...(limeInert > 0 ? { mineral: kg(limeInert) } : {}), ...((s.sulfideS ?? 0) > 0 ? { SO4: kg((s.sulfideS ?? 0) * MW.SO4 * 1000) } : {}) },
     removed,
     energy_kWhd: o2 / KINETICS.aerationEfficiency + p.volume_m3 * 0.003 * 24,
     ...(doseMol > 0 ? { chemicals: [{ name: alk.label, kgPerDay: (Q * doseMol * alk.mw) / alk.purity, priceRMkg: alk.priceRMkg }] } : {}),

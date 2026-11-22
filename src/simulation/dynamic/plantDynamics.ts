@@ -204,6 +204,7 @@ export function stepAS(st: ASState, inlet: Stream, p: { V: number; srt: number; 
   out.OGemulsified *= 0.1;
   for (const m of METALS) {
     out.precipitated[m] *= carry;
+    if (out.sulfide) out.sulfide[m] *= carry;
   }
   out.ml = undefined;
   // CO2 balance (knowledge/chemistry/acid_base_chemistry.md). Respiration CO2 from heterotroph growth only — aerobic and

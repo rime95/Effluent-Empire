@@ -62,18 +62,43 @@ describe('sulfide dosing', () => {
     expect(low.sulfide!.Ni).toBeCloseTo(r.out.sulfide!.Ni, 6);
   });
   it('releases acid (pH falls) and warns about H2S at low pH; fresh sulfide is colloidal', () => {
-    const s = feed(20, 0);
-    const r = precipitateSulfide(s, { dose_mgL: 40, volume_m3: 3 });
+    const s = setCbForPH(feed(20, 0), 7); // free Ni
+    const r = precipitateSulfide(s, { dose_mgL: 19, volume_m3: 3 });
     expect(r.out.pH).toBeLessThan(s.pH);
     expect(r.out.v50.precipitate).toBeLessThan(0.2);
     const acid = setCbForPH(feed(5, 0), 6.5);
     expect(precipitateSulfide(acid, { dose_mgL: 50, volume_m3: 3 }).notes.some((n) => n.code === 'sulf.h2s')).toBe(true);
   });
-  it('conserves metal and puts excess sulfur in the sulfate balance', () => {
+  it('conserves metal and sulfur: dosed S = sulfide-bound + residual sulfide', () => {
     const s = feed(8, 8);
     const r = precipitateSulfide(s, { dose_mgL: 40, volume_m3: 3 });
     expect(components(r.out).Ni).toBeCloseTo(components(s).Ni, 9);
-    expect(r.produced.SO4).toBeGreaterThan(0);
+    const boundMol = (r.out.sulfide!.Ni) / MW.Ni / 1000;
+    expect(boundMol + (r.out.sulfideS ?? 0)).toBeCloseTo(40 / NAHS_MW / 1000, 9);
+  });
+
+  it('breaking a complex releases acid (pH and alkalinity fall) — review fix', () => {
+    const s = feed(0, 20);
+    const dose = sulfideDemand_molL(s) * NAHS_MW * 1000;
+    const r = precipitateSulfide(s, { dose_mgL: dose, volume_m3: 3 });
+    expect(r.out.pH).toBeLessThan(s.pH);
+  });
+
+  it('converting hydroxide solids to sulfide releases OH− (pH rises) and consumes extra NaHS', () => {
+    const s = feed(20, 0); // at pH 9.5 almost all Ni is Ni(OH)2
+    const r = precipitateSulfide(s, { dose_mgL: 19, volume_m3: 5 });
+    expect(r.calcs.conv.value).toBeGreaterThan(0);
+    expect(r.out.pH).toBeGreaterThan(s.pH);
+  });
+
+  it('residual sulfide is regulated (0.5 mg/L): ferric scavenges it, aeration oxidises it to sulfate', async () => {
+    const { coagulate } = await import('../../src/simulation/chemistry/coagulation');
+    const { measure } = await import('../../src/simulation/treatment/compliance');
+    const r = precipitateSulfide(setCbForPH(feed(2, 0), 9), { dose_mgL: 60, volume_m3: 3 });
+    expect(measure(r.out).Sulphide).toBeGreaterThan(0.5);
+    expect(r.notes.some((n) => n.code === 'sulf.residual')).toBe(true);
+    const c = coagulate(r.out, { coagulant: 'ferric', dose_mgL: 150, flocTime_min: 15, pHset: 9 });
+    expect(measure(c.out).Sulphide).toBeLessThan(measure(r.out).Sulphide);
   });
 });
 

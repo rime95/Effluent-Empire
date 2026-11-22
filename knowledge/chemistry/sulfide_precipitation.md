@@ -51,3 +51,25 @@ Freshly precipitated metal sulfide is **colloidal**, v₅₀ ≈ 0.05 m/h. A cla
 - **Feed:** Ni 15–40 mg/L, of which 45–75 % is complexed. Standard B.
 - **Why hydroxide fails:** the hydroxide reference train leaves the complexed Ni in solution, well above the 1.0 mg/L limit.
 - **Reference design:** EQ → hydroxide precipitation pH 9.8 → sulfide (NaHS at 1.3× the complexed + residual metal demand) → ferric coagulation (pH held at 9.8) with polymer → clarifier → sand filter → pH adjustment.
+
+## Review changes (industrial-chemist, 2026-11-22)
+- **Charge on complex breaking (was a sign error).** Complexed metal carries no charge in the model, so the freed ligand is taken to keep the metal's former 2 equivalents as an anion: Cb −2 per mol broken. Net with the Na⁺ dosed: −1 eq/mol, which is acid released, as for free metal. Exact when the ligand stays deprotonated (pH above about 6.4 for citrate).
+- **Hydroxide solids convert.**
+  - Remaining sulfide converts existing M(OH)₂ (unstable against MS when HS⁻ is in excess), up to 50 % × (1 − e^(−t/20 min)) of it. GAME MODEL surface conversion.
+  - M(OH)₂ + HS⁻ → MS + OH⁻ + H₂O releases OH⁻, so pH rises.
+  - Sulfide dosed onto unclarified water therefore consumes extra NaHS.
+- **Residual sulfide is a pollutant.**
+  - `Stream.sulfideS` (mol/L S) is blended and split like sulfate.
+  - It is regulated as **Sulphide 0.50 mg/L (Standards A and B, Fifth Schedule)**, now in `standards.json`.
+  - Excess NaHS is pH-neutral (Na⁺ balanced by HS⁻).
+  - **Ferric scavenges it:** 2 Fe³⁺ + 3 HS⁻ → 2 FeS + S⁰ + 3 H⁺, so ⅔ mol Fe and 1 H⁺ per mol S. The sulfur joins the mineral solids and the Fe stays in the iron balance.
+  - **Activated sludge oxidises it to sulfate:** HS⁻ + 2 O₂ → SO₄²⁻ + H⁺.
+  - **H₂S warning:** any unit leaving more than 0.5 mg/L at pH < 8 raises one.
+- **Achievable residual for complexes:** 0.15 mg/L per metal, so stacking reactors no longer drives complexed metal to zero. EDTA chelates of Ni/Zn are **not** broken by sulfide (conditional log K ≈ 18). The model assumes the weak ligands of electroless baths; EDTA is not modelled.
+- **Not modelled:**
+  - Cr(VI) + HS⁻ (consumes about 1.5 mol S per Cr; reduce Cr(VI) first, as the reference design does);
+  - NH₃ released from ammine complexes;
+  - pK₁ temperature dependence (fixed at 7.0).
+
+  Ksp values are unused; residuals are capture-limited. Modern pK₂ is 17–19, so a Ksp-based residual would need an HS⁻ basis.
+- **Recycle solver and dynamic replay** now carry the complexed and sulfide metal maps.
