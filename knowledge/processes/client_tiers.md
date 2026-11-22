@@ -40,3 +40,26 @@ GAME MODEL multipliers (`verify:` against real tender spreads). These are all on
   - lab results next week;
   - load the job's pricing reference design (tier / variant / base train) into the Studio.
 - **Intended use.** It is for checking new content. Use "Save as new slot" first to keep a real company clean.
+
+## Flagship ESG tier (added 2026-11-22)
+A multinational's showcase plant for its ESG report. `TIERS.flagship` in `customers.ts`; terms in `requirements.ts`.
+
+| Unlock | Contract value | OPEX cap | Contract terms | ESG bonus |
+|---|---|---|---|---|
+| Reputation 70 + water reclaim | × 5 | × 4 | Standard A; standby; ZLD or a reuse target; effluent ≤ x % of every Std A limit; net energy ≤ y kWh/m³; sludge ≤ z kg DS/m³ | 10 % of the contract value, split equally over the green terms |
+
+All multipliers are GAME MODEL, `verify:`. When eligible, 15 % of new enquiries are flagship (own RNG stream `seed·104729 + 61`), checked before the MNC draw.
+
+- **Design basis.**
+  - With the evaporator researched, any industry tries a zero-liquid-discharge reference first. It works on food and semiconductor feeds, whose base trains cannot beat Standard A.
+  - Otherwise the MNC water design is used (reuse split or ZLD).
+  - If that design cannot meet Standard A, or cannot beat it with margin, the job is offered as an MNC job.
+- **Targets are set from the chosen reference design** × `FLAGSHIP_SLACK` 1.2, rounded up, so every flagship job is winnable:
+  - **Effluent factor** (only when something is discharged): the worst value ÷ Std A limit over every parameter with a maximum, temperature and pH excluded, with Reg. 11(2) combined metals counted where they apply. It is clamped to 0.3–0.9; a design that can't get under 0.9 isn't a flagship.
+  - **Net energy:** (plant kWh/d − biogas CHP kWh/d) ÷ total inflow.
+  - **Sludge:** `sludgeKgD` ÷ total inflow, in kg dry solids per m³.
+- **ESG bonus.**
+  - The green terms are effluent factor, energy, sludge, reuse and ZLD. Each one beaten by 10 % (a cap at ≤ 90 % of the limit, a reuse target by +10 %, ZLD when met) earns its equal share of the bonus pool.
+  - The bonus is paid with the retention at a passed commissioning and booked as "ESG bonus".
+  - Beating every green term adds +5 reputation.
+- **Names.** The multinational list, labelled "Flagship ESG project".

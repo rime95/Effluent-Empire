@@ -8,7 +8,7 @@ import { GENERIC_NAMES } from '../../src/game/clientNames';
 import { REFERENCE } from '../../src/game/referenceDesigns';
 import { linearGraph, simulate } from '../../src/simulation/treatment/graph';
 import { evaluate } from '../../src/simulation/treatment/compliance';
-import { evaluateRequirements } from '../../src/game/requirements';
+import { esgBonus, evaluateRequirements } from '../../src/game/requirements';
 import type { TechId } from '../../src/game/tech';
 
 const ALL: TechId[] = ['daf', 'dryer', 'uf', 'sulfide', 'ionExchange', 'uasb', 'ro', 'reclaim', 'electrowinning', 'aop', 'mbr', 'evaporator'];
@@ -80,7 +80,7 @@ describe('client tiers', () => {
   });
 
   it('fictional-names setting: every real name has a unique alias that is not a generic name', () => {
-    const all = Object.values(REAL_CLIENTS).flatMap((byInd) => Object.values(byInd).flat());
+    const all = [...new Set(Object.values(REAL_CLIENTS).flatMap((byInd) => Object.values(byInd).flat()))]; // flagship shares the MNC list
     const aliases = all.map(fictionalAlias);
     expect(new Set(aliases).size).toBe(all.length);
     const generic = new Set(Object.values(GENERIC_NAMES).flat());
@@ -91,5 +91,41 @@ describe('client tiers', () => {
     const n = all[0];
     expect(brandText(`Advance payment (30 %): ${n} (second site)`, true)).toBe(`Advance payment (30 %): ${fictionalAlias(n)} (second site)`);
     expect(brandText(`Contract with ${n}`, false)).toBe(`Contract with ${n}`);
+  });
+});
+
+describe('flagship ESG tier', () => {
+  const TECH = ['daf', 'dryer', 'uf', 'sulfide', 'ionExchange', 'uasb', 'ro', 'reclaim', 'electrowinning', 'aop', 'mbr', 'evaporator'] as const;
+  it('unlocks at reputation 70 with the reclaim system', () => {
+    expect(eligibleTiers(65, [...TECH])).not.toContain('flagship');
+    expect(eligibleTiers(70, [...TECH])).toContain('flagship');
+  });
+  for (const industry of ['plating', 'food', 'semiconductor'] as const)
+    it(`${industry}: green targets (better than Std A, energy, sludge) are met by the reference design, and pay an ESG bonus pool`, () => {
+      let flag = 0;
+      for (let seed = 1; seed <= 6; seed++) {
+        const e = generateEnquiry(seed, 1, 80, { tech: [...TECH], force: { tier: 'flagship', industry } });
+        const d = tierDesign('flagship', industry, e.trueStream, [...TECH], seed);
+        expect(e.tier).toBe(d.tier);
+        if (d.tier !== 'flagship') continue; // feed can't beat Std A: offered as an MNC job
+        flag++;
+        expect(e.standard).toBe('A');
+        expect(e.esgBonusRM).toBeGreaterThan(0);
+        expect(e.requirements?.energyMax_kWhm3).toBeGreaterThan(0);
+        expect(e.requirements?.sludgeMax_kgm3).toBeGreaterThan(0);
+        if (e.requirements?.effluentFactor !== undefined) expect(e.requirements.effluentFactor).toBeLessThan(1);
+        const sim = simulate(d.graph, e.trueStream);
+        expect(evaluate(sim.effluent!, 'A', sim).pass).toBe(true);
+        expect(evaluateRequirements(sim, e.requirements).filter((r) => !r.pass).map((r) => r.why)).toEqual([]);
+      }
+      expect(flag).toBeGreaterThanOrEqual(3);
+    });
+  it('ESG bonus: each green term beaten by 10 % earns its share', () => {
+    const checks = [
+      { id: 'energyMax_kWhm3', label: 'E', value: 0.8, limit: 1, unit: '', pass: true, why: '' },
+      { id: 'sludgeMax_kgm3', label: 'S', value: 0.95, limit: 1, unit: '', pass: true, why: '' },
+      { id: 'standby', label: 'SB', value: 0, limit: 0, unit: '', pass: true, why: '' },
+    ] as Parameters<typeof esgBonus>[0];
+    expect(esgBonus(checks, 100_000)).toEqual({ paid: 50_000, earned: ['E'], total: 2 });
   });
 });

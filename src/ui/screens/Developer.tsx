@@ -106,7 +106,7 @@ export function Developer({ go }: { go: (s: Screen) => void }) {
             </button>
           ))}
           <span className="muted" style={{ fontSize: 12, marginLeft: 12 }}>Client tier</span>
-          {(['basic', 'medium', 'mnc'] as ClientTier[]).map((t) => (
+          {(['basic', 'medium', 'mnc', 'flagship'] as ClientTier[]).map((t) => (
             <button key={t} className={`btn sm ${tier === t ? 'primary' : 'ghost'}`} onClick={() => setTier(t)}>
               {TIER_LABEL[t]}
             </button>

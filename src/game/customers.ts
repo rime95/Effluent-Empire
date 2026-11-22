@@ -16,7 +16,7 @@ import { ClientVariant, VARIANTS, VARIANT_CHANCE, VARIANT_PREMIUM, eligibleVaria
 import { ClientTier, REAL_CLIENTS } from './realClients';
 import { evaluate } from '../simulation/treatment/compliance';
 import { ProcessGraph, SimResult } from '../simulation/treatment/graph';
-import { evaluateRequirements } from './requirements';
+import { effluentRatioToA, evaluateRequirements, netEnergy_kWhm3, sludge_kgm3 } from './requirements';
 import { TrainSpec, reuseGraph, zldGraph } from './referenceDesigns';
 
 export interface Enquiry {
@@ -43,6 +43,8 @@ export interface Enquiry {
   requirements?: Requirements;
   /** client tier (missing = basic, legacy saves) */
   tier?: ClientTier;
+  /** flagship ESG bonus pool, RM: paid at commissioning in proportion to the green terms beaten by 10 % */
+  esgBonusRM?: number;
   /** declared datasheet of each segregated side stream (trueStream.side), by side id */
   declaredSide?: Record<string, Datasheet>;
 }
@@ -55,12 +57,22 @@ export const TIERS = {
   medium: { reputation: 25, chance: 0.3, valueMult: 1.8, opexMult: 1.5 },
   /** needs the water reclaim system researched: MNC contracts carry a reuse target */
   mnc: { reputation: 50, tech: 'reclaim' as TechId, chance: 0.25, valueMult: 3, opexMult: 3, reuseSplits: [70, 50, 35] },
+  /**
+   * Flagship ESG project: a multinational's showcase plant. Huge budget, MNC water terms plus effluent better than
+   * Standard A, an energy cap and a sludge cap — each set from the reference design × FLAGSHIP_SLACK so the job is
+   * winnable — and an ESG bonus (share of the contract value) paid at commissioning for each green term beaten by 10 %.
+   */
+  flagship: { reputation: 70, tech: 'reclaim' as TechId, chance: 0.15, valueMult: 5, opexMult: 4, esgBonusFrac: 0.1 },
 } as const;
+
+/** flagship targets = the reference design's own figure × this slack (GAME MODEL) */
+export const FLAGSHIP_SLACK = 1.2;
 
 export function eligibleTiers(reputation: number, tech: readonly TechId[]): ClientTier[] {
   const t: ClientTier[] = [];
   if (reputation >= TIERS.medium.reputation) t.push('medium');
   if (reputation >= TIERS.mnc.reputation && tech.includes(TIERS.mnc.tech)) t.push('mnc');
+  if (reputation >= TIERS.flagship.reputation && tech.includes(TIERS.flagship.tech)) t.push('flagship');
   return t;
 }
 
@@ -87,6 +99,30 @@ export interface TierDesign {
  * reuseMin = split × UF recovery (0.92) × RO recovery (0.75) × 0.95 margin, rounded down to 5 %.
  */
 export function tierDesign(tier: Exclude<ClientTier, 'basic'>, industry: IndustryId, s: Stream, tech: readonly TechId[], seed: number): TierDesign {
+  if (tier === 'flagship') {
+    // with the evaporator researched, any industry's flagship can be zero liquid discharge (nothing to beat Std A with);
+    // otherwise the MNC water design. Green targets are set from what the chosen design achieves; offered as an MNC job
+    // if it can't beat Standard A.
+    let base: TierDesign | undefined;
+    if (tech.includes('evaporator')) {
+      const graph = withStandby(zldGraph(REFERENCE[industry](s), s.Q));
+      const ref = simulate(graph, s);
+      const req: Requirements = { zld: true, standby: true };
+      if (ref.ok && evaluateRequirements(ref, req).every((r) => r.pass)) base = { tier: 'mnc', graph, ref, requirements: req, standard: 'A' };
+    }
+    base ??= tierDesign('mnc', industry, s, tech, seed);
+    if (base.tier !== 'mnc' || base.standard !== 'A') return base;
+    const { ratio } = effluentRatioToA(base.ref);
+    const discharges = !!base.ref.effluent && base.ref.effluent.Q > 1e-6;
+    if (discharges && ratio * FLAGSHIP_SLACK > 0.9) return base;
+    const up = (x: number, step: number) => Math.ceil(x / step) * step;
+    const green: Requirements = {
+      ...(discharges ? { effluentFactor: Math.max(0.3, up(ratio * FLAGSHIP_SLACK, 0.05)) } : {}),
+      energyMax_kWhm3: up(netEnergy_kWhm3(base.ref) * FLAGSHIP_SLACK, 0.05),
+      sludgeMax_kgm3: up(Math.max(0.005, sludge_kgm3(base.ref) * FLAGSHIP_SLACK), 0.005),
+    };
+    return { ...base, tier: 'flagship', requirements: { ...base.requirements, ...green } };
+  }
   const train = REFERENCE[industry](s);
   const Q = s.Q;
   const cands: { tier: ClientTier; graph: () => ProcessGraph; req: Requirements }[] = [];
@@ -154,7 +190,8 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
   else if (opts.tech && !forcedVariant) {
     const tr = createRng(seed * 104729 + 31);
     const open = eligibleTiers(reputation, opts.tech);
-    if (open.includes('mnc') && tr.chance(TIERS.mnc.chance)) tier = 'mnc';
+    if (open.includes('flagship') && createRng(seed * 104729 + 61).chance(TIERS.flagship.chance)) tier = 'flagship';
+    else if (open.includes('mnc') && tr.chance(TIERS.mnc.chance)) tier = 'mnc';
     else if (open.includes('medium') && tr.chance(TIERS.medium.chance)) tier = 'medium';
   }
 
@@ -208,6 +245,7 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
     ...(variant ? { variant: { id: variant.id, label: variant.label, brief: variant.brief } } : {}),
     ...(requirements ? { requirements } : {}),
     ...(tier !== 'basic' ? { tier } : {}),
+    ...(tier === 'flagship' ? { esgBonusRM: Math.round((contractValue * TIERS.flagship.esgBonusFrac) / 1000) * 1000 } : {}),
     ...(ww.stream.side?.length
       ? { declaredSide: Object.fromEntries(ww.stream.side.map((sd, i) => [sd.id, declaredDatasheet(sd.stream, createRng(seed * 7727 + i), false)])) }
       : {}),

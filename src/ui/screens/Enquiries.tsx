@@ -14,12 +14,16 @@ function terms(r?: Requirements): string[] {
   if (r.reuseMin !== undefined) t.push(`≥ ${Math.round(r.reuseMin * 100)} % of the wastewater back to the process on the reuse spec`);
   if (r.zld) t.push('zero liquid discharge (water recovered, concentrate hauled)');
   if (r.standby) t.push('duty/standby on every dosing pump and blower');
+  if (r.effluentFactor !== undefined) t.push(`effluent at ≤ ${Math.round(r.effluentFactor * 100)} % of every Standard A limit`);
+  if (r.energyMax_kWhm3 !== undefined) t.push(`net energy ≤ ${r.energyMax_kWhm3.toFixed(2)} kWh/m³`);
+  if (r.sludgeMax_kgm3 !== undefined) t.push(`sludge ≤ ${r.sludgeMax_kgm3.toFixed(3)} kg DS/m³`);
   return t;
 }
 
 const TIER_BRIEF: Record<string, string> = {
   medium: 'A large listed company: bigger budget, its own engineering standard (N+1 machines) and Standard A wherever it can be met.',
   mnc: 'A multinational with a group sustainability target: a generous budget, but water reuse or zero discharge and full redundancy are contract terms.',
+  flagship: 'A multinational showcase plant for its ESG report: the biggest budget in the game, and a green scorecard on top of water reuse or zero discharge — effluent well inside Standard A, low energy and little sludge. Beat each green target by 10 % for its share of the ESG bonus.',
 };
 import { brand } from '../prefs';
 
@@ -52,7 +56,7 @@ export function Enquiries({ go }: { go: (s: Screen) => void }) {
               <div className="company">
                 {brand(e.company)}
                 {e.variant && <span className="pill warn" style={{ marginLeft: 6, fontSize: 9 }}>TOUGH JOB</span>}
-                {e.tier && <span className={`pill ${e.tier === 'mnc' ? 'pass' : 'info'}`} style={{ marginLeft: 6, fontSize: 9 }}>{TIER_LABEL[e.tier].toUpperCase()}</span>}
+                {e.tier && <span className={`pill ${e.tier === 'flagship' ? 'warn' : e.tier === 'mnc' ? 'pass' : 'info'}`} style={{ marginLeft: 6, fontSize: 9 }}>{TIER_LABEL[e.tier].toUpperCase()}</span>}
               </div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {t.description}
@@ -128,6 +132,7 @@ export function Enquiries({ go }: { go: (s: Screen) => void }) {
                 </div>
               )}
               {e.tier && <div className="note info"><b>{TIER_LABEL[e.tier]}.</b> {TIER_BRIEF[e.tier]}</div>}
+              {e.esgBonusRM ? <div className="note info" style={{ fontSize: 12, borderColor: "var(--ok)" }}>ESG bonus pool: <b>{rm(e.esgBonusRM)}</b>, paid at commissioning for each green target beaten by 10 %.</div> : null}
               {terms(e.requirements).length > 0 && (
                 <div className="note warn">
                   <b>Contract terms (checked at commissioning):</b> {terms(e.requirements).join('; ')}.

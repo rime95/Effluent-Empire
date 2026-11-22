@@ -363,8 +363,9 @@ export function stepWeek(state: GameState): GameState {
       // legacy builds (paid up front) receive the 60 % here; new builds were paid progressively
       if (rep.milestone > 0 && !p.building.progress) s = book(s, `Mechanical completion (60 %): ${p.enquiry.company}`, rep.milestone, 'project');
       if (rep.pass) s = book(s, `Retention released (10 %, net of LDs): ${p.enquiry.company}`, rep.payment, 'project');
+      if (rep.pass && rep.esgBonus) s = book(s, `ESG bonus: ${p.enquiry.company}`, rep.esgBonus, 'project');
       s = { ...s, reputation: s.reputation + rep.reputationDelta };
-      const paid = p.paid + rep.milestone + (rep.pass ? rep.payment : 0);
+      const paid = p.paid + rep.milestone + (rep.pass ? rep.payment + (rep.esgBonus ?? 0) : 0);
       const builtGraph = p.building.graph ?? p.graph;
       const omOffer = rep.pass
         ? { quote: omFeeQuote({ capex: p.spent.capex, Q: totalQ(p.enquiry.trueStream), std: p.enquiry.standard, reputation: s.reputation, opexRMd: rep.opexRMd, graph: builtGraph }), weeks: OM.contractWeeks }

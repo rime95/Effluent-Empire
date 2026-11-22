@@ -8,7 +8,7 @@ import { applicableInstruments, hasInst, instCapex } from '../simulation/treatme
 import { Note } from '../simulation/treatment/types';
 import { Enquiry, PAYMENT } from './customers';
 import { Datasheet, LabTestId, designBasis } from './lab';
-import { ReqCheck, evaluateRequirements } from './requirements';
+import { ReqCheck, esgBonus, evaluateRequirements } from './requirements';
 import { createRng } from './rng';
 import { SETPOINTS } from './incidents';
 import type { FeeQuote } from './operations';
@@ -43,6 +43,8 @@ export interface CommissionReport {
   milestone: number;
   /** retention released on acceptance, net of liquidated damages */
   payment: number;
+  /** flagship ESG bonus earned on acceptance, RM (absent = none) */
+  esgBonus?: number;
   lateWeeks: number;
   reputationDelta: number;
   messages: string[];
@@ -241,6 +243,7 @@ export function commission(p: Project, week: number): CommissionReport {
   const lateWeeks = Math.max(0, week - deadline);
   let rep = 0;
   let payment = 0;
+  let esg = 0;
   if (pass) {
     const ld = Math.min(0.2, lateWeeks * LD_RATE_PER_WEEK) * e.contractValue;
     payment = e.contractValue * PAYMENT.retention - ld;
@@ -259,6 +262,15 @@ export function commission(p: Project, week: number): CommissionReport {
       rep -= 5;
       messages.push(`Operating cost RM ${sim.opexRMd.toFixed(0)}/d exceeds the customer's RM ${e.opexLimitRMd}/d expectation (−5).`);
     }
+    if (e.esgBonusRM) {
+      const b = esgBonus(requirements, e.esgBonusRM);
+      esg = b.paid;
+      messages.push(b.paid > 0 ? `ESG bonus: ${b.earned.length} of ${b.total} green targets beaten by 10 % (${b.earned.join(', ')}) — RM ${b.paid.toLocaleString()}.` : `No ESG bonus: none of the ${b.total} green targets was beaten by 10 %.`);
+      if (b.earned.length === b.total) {
+        rep += 5;
+        messages.push('Every green target beaten — a showcase plant for the client (+5).');
+      }
+    }
     if (p.attempts > 0) {
       rep -= 3 * p.attempts;
       messages.push(`${p.attempts} failed commissioning attempt(s) before success (−${3 * p.attempts}).`);
@@ -273,5 +285,5 @@ export function commission(p: Project, week: number): CommissionReport {
     for (const r of requirements.filter((x) => !x.pass)) messages.push(`${r.label}: ${r.why}`);
   }
   const milestone = p.built ? 0 : e.contractValue * PAYMENT.mechanicalCompletion;
-  return { week, attempt: p.attempts + 1, pass, compliance, requirements, stages, capexCharged, totalCapex: p.spent.capex + capexCharged, opexRMd: sim.opexRMd, milestone, payment, lateWeeks, reputationDelta: rep, messages, errors: sim.errors };
+  return { week, attempt: p.attempts + 1, pass, compliance, requirements, stages, capexCharged, totalCapex: p.spent.capex + capexCharged, opexRMd: sim.opexRMd, milestone, payment, ...(esg > 0 ? { esgBonus: esg } : {}), lateWeeks, reputationDelta: rep, messages, errors: sim.errors };
 }
