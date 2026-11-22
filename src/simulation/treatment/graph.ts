@@ -7,7 +7,7 @@
  * - recycle loops are solved by successive substitution on tear streams (knowledge/design/recycle_streams.md).
  */
 import { BalanceCheck, Components, addComponents, checkMassBalance, components, zeroComponents } from '../core/massBalance';
-import { METALS, POOLS, Stream, blend, cloneStream, codTotal, emptyStream, metalTotal, poolMass, tdsTotal, tss } from '../core/stream';
+import { METALS, POOLS, Stream, blend, cloneStream, codTotal, emptyStream, metalTotal, poolMass, tdsTotal, tss , mainInlet, totalInfluent } from '../core/stream';
 import standardsJson from '../regulations/standards.json';
 import { effectiveParams, instCapex, type InstKey } from './instrumentation';
 import { BACKWASH_FRACTION, defaultSludgeFraction, removedDryKgD, splitSludge } from '../physical/sludge';
@@ -115,7 +115,10 @@ export function validateGraph(g: ProcessGraph): Note[] {
   const errs: Note[] = [];
   const inf = g.nodes.filter((n) => n.kind === 'influent');
   const dis = g.nodes.filter((n) => n.kind === 'discharge');
-  if (inf.length !== 1) errs.push({ level: 'error', code: 'graph.influent', text: 'The design needs exactly one raw-wastewater inlet.' });
+  const mainInf = inf.filter((n) => !n.params.source);
+  if (mainInf.length !== 1) errs.push({ level: 'error', code: 'graph.influent', text: 'The design needs exactly one main raw-wastewater inlet.' });
+  const srcs = inf.map((n) => String(n.params.source ?? 'main'));
+  if (new Set(srcs).size !== srcs.length) errs.push({ level: 'error', code: 'graph.influentDup', text: 'Each raw-wastewater stream has exactly one inlet on the drawing.' });
   if (dis.length !== 1) errs.push({ level: 'error', code: 'graph.discharge', text: 'The design needs exactly one final discharge point.' });
   const byId = new Map(g.nodes.map((n) => [n.id, n]));
   for (const e of g.edges) {
@@ -155,7 +158,7 @@ export function validateGraph(g: ProcessGraph): Note[] {
     const mainOuts = g.edges.filter((e) => e.from === n.id && e.fromPort !== 'sludge' && e.fromPort !== 'ras').length;
     const zld = n.kind === 'discharge' && g.nodes.some((x) => isReuse(x));
     if (n.kind !== 'influent' && ins === 0 && !zld) errs.push({ level: 'error', code: 'graph.noInlet', text: `${n.tag ?? n.kind} has no inlet pipe.` });
-    if (n.kind !== 'discharge' && n.kind !== 'disposal' && mainOuts === 0) errs.push({ level: 'error', code: 'graph.noOutlet', text: `${n.tag ?? n.kind} has no outlet pipe.` });
+    if (n.kind !== 'discharge' && n.kind !== 'disposal' && mainOuts === 0) errs.push({ level: 'error', code: 'graph.noOutlet', text: n.kind === 'influent' ? `${n.tag ?? 'Raw-wastewater inlet'} has no outlet pipe — that stream has nowhere to go.` : `${n.tag ?? n.kind} has no outlet pipe.` });
   }
   return errs;
 }
@@ -230,9 +233,11 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
     const outEdges = g.edges.filter((e) => e.from === id);
     let inlet: Stream;
     if (node.kind === 'influent') {
-      inlet = cloneStream(influent);
-      sysIn = components(inlet);
-      res.influentQ = inlet.Q;
+      const src = node.params.source ? String(node.params.source) : undefined;
+      const sideS = src ? influent.side?.find((x) => x.id === src)?.stream : undefined;
+      inlet = sideS ? cloneStream(sideS) : src ? emptyStream(0) : mainInlet(influent);
+      sysIn = addComponents(sysIn, components(inlet));
+      res.influentQ = (res.influentQ ?? 0) + inlet.Q;
       res.capex += instCapex(node); // inlet flow meter
     } else {
       // RAS lines are internal to the activated-sludge model (MLSS retention), shown but not re-added as flow
@@ -367,8 +372,9 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
       // no flow reaches this unit (e.g. first pass of a recycle loop): register it with zero duty
       const def = CATALOGUE[node.kind];
       // equipment is still built: CAPEX from its parameters, evaluated on the plant influent as a sizing proxy
-      const proxy = def.run(cloneStream(influent), node.params, { clarifierFollows: false });
-      const capex = def.capex(node.params, influent, proxy) + instCapex(node);
+      const total = totalInfluent(influent);
+      const proxy = def.run(cloneStream(total), node.params, { clarifierFollows: false });
+      const capex = def.capex(node.params, total, proxy) + instCapex(node);
       res.capex += capex;
       res.footprint += def.footprint(node.params);
       res.nodes[id] = { node, inlet, result: { ...proxy, out: emptyStream(0), removed: null, chemicals: [], energy_kWhd: 0, calcs: {}, notes: [{ level: 'warn', code: 'unit.dry', text: 'No flow reaches this unit — it is built but idle.' }] }, capex, footprint: def.footprint(node.params), balance: checkMassBalance({ in: zeroComponents(), out: zeroComponents(), sludge: zeroComponents(), gas: zeroComponents(), consumed: zeroComponents(), produced: zeroComponents() }), sludgeKgD: 0, opexRMd: 0 };
@@ -455,6 +461,11 @@ export function simulate(gIn: ProcessGraph, influent: Stream): SimResult {
   const errors = validateGraph(g);
   for (const n of loose) errors.push({ level: 'warn', code: 'graph.loose', text: `${n.tag ?? n.kind} is not connected — it is left out of the calculation (and the build) until you pipe it in.` });
   if (!(influent.Q > 0)) errors.push({ level: 'error', code: 'graph.noFlow', text: 'Influent flow must be greater than zero.' });
+  // every segregated stream needs its inlet on the drawing, and every side inlet must belong to a stream of this plant
+  for (const sd of influent.side ?? [])
+    if (!g.nodes.some((n) => n.kind === 'influent' && n.params.source === sd.id)) errors.push({ level: 'error', code: 'graph.sideMissing', text: `The ${sd.label} stream has no inlet on the drawing.` });
+  for (const n of g.nodes.filter((x) => x.kind === 'influent' && x.params.source))
+    if (!influent.side?.some((sd) => sd.id === n.params.source)) errors.push({ level: 'error', code: 'graph.sideUnknown', text: `${n.tag ?? 'Inlet'} is not a stream of this plant — delete it.` });
   if (errors.some((e) => e.level === 'error')) return emptyResult(errors);
   const flowG: ProcessGraph = { nodes: g.nodes, edges: g.edges.filter((e) => e.fromPort !== 'ras') };
   const tears = findTears(flowG);

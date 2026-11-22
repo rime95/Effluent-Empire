@@ -12,7 +12,7 @@
  *     The client pays for those instruments only.
  *  Everything else in the draft is operator-funded.
  */
-import { Stream, cloneStream } from '../simulation/core/stream';
+import { Stream , mapInlets } from '../simulation/core/stream';
 import { evaluate } from '../simulation/treatment/compliance';
 import { PNode, ProcessGraph, SimResult, simulate } from '../simulation/treatment/graph';
 import { SETPOINTS } from './incidents';
@@ -60,9 +60,8 @@ export interface UpgradeQuote {
 
 /** The plant's influent at today's production level (design stream × growth factor of the last operated week). */
 export function currentInfluent(p: Plant): Stream {
-  const s = cloneStream(p.trueStream);
-  s.Q *= p.history[p.history.length - 1]?.flowFactor ?? 1;
-  return s;
+  const f = p.history[p.history.length - 1]?.flowFactor ?? 1;
+  return mapInlets(p.trueStream, (x) => ({ ...x, Q: x.Q * f }));
 }
 
 /** Does the plant meet its standard on a given simulation? */

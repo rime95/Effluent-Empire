@@ -54,6 +54,21 @@ QA review (qa-engineer), 2026-11-22. Two items fixed at once because they could 
 10. LOW Wrap remaining free-text spots (Scada alarm text, Studio result text, TechTree) in brand() for future-proofing.
 11. LOW Test gaps: fuller determinism assertions (deadline, declared, hidden, name index), golden snapshot of pre-change enquiries, unique ids after spawn + refill, brandText idempotence / multiple names, missingStandby only on applicable units, MNC without evaporator never ZLD, neutral-wording message test, build ALL from TECH_ORDER.
 
+## D. Segregated streams stage (2026-11-22)
+Process review (wwtp-process-engineer). Nothing blocking.
+1. MED EN stream COD (150–400 mg/L) is not tied to Ni. Lactate/citrate is about 4–6 g COD per g Ni, so 1,200–1,800 mg/L at 300 mg/L Ni. Fix: en.SS = ni × 4–6, then re-check COD under Std B, since the metal train removes little COD.
+2. MED Drag-out SO4T is fixed at 0.06 M while Ni + Cu spans 39–167 mM, so setCbForPH closes the charge balance with implied chloride. Fix: SO4T ≈ 0.8 × metal eq + acid, remainder chloride (Watts bath).
+3. LOW The UASB feed is only neutralised to pH 7 (about 50 mg/L alkalinity). A real 15–40 g/L sugar feed sours. Fix: add bicarbonate or effluent recycle once UASB alkalinity is modelled.
+4. LOW A single drag-out carrying both Ni and Cu at pH 2–3 is unusual: lines are normally separate, and Ni electrowinning prefers pH 3.5–4.5. Fix: make it Ni-only, or mark it as a GAME MODEL simplification.
+5. LOW NH₄-N at 1 % of COD is high for syrup or sugar reject, which are N-deficient. Fix: range(0.003, 0.01).
+6. LOW segregatedGraph silently joins at u0 if the join kind is missing from the main train. Fix: throw.
+7. LOW graph.noFlow tests the main Q only. Fix: use totalQ.
+8. LOW The dynamic EQ pump target is total plant inflow. An EQ that sits only on a side stream (a player design) would get the wrong target. Fix: use that EQ's own steady inflow scaled by today's growth (this changes legacy dynamics for plants with filtrate returns, so it needs its own test pass).
+9. LOW The Studio stream table and commissioning report list the main inlet only; side inlets appear only through their own pipes.
+
 ## Done
+- Segregated streams: the SCADA replay scaled production growth on the main stream only. Now it scales every inlet.
+- Segregated streams: the dynamic EQ pumped out at the main-stream flow only, so side-stream water accumulated until the tank overflowed (found in the browser check). It now pumps the total inflow. Regression test added; single-stream plants are unchanged.
+- Segregated streams: the chrome, EN and drag-out reference trains are now sized on total flow.
 - Dev mode leaked into a new game / older loaded save (Zustand merge kept devMode/devUsed) — initial() and migrate now reset both. Regression test in devMode.test.ts.
 - Dev spawn with “Local SME” still rolled a random tier — force.tier 'basic' now skips the draw. Regression test.

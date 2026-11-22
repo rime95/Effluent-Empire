@@ -149,6 +149,17 @@ export function Encyclopedia() {
         </div>
       )}
       {tab === 'industries' && (
+        <div className="panel" style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#fff' }}>Segregated raw streams</div>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Many factories drain more than one raw stream: a dilute rinse plus a small, difficult one — a chrome rinse (Cr(VI)), an electroless-nickel line (nickel held by citrate/lactate), a concentrated drag-out (grams per litre of metal) or a high-strength food stream (15–40 g/L COD). Each stream has its own inlet on the drawing and its own lab datasheet.
+          </p>
+          <p className="muted" style={{ fontSize: 13 }}>
+            Usual practice is to <b>treat each stream on its own, then combine</b>: the small stream is treated at its own small flow and high concentration (reduction, sulfide, electrowinning, anaerobic) before it joins the main train. Blending the raw streams first is allowed too — the chemistry decides whether it works (for example, reducing Cr(VI) on the whole flow needs a bigger reactor and much more acid).
+          </p>
+        </div>
+      )}
+      {tab === 'industries' && (
         <div className="grid g3">
           {Object.values(INDUSTRIES).map((t) => (
             <div key={t.id} className="panel">

@@ -63,6 +63,12 @@ export interface Stream {
   alDissolved: number;
   /** dissolved ferric iron (Fe3+, FeOH2+, Fe(OH)2+, Fe(OH)4−) in equilibrium with Fe(OH)3(am), mg/L as Fe — set by equilibrate(); optional for old saves */
   feDissolved?: number;
+  /**
+   * Segregated raw-wastewater sources of the same factory (plant-inlet container, not chemistry): only meaningful on a
+   * plant influent. Each becomes its own inlet node (params.source = id) in the process graph; units never see it and
+   * blend() drops it. Ref: knowledge/processes/segregated_streams.md
+   */
+  side?: SideStream[];
 
   // ---- organics, mg COD/L (ASM-style fractions) ----
   /** readily biodegradable soluble */
@@ -155,9 +161,47 @@ export function emptyStream(Q = 0): Stream {
   };
 }
 
+/** a segregated raw-wastewater source of a factory (e.g. the electroless-nickel line next to the main rinse) */
+export interface SideStream {
+  id: string;
+  label: string;
+  stream: Stream;
+}
+
+/** The main inlet of a plant influent (without its side streams). */
+export function mainInlet(s: Stream): Stream {
+  const { side: _side, ...rest } = s;
+  void _side;
+  return cloneStream(rest as Stream);
+}
+
+/** Every inlet of a plant influent: the main stream first, then each side stream. */
+export function allInlets(s: Stream): { id: string; label: string; stream: Stream }[] {
+  return [{ id: 'main', label: 'Main', stream: mainInlet(s) }, ...(s.side ?? []).map((x) => ({ ...x, stream: cloneStream(x.stream) }))];
+}
+
+/** All inlets blended (total plant inflow): sizing proxies and totals. Single-source influents are returned as-is. */
+export function totalInfluent(s: Stream): Stream {
+  if (!s.side?.length) return cloneStream(s);
+  return blend(allInlets(s).map((x) => x.stream));
+}
+
+/** Total plant inflow, m³/d: main stream plus every segregated side stream. */
+export function totalQ(s: Stream): number {
+  return s.Q + (s.side ?? []).reduce((a, x) => a + x.stream.Q, 0);
+}
+
+/** Apply the same change to the main stream and every side stream (disturbances, flow factors). */
+export function mapInlets(s: Stream, f: (x: Stream, id: string) => Stream): Stream {
+  const out = f(mainInlet(s), 'main');
+  if (s.side?.length) out.side = s.side.map((x) => ({ ...x, stream: f(cloneStream(x.stream), x.id) }));
+  return out;
+}
+
 export function cloneStream(s: Stream): Stream {
   return {
     ...s,
+    side: s.side?.map((x) => ({ ...x, stream: cloneStream(x.stream) })),
     dissolved: { ...s.dissolved },
     precipitated: { ...s.precipitated },
     complexed: { ...(s.complexed ?? zeroMetals()) },

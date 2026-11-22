@@ -77,7 +77,7 @@ describe('emulsified-oil client (DAF variant)', () => {
   };
 
   it('only appears once DAF is researched', () => {
-    for (let seed = 1; seed < 200; seed++) expect(generateEnquiry(seed, 1, 30, { tech: [] }).variant).toBeUndefined();
+    for (let seed = 1; seed < 200; seed++) expect(generateEnquiry(seed, 1, 30, { tech: [] }).variant?.id).not.toBe('emulsifiedOil');
     expect(find(1).length).toBe(1);
   });
 

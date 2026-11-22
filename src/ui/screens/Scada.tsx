@@ -5,7 +5,7 @@ import { commissioningInfluent } from '../../game/project';
 import { TrendChart, TrendRef, TrendSeries } from '../components/TrendChart';
 import { AXIS_GROUPS, clockLabel, groupByUnit, groupOf } from '../components/trendScale';
 import { SETPOINTS, availableActions, incidentDisturbances } from '../../game/incidents';
-import { cloneStream } from '../../simulation/core/stream';
+import { cloneStream, mapInlets } from '../../simulation/core/stream';
 import { DynamicResult, runDynamic } from '../../simulation/dynamic/plantDynamics';
 import { CATALOGUE, UnitType } from '../../simulation/treatment/catalogue';
 import { limitsFor } from '../../simulation/treatment/compliance';
@@ -97,8 +97,9 @@ export function Scada({ go }: { go: (s: Screen) => void }) {
     // let the "simulating" state paint before the (≈0.5–2 s) integration
     setTimeout(() => {
       const last = plant.history[plant.history.length - 1];
-      const inf = cloneStream(last ? commissioningInfluent(plant.trueStream, plant.seed * 97 + last.week) : plant.trueStream);
-      inf.Q *= last?.flowFactor ?? 1;
+      const ff = last?.flowFactor ?? 1;
+      // production growth applies to every segregated inlet
+      const inf = mapInlets(cloneStream(last ? commissioningInfluent(plant.trueStream, plant.seed * 97 + last.week) : plant.trueStream), (x) => ({ ...x, Q: x.Q * ff }));
       const r = runDynamic(degradedGraph(plant.graph, plant.breakdown), inf, plant.standard, { hours: 48, disturbances: incidentDisturbances(plant.incident ?? null), warmBase: plant.trueStream });
       setResult(r);
       setCursor(48);

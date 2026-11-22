@@ -43,6 +43,8 @@ export interface Enquiry {
   requirements?: Requirements;
   /** client tier (missing = basic, legacy saves) */
   tier?: ClientTier;
+  /** declared datasheet of each segregated side stream (trueStream.side), by side id */
+  declaredSide?: Record<string, Datasheet>;
 }
 
 /**
@@ -163,7 +165,7 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
     if (variant.standard) standard = variant.standard;
   } else if (opts.tech && tier === 'basic') {
     const vr = createRng(seed * 7919 + 17);
-    const open = eligibleVariants(industry, opts.tech);
+    const open = eligibleVariants(industry, opts.tech, reputation);
     if (open.length && vr.chance(VARIANT_CHANCE)) {
       variant = vr.pick(open);
       ww.stream = variant.overlay(ww.stream, vr);
@@ -206,6 +208,9 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
     ...(variant ? { variant: { id: variant.id, label: variant.label, brief: variant.brief } } : {}),
     ...(requirements ? { requirements } : {}),
     ...(tier !== 'basic' ? { tier } : {}),
+    ...(ww.stream.side?.length
+      ? { declaredSide: Object.fromEntries(ww.stream.side.map((sd, i) => [sd.id, declaredDatasheet(sd.stream, createRng(seed * 7727 + i), false)])) }
+      : {}),
   };
 }
 

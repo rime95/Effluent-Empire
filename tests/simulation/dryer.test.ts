@@ -63,7 +63,7 @@ describe('disposal-cost-cap client (dryer variant)', () => {
   const v = VARIANTS.find((x) => x.id === 'sludgeCap')!;
 
   it('only appears once the dryer is researched, and carries a disposal-cost cap', () => {
-    for (let seed = 1; seed < 200; seed++) expect(generateEnquiry(seed, 1, 30, { tech: [] }).variant).toBeUndefined();
+    for (let seed = 1; seed < 200; seed++) expect(generateEnquiry(seed, 1, 30, { tech: [] }).variant?.id).not.toBe('sludgeCap');
     const [e] = find(1);
     expect(e.requirements?.sludgeCapRMd).toBeGreaterThan(0);
   });

@@ -13,7 +13,8 @@ import { OM, Plant, contractFor, omFeeQuote, operateWeek, plantPosts, recommende
 import { simulate } from '../simulation/treatment/graph';
 import { completeUpgrade, upgradeQuote } from './upgrade';
 import { TECH, TECH_ORDER, TechId, canResearch } from './tech';
-import { Project, ABANDON_PENALTY, commission, constructionWeeks, newProject } from './project';
+import { Project, ABANDON_PENALTY, commission, constructionWeeks, newProject, samplePoint } from './project';
+import { mainInlet, totalQ } from '../simulation/core/stream';
 import { createRng } from './rng';
 import { Employee, founder, generateCandidates, labDiscount, labWeeks, operatorCapacity, payroll, projectSlots, salesBoost } from './staff';
 
@@ -122,7 +123,8 @@ interface Actions {
   accept: (id: string) => void;
   decline: (id: string) => void;
   setActiveProject: (id: string) => void;
-  runTest: (t: LabTestId) => void;
+  /** send a lab test on the main stream or a segregated side stream (source = side id) */
+  runTest: (t: LabTestId, source?: string) => void;
   setGraph: (g: ProcessGraph) => void;
   startConstruction: () => boolean;
   abandon: () => void;
@@ -243,7 +245,7 @@ function migrateAmmoniaCb(node: unknown, seen = new Set<unknown>()): void {
 export function repriceLegacyContract(p: Plant, reputation: number): Plant {
   if (!p.contract || p.contract.quote) return p;
   const sim = simulate(p.graph, p.trueStream);
-  const quote = omFeeQuote({ capex: p.capex, Q: p.trueStream.Q, std: p.standard, reputation, opexRMd: sim.opexRMd, graph: p.graph });
+  const quote = omFeeQuote({ capex: p.capex, Q: totalQ(p.trueStream), std: p.standard, reputation, opexRMd: sim.opexRMd, graph: p.graph });
   return { ...p, contract: { monthlyFee: quote.monthlyFee, quote, startWeek: p.contract.startWeek, endWeek: p.contract.endWeek, indexation: 1 } };
 }
 
@@ -333,8 +335,19 @@ export function stepWeek(state: GameState): GameState {
     const due = p.labQueue.filter((q) => q.doneWeek <= week);
     if (due.length) {
       let datasheet = p.datasheet;
-      due.forEach((q, i) => (datasheet = applyTest(datasheet, q.test, p.enquiry.trueStream, createRng(p.enquiry.seed * 7 + p.testsDone.length + i * 101 + q.doneWeek))));
-      s = updateProject(s, p.id, (x) => ({ ...x, datasheet, testsDone: [...x.testsDone, ...due.map((q) => q.test)], labQueue: x.labQueue.filter((q) => q.doneWeek > week) }));
+      const sideDs = { ...(p.sideDatasheets ?? {}) };
+      const sideDone = { ...(p.sideTestsDone ?? {}) };
+      due.forEach((q, i) => {
+        const rng = createRng(p.enquiry.seed * 7 + p.testsDone.length + i * 101 + q.doneWeek);
+        if (!q.source) datasheet = applyTest(datasheet, q.test, mainInlet(p.enquiry.trueStream), rng);
+        else {
+          const sp = samplePoint(p, q.source);
+          sideDs[q.source] = applyTest(sideDs[q.source] ?? sp.ds, q.test, sp.trueS, rng);
+          sideDone[q.source] = [...(sideDone[q.source] ?? []), q.test];
+        }
+      });
+      const mainDue = due.filter((q) => !q.source).map((q) => q.test);
+      s = updateProject(s, p.id, (x) => ({ ...x, datasheet, ...(p.enquiry.trueStream.side?.length ? { sideDatasheets: sideDs, sideTestsDone: sideDone } : {}), testsDone: [...x.testsDone, ...mainDue], labQueue: x.labQueue.filter((q) => q.doneWeek > week) }));
       notices.push(`${p.enquiry.company}: lab results ready (${due.map((q) => LAB_TESTS[q.test].name).join(', ')}).`);
     }
     // construction progress: weekly contractor payment and the client's progress claim
@@ -354,7 +367,7 @@ export function stepWeek(state: GameState): GameState {
       const paid = p.paid + rep.milestone + (rep.pass ? rep.payment : 0);
       const builtGraph = p.building.graph ?? p.graph;
       const omOffer = rep.pass
-        ? { quote: omFeeQuote({ capex: p.spent.capex, Q: p.enquiry.trueStream.Q, std: p.enquiry.standard, reputation: s.reputation, opexRMd: rep.opexRMd, graph: builtGraph }), weeks: OM.contractWeeks }
+        ? { quote: omFeeQuote({ capex: p.spent.capex, Q: totalQ(p.enquiry.trueStream), std: p.enquiry.standard, reputation: s.reputation, opexRMd: rep.opexRMd, graph: builtGraph }), weeks: OM.contractWeeks }
         : null;
       s = updateProject(s, p.id, (x) => ({ ...x, building: null, built: p.building!.graph ?? x.graph, paid, attempts: x.attempts + 1, status: rep.pass ? 'completed' : 'failed', reports: [...x.reports, rep], omOffer }));
       if (rep.pass) {
@@ -522,16 +535,18 @@ export const useGame = create<GameState & Actions>((set, get) => {
       });
       return { ok: true, text: q.reason };
     },
-    runTest: (t) =>
+    runTest: (t, source = 'main') =>
       set((s) => {
         const p = active(s);
-        if (s.gameOver || !p || !isLive(p) || p.status === 'building' || p.testsDone.includes(t) || p.labQueue.some((q) => q.test === t)) return {};
+        const src = (q: { source?: string }) => q.source ?? 'main';
+        if (s.gameOver || !p || !isLive(p) || p.status === 'building' || samplePoint(p, source).done.includes(t) || p.labQueue.some((q) => q.test === t && src(q) === source)) return {};
         const spec = LAB_TESTS[t];
         const cost = Math.round(spec.cost * (1 - labDiscount(s.staff)));
         if (s.cash < cost) return { toast: 'Not enough cash for this test.' };
         const doneWeek = s.week + labWeeks(s.staff, spec.weeks);
-        const next = book(s, `Lab: ${spec.name} (${p.enquiry.company})`, -cost, 'lab');
-        return { ...updateProject(next, p.id, (x) => ({ ...x, labQueue: [...x.labQueue, { test: t, doneWeek }], spent: { ...x.spent, lab: x.spent.lab + cost } })), toast: `${spec.name} sent to the lab — results in week ${doneWeek}.` };
+        const where = source === 'main' ? '' : ` — ${samplePoint(p, source).label} stream`;
+        const next = book(s, `Lab: ${spec.name}${where} (${p.enquiry.company})`, -cost, 'lab');
+        return { ...updateProject(next, p.id, (x) => ({ ...x, labQueue: [...x.labQueue, { test: t, doneWeek, ...(source !== 'main' ? { source } : {}) }], spent: { ...x.spent, lab: x.spent.lab + cost } })), toast: `${spec.name} sent to the lab — results in week ${doneWeek}.` };
       }),
     setGraph: (g) => set((s) => (s.activeProjectId ? updateProject(s, s.activeProjectId, (p) => (p.status === 'design' || p.status === 'failed' ? { ...p, graph: g } : p)) : {})),
     startConstruction: () => {
@@ -585,7 +600,7 @@ export const useGame = create<GameState & Actions>((set, get) => {
         if (!p || !p.omOffer || !p.built) return {};
         const capex = p.spent.capex;
         // offers made before the 2026-11-22 contract model are re-priced when signed
-        const offer = p.omOffer.quote ? p.omOffer : { ...p.omOffer, quote: omFeeQuote({ capex, Q: p.enquiry.trueStream.Q, std: p.enquiry.standard, reputation: s.reputation, opexRMd: simulate(p.built, p.enquiry.trueStream).opexRMd, graph: p.built }) };
+        const offer = p.omOffer.quote ? p.omOffer : { ...p.omOffer, quote: omFeeQuote({ capex, Q: totalQ(p.enquiry.trueStream), std: p.enquiry.standard, reputation: s.reputation, opexRMd: simulate(p.built, p.enquiry.trueStream).opexRMd, graph: p.built }) };
         const plant: Plant = {
           id: `plant-${p.id}`,
           company: p.enquiry.company,

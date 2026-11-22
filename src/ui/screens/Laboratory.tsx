@@ -7,6 +7,7 @@ import { Coagulant, COAGULANTS } from '../../simulation/chemistry/coagulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
 import { brand } from '../prefs';
+import { samplePoint } from '../../game/project';
 
 const AXIS = { stroke: '#8aa0b8', fontSize: 11, fontFamily: 'var(--mono)' };
 
@@ -16,40 +17,46 @@ export function Laboratory({ go }: { go: (s: Screen) => void }) {
   const [coag, setCoag] = useState<Coagulant>('pac');
   const [prePH, setPrePH] = useState<string>('');
   const [maxDose, setMaxDose] = useState(300);
+  // sample point: the main stream or one of the factory's segregated side streams
+  const [srcSel, setSrc] = useState('main');
+  const src = p?.enquiry.trueStream.side?.some((x) => x.id === srcSel) ? srcSel : 'main';
+  const sp = p ? samplePoint(p, src) : null;
 
-  const basis = useMemo(() => (p ? designBasis(p.datasheet) : null), [p]);
-  const titration = useMemo(() => (p && p.testsDone.includes('titration') ? titrationData(p.enquiry.trueStream) : null), [p]);
+  const basis = useMemo(() => (sp ? designBasis(sp.ds) : null), [p, src]); // eslint-disable-line react-hooks/exhaustive-deps
+  const titration = useMemo(() => (sp && sp.done.includes('titration') ? titrationData(sp.trueS) : null), [p, src]); // eslint-disable-line react-hooks/exhaustive-deps
   const jar = useMemo(() => {
-    if (!p || !p.testsDone.includes('jar')) return null;
+    if (!p || !sp || !sp.done.includes('jar')) return null;
     const doses = Array.from({ length: 31 }, (_, i) => (i * maxDose) / 30);
     const pre = prePH.trim() === '' ? undefined : Number(prePH);
-    return jarTest(p.enquiry.trueStream, coag, doses, pre !== undefined && Number.isFinite(pre) ? pre : undefined);
-  }, [p, coag, prePH, maxDose]);
+    return jarTest(sp.trueS, coag, doses, pre !== undefined && Number.isFinite(pre) ? pre : undefined);
+  }, [p, src, coag, prePH, maxDose]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!p) return <div className="page">No active project.</div>;
-  const ds = p.datasheet;
-  const decl = p.enquiry.declared;
+  if (!p || !sp) return <div className="page">No active project.</div>;
+  const ds = sp.ds;
+  const decl = sp.decl;
+  const done = (t: LabTestId) => sp.done.includes(t);
+  const sides = p.enquiry.trueStream.side ?? [];
   const editable = p.status === 'design' || p.status === 'failed';
   const discount = labDiscount(g.staff);
 
   const rows: { label: string; unit: string; declared?: number; measured?: number; measuredBy?: LabTestId | 'basic' }[] = [
     { label: 'Flow', unit: 'm³/d', declared: decl.Q, measured: ds.Q },
     { label: 'Peak factor', unit: '×', declared: decl.peakFactor },
-    { label: 'pH', unit: '', declared: decl.pH, measured: p.testsDone.includes('titration') ? ds.pH : undefined, measuredBy: 'titration' },
+    { label: 'pH', unit: '', declared: decl.pH, measured: done('titration') ? ds.pH : undefined, measuredBy: 'titration' },
     { label: 'Alkalinity', unit: 'mg/L CaCO₃', measured: ds.alkalinity_mgCaCO3, measuredBy: 'titration' },
     { label: 'Acidity (to pH 8.3)', unit: 'mg/L CaCO₃', measured: ds.acidity_mgCaCO3, measuredBy: 'titration' },
     { label: 'Sulfate', unit: 'mg/L SO₄', measured: ds.sulfate_mgL, measuredBy: 'titration' },
-    { label: 'COD', unit: 'mg/L', declared: decl.COD, measured: p.testsDone.includes('fractionation') ? ds.COD : undefined, measuredBy: 'fractionation' },
+    { label: 'COD', unit: 'mg/L', declared: decl.COD, measured: done('fractionation') ? ds.COD : undefined, measuredBy: 'fractionation' },
     { label: 'BOD₅', unit: 'mg/L', measured: ds.BOD5, measuredBy: 'fractionation' },
     { label: 'NH₄-N', unit: 'mg/L', measured: ds.NH3N, measuredBy: 'fractionation' },
-    { label: 'TSS', unit: 'mg/L', declared: decl.TSS, measured: p.testsDone.includes('jar') ? ds.TSS : undefined, measuredBy: 'jar' },
-    { label: 'Oil & grease', unit: 'mg/L', declared: decl.OG, measured: p.testsDone.includes('oil') ? ds.OG : undefined, measuredBy: 'oil' },
-    { label: 'Nickel', unit: 'mg/L', declared: decl.Ni, measured: p.testsDone.includes('metals') ? ds.Ni : undefined, measuredBy: 'metals' },
-    { label: 'Copper', unit: 'mg/L', declared: decl.Cu, measured: p.testsDone.includes('metals') ? ds.Cu : undefined, measuredBy: 'metals' },
-    { label: 'Zinc', unit: 'mg/L', declared: decl.Zn, measured: p.testsDone.includes('metals') ? ds.Zn : undefined, measuredBy: 'metals' },
-    { label: 'Chromium (III)', unit: 'mg/L', declared: decl.Cr, measured: p.testsDone.includes('metals') ? ds.Cr : undefined, measuredBy: 'metals' },
-    { label: 'Chromium (VI)', unit: 'mg/L', declared: decl.CrVI, measured: p.testsDone.includes('metals') ? ds.CrVI : undefined, measuredBy: 'metals' },
-    { label: 'Complexed Ni + Cu + Zn (soluble at pH 10)', unit: 'mg/L', declared: undefined, measured: p.testsDone.includes('metals') ? (ds.complexed?.Ni ?? 0) + (ds.complexed?.Cu ?? 0) + (ds.complexed?.Zn ?? 0) : undefined, measuredBy: 'metals' },
+    { label: 'TSS', unit: 'mg/L', declared: decl.TSS, measured: done('jar') ? ds.TSS : undefined, measuredBy: 'jar' },
+    { label: 'Oil & grease', unit: 'mg/L', declared: decl.OG, measured: done('oil') ? ds.OG : undefined, measuredBy: 'oil' },
+    { label: 'Nickel', unit: 'mg/L', declared: decl.Ni, measured: done('metals') ? ds.Ni : undefined, measuredBy: 'metals' },
+    { label: 'Copper', unit: 'mg/L', declared: decl.Cu, measured: done('metals') ? ds.Cu : undefined, measuredBy: 'metals' },
+    { label: 'Zinc', unit: 'mg/L', declared: decl.Zn, measured: done('metals') ? ds.Zn : undefined, measuredBy: 'metals' },
+    { label: 'Chromium (III)', unit: 'mg/L', declared: decl.Cr, measured: done('metals') ? ds.Cr : undefined, measuredBy: 'metals' },
+    { label: 'Chromium (VI)', unit: 'mg/L', declared: decl.CrVI, measured: done('metals') ? ds.CrVI : undefined, measuredBy: 'metals' },
+    { label: 'Complexed Ni + Cu + Zn (soluble at pH 10)', unit: 'mg/L', declared: undefined, measured: done('metals') ? (ds.complexed?.Ni ?? 0) + (ds.complexed?.Cu ?? 0) + (ds.complexed?.Zn ?? 0) : undefined, measuredBy: 'metals' },
   ];
 
   return (
@@ -58,6 +65,17 @@ export function Laboratory({ go }: { go: (s: Screen) => void }) {
       <p className="sub">
         {brand(p.enquiry.company)} — every design prediction in the Studio uses the <b>design basis</b> built from this datasheet. Unknowns are filled with generic assumptions.
       </p>
+      {sides.length > 0 && (
+        <div className="row" style={{ gap: 6, margin: '10px 0', alignItems: 'center', flexWrap: 'wrap' }}>
+          <span className="muted" style={{ fontSize: 12 }}>Sample point:</span>
+          {[{ id: 'main', label: 'Main' }, ...sides].map((x) => (
+            <button key={x.id} className={`btn sm ${src === x.id ? 'primary' : 'ghost'}`} onClick={() => setSrc(x.id)}>
+              {x.label} stream
+            </button>
+          ))}
+          <span className="muted" style={{ fontSize: 12 }}>This factory drains {sides.length + 1} separate raw streams; each has its own inlet in the Studio and is tested and paid for separately.</span>
+        </div>
+      )}
       <div className="grid g2">
         <div className="panel">
           <h2>Wastewater datasheet</h2>
@@ -116,8 +134,8 @@ export function Laboratory({ go }: { go: (s: Screen) => void }) {
           <h2>Order tests</h2>
           {(Object.keys(LAB_TESTS) as LabTestId[]).map((t) => {
             const spec = LAB_TESTS[t];
-            const done = p.testsDone.includes(t);
-            const queued = p.labQueue.find((q) => q.test === t);
+            const isDone = done(t);
+            const queued = p.labQueue.find((q) => q.test === t && (q.source ?? 'main') === src);
             const cost = Math.round(spec.cost * (1 - discount));
             return (
               <div key={t} className="row" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #1a3049' }}>
@@ -127,12 +145,12 @@ export function Laboratory({ go }: { go: (s: Screen) => void }) {
                     {spec.reveals}
                   </div>
                 </div>
-                {done ? (
+                {isDone ? (
                   <span className="pill pass">DONE</span>
                 ) : queued ? (
                   <span className="pill info">RESULTS WK {queued.doneWeek}</span>
                 ) : (
-                  <button className="btn sm" disabled={!editable || g.cash < cost} onClick={() => g.runTest(t)}>
+                  <button className="btn sm" disabled={!editable || g.cash < cost} onClick={() => g.runTest(t, src)}>
                     {rm(cost)} · {labWeeks(g.staff, spec.weeks)} wk
                   </button>
                 )}

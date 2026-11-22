@@ -125,6 +125,39 @@ export function zldGraph(train: TrainSpec, Q: number): ProcessGraph {
   return g;
 }
 
+/** A segregated stream's own pretreatment train and the main-train unit it joins once treated. */
+export interface SideTrain {
+  /** SideStream id (Stream.side[].id) */
+  id: string;
+  /** tag suffix, e.g. EN → inlet RAW-EN, units CR-EN1… */
+  tag: string;
+  train: TrainSpec;
+  /** kind of the main-train unit the treated side stream joins (first of that kind) */
+  join: UnitType;
+}
+
+/**
+ * Segregated-stream plant: the main train, plus one inlet per side stream (params.source = id) → its own pretreatment
+ * → joins the main train at `join`. Ref: knowledge/processes/segregated_streams.md
+ */
+export function segregatedGraph(train: TrainSpec, sides: SideTrain[]): ProcessGraph {
+  const g = linearGraph(train);
+  for (const sd of sides) {
+    const inId = `in_${sd.id}`;
+    g.nodes.push({ id: inId, kind: 'influent', tag: `RAW-${sd.tag}`, params: { source: sd.id } });
+    let prev = inId;
+    sd.train.forEach((x, i) => {
+      const id = `${sd.id}${i}`;
+      g.nodes.push({ id, kind: x.kind, tag: `${CATALOGUE[x.kind].tagPrefix}-${sd.tag}${i + 1}`, params: x.params });
+      g.edges.push({ id: `e_${id}`, from: prev, to: id });
+      prev = id;
+    });
+    const j = train.findIndex((t) => t.kind === sd.join);
+    g.edges.push({ id: `j_${sd.id}`, from: prev, to: `u${Math.max(0, j)}` });
+  }
+  return g;
+}
+
 export const foodTrain = (Q: number): TrainSpec => [
   u('oilSep', Q, { area: Math.ceil((Q * 2.2) / 24 / 1.0) }),
   u('eq', Q),

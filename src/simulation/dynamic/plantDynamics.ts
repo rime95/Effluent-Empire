@@ -8,7 +8,7 @@
  *                        wasting from the SRT set-point, secondary-clarifier carry-over from zone settling (Vesilind)
  *   every other unit   — quasi-steady: the Phase 1 process model on each step's inlet
  */
-import { Stream, blend, cloneStream, emptyStream, tss, METALS, MetalMap, poolMass } from '../core/stream';
+import { Stream, blend, cloneStream, emptyStream, tss, METALS, MetalMap, poolMass , mainInlet, mapInlets, totalQ } from '../core/stream';
 import { unaidedPrecipitateV50 } from '../chemistry/neutralisation';
 import { effectiveParams, hasInst } from '../treatment/instrumentation';
 import { equilibrate, aerationCarbonate } from '../chemistry/acidBase';
@@ -92,9 +92,8 @@ export function diurnal(tH: number, peakFactor: number): number {
 }
 
 function influentAt(base: Stream, tH: number, d: Disturbance[]): Stream {
-  const s = cloneStream(base);
-  s.Q = base.Q * diurnal(tH, base.peakFactor);
-  s.peakFactor = 1; // instantaneous flow: no extra peak factor
+  // every segregated inlet follows its own diurnal pattern; disturbances act on the main stream
+  const s = mapInlets(base, (x) => ({ ...x, Q: x.Q * diurnal(tH, x.peakFactor), peakFactor: 1 }));
   for (const x of d) {
     if (x.kind === 'flowSurge' && tH >= x.fromH && tH < x.toH) s.Q *= x.factor;
     if (x.kind === 'toxicSlug' && tH >= x.fromH && tH < x.toH) s.dissolved[x.metal] += x.mgL;
@@ -316,7 +315,7 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
       const n = byId.get(id)!;
       // inlets: this step's value, or the previous step's for recycle (tear) pipes not yet computed this step
       const ins = g.edges.filter((e) => e.to === id).map((e) => edge.get(e.id) ?? prevEdge.get(e.id)).filter((x): x is Stream => !!x && x.Q > 1e-9);
-      let inlet = n.kind === 'influent' ? inf : ins.length === 0 ? emptyStream(0) : ins.length === 1 ? ins[0] : equilibrate(blend(ins));
+      let inlet = n.kind === 'influent' ? (n.params.source ? cloneStream(inf.side?.find((x) => x.id === n.params.source)?.stream ?? emptyStream(0)) : mainInlet(inf)) : ins.length === 0 ? emptyStream(0) : ins.length === 1 ? ins[0] : equilibrate(blend(ins));
       if (n.kind === 'disposal') continue;
       if (n.kind === 'discharge') {
         effluent = bypass && bypass.Q > 0 ? equilibrate(blend([inlet, bypass])) : inlet;
@@ -332,7 +331,7 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
         if (kind === 'eq' && eq[id]) {
           const st = eq[id];
           const V = Number(n.params.volume);
-          const target = base.Q * (opts.eqOutflowFraction?.[id] ?? 1);
+          const target = totalQ(base) * (opts.eqOutflowFraction?.[id] ?? 1);
           let qOut = target;
           const inVol = inlet.Q * dtD;
           const minLevel = 0.05 * V;
@@ -454,7 +453,7 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
     }
     points.push({
       t: tH,
-      Qin: inf.Q,
+      Qin: inf.Q + (inf.side ?? []).reduce((a, x) => a + x.stream.Q, 0),
       effluent: { pH: m.pH, COD: m.COD, BOD5: m.BOD5, TSS: m.TSS, NH3N: m.NH3N, Ni: m.Ni, Cu: m.Cu, Zn: m.Zn, CrVI: m.CrVI, OG: m.OG, Q: eff.Q },
       pass: !rep || rep.pass,
       failed: failed.map((c) => c.param),

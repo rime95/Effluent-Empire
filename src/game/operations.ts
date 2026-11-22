@@ -4,7 +4,7 @@
  * A grab sample is checked against the discharge standard; non-compliance risks a DOE inspection fine.
  * Ref: knowledge/operations/om_model.md. All rates here are GAME MODEL values.
  */
-import { Stream, cloneStream } from '../simulation/core/stream';
+import { Stream, cloneStream , mapInlets , totalQ } from '../simulation/core/stream';
 import { CATALOGUE, Params, UnitType } from '../simulation/treatment/catalogue';
 import { evaluate, limitsFor, StandardId } from '../simulation/treatment/compliance';
 import { PNode, ProcessGraph, simulate } from '../simulation/treatment/graph';
@@ -167,7 +167,7 @@ export function operatorFTE(Q: number, graph?: ProcessGraph): number {
 
 /** Operator posts an operating plant needs: what its O&M contract bills (staffing matches the fee). */
 export function plantPosts(p: Pick<Plant, 'contract' | 'trueStream' | 'graph'>): number {
-  return p.contract?.quote.operatorFTE ?? operatorFTE(p.trueStream.Q, p.graph);
+  return p.contract?.quote.operatorFTE ?? operatorFTE(totalQ(p.trueStream), p.graph);
 }
 
 /** Number of parameters in the weekly compliance sample (everything the standard regulates). */
@@ -389,7 +389,9 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   // 3. this week's influent: production growth + variability
   const flowFactor = Math.min(OM.growthCap, 1 + OM.growthPerWeek * (week - p.commissionedWeek));
   const inf = cloneStream(commissioningInfluent(p.trueStream, p.seed * 97 + week));
-  inf.Q = inf.Q * flowFactor;
+  const infG = mapInlets(inf, (x) => ({ ...x, Q: x.Q * flowFactor }));
+  inf.Q = infG.Q;
+  inf.side = infG.side;
   const disturbed = applyIncidentSteady(degradedGraph(p.graph, p.breakdown), inf, p.incident ?? null);
   const sim = simulate(disturbed.graph, disturbed.influent);
   costs.opex = sim.ok ? 7 * marketOpex(sim.opexSplit, market) : 0;

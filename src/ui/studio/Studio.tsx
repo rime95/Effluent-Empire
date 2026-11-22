@@ -16,15 +16,14 @@ import {
 } from '@xyflow/react';
 import { engineersBusy, useActiveProject, useGame } from '../../game/store';
 import { projectSlots } from '../../game/staff';
-import { designBasis } from '../../game/lab';
-import { constructionWeeks, makeNode, retrofitCharge, RETROFIT_PREMIUM, type Project } from '../../game/project';
+import { constructionWeeks, makeNode, projectDesignBasis, retrofitCharge, RETROFIT_PREMIUM, type Project } from '../../game/project';
 import type { Plant } from '../../game/operations';
 import { currentInfluent, upgradeQuote, VO_MARKUP } from '../../game/upgrade';
 import { REJECT_KINDS, REUSE_SPEC, isLiquidHaul, isReuse, simulate } from '../../simulation/treatment/graph';
 import { CATALOGUE, PRICES, UnitType } from '../../simulation/treatment/catalogue';
 import { PNode, PortId, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
 import { evaluate, measure, STANDARDS } from '../../simulation/treatment/compliance';
-import { Stream } from '../../simulation/core/stream';
+import { Stream, mainInlet } from '../../simulation/core/stream';
 import { DisposalSymbol, TankerSymbol, UnitSymbol } from '../components/Symbols';
 import { CATEGORY_COLOR, edgeTypes, nodeTypes, type DosingTag, type UnitNodeData } from './nodes';
 import { NumberField } from './NumberField';
@@ -84,7 +83,7 @@ export function Studio(props: { go: (s: Screen) => void }) {
 }
 
 function defaultPos(n: PNode, i: number) {
-  return n.position ?? (n.kind === 'influent' ? { x: 0, y: 160 } : n.kind === 'discharge' ? { x: 1100, y: 160 } : { x: 160 + i * 190, y: 160 });
+  return n.position ?? (n.kind === 'influent' ? { x: 0, y: n.params.source ? 400 : 160 } : n.kind === 'discharge' ? { x: 1100, y: 160 } : { x: 160 + i * 190, y: 160 });
 }
 
 /**
@@ -156,7 +155,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
   // an operating plant is shown on its real influent at today's production level; a project on the lab design basis
   const plantBasis = useMemo(() => (plant ? { stream: currentInfluent(plant), assumptions: [] as string[] } : null), [plant?.trueStream, plant?.history.length]); // eslint-disable-line react-hooks/exhaustive-deps
-  const projBasis = useMemo(() => (proj ? designBasis(proj.datasheet) : null), [proj?.datasheet]); // eslint-disable-line react-hooks/exhaustive-deps
+  const projBasis = useMemo(() => (proj ? projectDesignBasis(proj) : null), [proj?.datasheet, proj?.sideDatasheets]); // eslint-disable-line react-hooks/exhaustive-deps
   const basis = plant ? plantBasis : projBasis;
   const { sim, busy, error: simError } = useSimulation(p ? draft : null, basis?.stream ?? null);
   const report = useMemo(() => (sim?.effluent && p ? evaluate(sim.effluent, p.enquiry.standard, sim) : null), [sim, p?.enquiry.standard]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -188,7 +187,13 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           : { kind: 'disposal', tag: n.tag ?? 'SD', label: 'Sludge disposal', sub: d ? `${fmt(d.wetKgD, 0)} kg/d wet · ${rm(d.costRMd)}/d` : 'connect a sludge line' };
       } else if (isTerminal(n)) {
         type = 'terminal';
-        data = { kind: n.kind, label: n.kind === 'influent' ? 'RAW WASTEWATER' : 'FINAL DISCHARGE', sub: n.kind === 'influent' ? `${p.datasheet.Q} m³/d` : `Standard ${p.enquiry.standard}` };
+        // segregated plants: one inlet per raw stream, labelled with the stream
+        const sideIn = n.kind === 'influent' && n.params.source ? basis?.stream.side?.find((x) => x.id === n.params.source) : undefined;
+        const multi = !!basis?.stream.side?.length;
+        data =
+          n.kind === 'influent'
+            ? { kind: n.kind, tag: n.tag, label: sideIn ? `RAW — ${sideIn.label.toUpperCase()}` : multi ? 'RAW — MAIN' : 'RAW WASTEWATER', sub: `${fmt(sideIn ? sideIn.stream.Q : (basis?.stream.Q ?? p.datasheet.Q), (sideIn?.stream.Q ?? 10) < 10 ? 1 : 0)} m³/d` }
+            : { kind: n.kind, label: 'FINAL DISCHARGE', sub: `Standard ${p.enquiry.standard}` };
       } else {
         const ns = sim?.nodes[n.id];
         const notes = ns?.result.notes ?? [];
@@ -416,7 +421,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
   const autoConnect = () => {
     setDraft((g) => {
       const units = g.nodes.filter((n) => !isNonUnit(n) && !['thickener', 'filterPress'].includes(n.kind)).sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0));
-      const chain = [g.nodes.find((n) => n.kind === 'influent')!, ...units, g.nodes.find((n) => n.kind === 'discharge')!];
+      const chain = [g.nodes.find((n) => n.kind === 'influent' && !n.params.source)!, ...units, g.nodes.find((n) => n.kind === 'discharge')!];
       return { ...g, edges: chain.slice(0, -1).map((n, i) => ({ id: `p-auto-${i}-${Date.now().toString(36)}`, from: n.id, to: chain[i + 1].id })) };
     });
   };
@@ -685,7 +690,10 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           <DisposalInspector id={single.id} tag={single.tag ?? 'SD'} sim={sim} />
         ) : single?.kind === 'influent' ? (
           <>
-            <StreamTable title="Raw wastewater (design basis)" s={basis.stream} />
+            <StreamTable
+              title={single.params.source ? `${basis.stream.side?.find((x) => x.id === single.params.source)?.label ?? 'Side'} stream (design basis)` : 'Raw wastewater (design basis)'}
+              s={single.params.source ? (basis.stream.side?.find((x) => x.id === single.params.source)?.stream ?? basis.stream) : mainInlet(basis.stream)}
+            />
             <InstrumentSection node={single} editable={editable} onInst={toggleInst} />
           </>
         ) : selNodes.size > 1 ? (

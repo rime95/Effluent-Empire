@@ -1,5 +1,5 @@
 /** Project lifecycle: design → commission → (pass → paid) | (fail → retrofit | abandon). Pure functions. */
-import { Stream, METALS, cloneStream, codTotal, tss, metalTotal, oilGrease } from '../simulation/core/stream';
+import { Stream, METALS, cloneStream, codTotal, tss, metalTotal, oilGrease, mapInlets, mainInlet } from '../simulation/core/stream';
 import { setCbForPH } from '../simulation/chemistry/acidBase';
 import { CATALOGUE, defaultParams } from '../simulation/treatment/catalogue';
 import { ComplianceReport, evaluate } from '../simulation/treatment/compliance';
@@ -7,7 +7,7 @@ import { PNode, ProcessGraph, SimResult, simulate } from '../simulation/treatmen
 import { applicableInstruments, hasInst, instCapex } from '../simulation/treatment/instrumentation';
 import { Note } from '../simulation/treatment/types';
 import { Enquiry, PAYMENT } from './customers';
-import { Datasheet, LabTestId } from './lab';
+import { Datasheet, LabTestId, designBasis } from './lab';
 import { ReqCheck, evaluateRequirements } from './requirements';
 import { createRng } from './rng';
 import { SETPOINTS } from './incidents';
@@ -65,7 +65,10 @@ export interface Project {
   /** stable id (enquiry id) */
   id: string;
   /** lab tests in progress */
-  labQueue: { test: LabTestId; doneWeek: number }[];
+  labQueue: { test: LabTestId; doneWeek: number; /** side-stream id; missing = main stream */ source?: string }[];
+  /** datasheets and completed tests of the segregated side streams (by side id) */
+  sideDatasheets?: Record<string, Datasheet>;
+  sideTestsDone?: Record<string, LabTestId[]>;
   /** construction in progress: the commissioning outcome is fixed when work starts and revealed at doneWeek */
   /** under construction. `progress` (new saves): CAPEX is paid and the client's 60 % progress claims are received weekly
    *  over the build (industry practice); legacy saves without it paid CAPEX up front and get the 60 % at completion. */
@@ -75,10 +78,39 @@ export interface Project {
   omOffer: { quote: FeeQuote; weeks: number; weeklyFee?: number } | null;
 }
 
-export function starterGraph(): ProcessGraph {
+/** What the lab knows about one sample point (main stream or a segregated side stream). */
+export function samplePoint(p: Project, source = 'main') {
+  if (source === 'main') return { ds: p.datasheet, decl: p.enquiry.declared, done: p.testsDone, trueS: mainInlet(p.enquiry.trueStream), label: 'Main' };
+  const sd = p.enquiry.trueStream.side?.find((x) => x.id === source);
+  return {
+    ds: p.sideDatasheets?.[source] ?? p.enquiry.declaredSide?.[source] ?? p.enquiry.declared,
+    decl: p.enquiry.declaredSide?.[source] ?? p.enquiry.declared,
+    done: p.sideTestsDone?.[source] ?? [],
+    trueS: sd ? cloneStream(sd.stream) : mainInlet(p.enquiry.trueStream),
+    label: sd?.label ?? source,
+  };
+}
+
+/** Studio design basis: the main datasheet's stream with every side stream's basis attached as an inlet. */
+export function projectDesignBasis(p: Project): { stream: Stream; assumptions: string[] } {
+  const b = designBasis(p.datasheet);
+  const sides = p.enquiry.trueStream.side ?? [];
+  if (!sides.length) return b;
+  const assumptions = [...b.assumptions];
+  b.stream.side = sides.map((sd) => {
+    const sb = designBasis(samplePoint(p, sd.id).ds);
+    assumptions.push(...sb.assumptions.map((a) => `${sd.label}: ${a}`));
+    return { id: sd.id, label: sd.label, stream: sb.stream };
+  });
+  return { stream: b.stream, assumptions };
+}
+
+/** The empty drawing: one inlet per raw stream of the factory (main first) and the final discharge. */
+export function starterGraph(sides: { id: string }[] = []): ProcessGraph {
   return {
     nodes: [
       { id: 'in', kind: 'influent', tag: 'RAW', params: {} },
+      ...sides.map((sd, i) => ({ id: `in_${sd.id}`, kind: 'influent' as const, tag: `RAW-${sd.id.toUpperCase()}`, params: { source: sd.id }, position: { x: 0, y: 360 + i * 160 } })),
       { id: 'out', kind: 'discharge', tag: 'OUT', params: {} },
     ],
     edges: [],
@@ -86,7 +118,7 @@ export function starterGraph(): ProcessGraph {
 }
 
 export function newProject(e: Enquiry, week: number): Project {
-  return { id: e.id, enquiry: e, startedWeek: week, datasheet: { ...e.declared }, testsDone: [], graph: starterGraph(), built: null, spent: { lab: 0, capex: 0 }, paid: 0, attempts: 0, status: 'design', reports: [], labQueue: [], building: null, omOffer: null };
+  return { id: e.id, enquiry: e, startedWeek: week, datasheet: { ...e.declared }, ...(e.declaredSide ? { sideDatasheets: structuredClone(e.declaredSide), sideTestsDone: {} } : {}), testsDone: [], graph: starterGraph(e.trueStream.side ?? []), built: null, spent: { lab: 0, capex: 0 }, paid: 0, attempts: 0, status: 'design', reports: [], labQueue: [], building: null, omOffer: null };
 }
 
 export function makeNode(kind: PNode['kind'], Q: number, existing: PNode[]): PNode {
@@ -154,6 +186,11 @@ export function changedUnits(built: ProcessGraph, graph: ProcessGraph): PNode[] 
 /** Day-to-day variability of the real influent at commissioning (GAME MODEL ±8 %). */
 export function commissioningInfluent(trueS: Stream, seed: number): Stream {
   const rng = createRng(seed);
+  // the same day-to-day variability on every segregated inlet (main first, so single-stream plants are unchanged)
+  return mapInlets(trueS, (x) => varyInlet(x, rng));
+}
+
+function varyInlet(trueS: Stream, rng: ReturnType<typeof createRng>): Stream {
   const s = cloneStream(trueS);
   const v = (x: number) => rng.noise(x, 0.08);
   s.SS = v(s.SS);
