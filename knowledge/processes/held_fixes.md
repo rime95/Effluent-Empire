@@ -67,6 +67,7 @@ Process review (wwtp-process-engineer). Nothing blocking.
 9. LOW The Studio stream table and commissioning report list the main inlet only; side inlets appear only through their own pipes.
 
 ## Done
+- 2026-11-23, user decision: random equipment breakdowns and process incidents are OFF (`OM.randomFailures = false`) — they drove reputation to −36 and made O&M unplayable. Loaded saves drop any active breakdown/incident. The machinery (BREAKDOWNS, incidents.ts, SCADA field actions) is kept for a possible opt-in setting. Note: the maintenance budget now only sets equipment condition, which no longer triggers anything.
 - B1 (2026-11-23): base reference trains could not reach Standard A, so early Std A jobs (e.g. food O&G 1 mg/L) were unwinnable with the basic kit. Plain jobs now offer Standard A only where `REFERENCE_STD_A` (basic units + polishing / nitrification) meets it on the feed — about 100 % semiconductor, 60 % plating, 40 % food feeds — and are priced on that design; the rest are Standard B. Tier-1 research needs no reputation; low reputation recovers +1 every 2 weeks up to 30 while no plant fails a sample. The Studio has a design-margin check at end-of-contract flow (+30 %) with +8 % load.
 - Reg. 11(2) combined metals: measure() summed every tracked metal including chromium; it now sums only the listed metals that are modelled (Cu, Ni, Zn — `COMBINED_METALS`). The rule trigger already ignored Cr. Regression test in edge.test.ts.
 - Segregated streams: the SCADA replay scaled production growth on the main stream only. Now it scales every inlet.

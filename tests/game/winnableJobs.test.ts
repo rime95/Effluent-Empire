@@ -40,3 +40,17 @@ describe('reputation recovery', () => {
     expect(useGame.getState().reputation).toBe(50);
   });
 });
+
+describe('no random failures', () => {
+  it('operated plants get no random breakdowns or incidents; a loaded save drops any it had', async () => {
+    const { OM } = await import('../../src/game/operations');
+    const { useGame, migrate } = await import('../../src/game/store');
+    expect(OM.randomFailures).toBe(false);
+    useGame.getState().newGame('Calm Co');
+    const s = useGame.getState();
+    const fake = { ...s, plants: [{ id: 'x', status: 'operating', breakdown: { unitId: 'u0', tag: 'EQ-01', description: 'x', weeksLeft: 3 }, incident: { kind: 'pumpTrip' }, graph: { nodes: [], edges: [] }, trueStream: s.enquiries[0].trueStream, capex: 1, contract: null, history: [] }] };
+    const m = migrate(JSON.parse(JSON.stringify(fake)))!;
+    expect(m.plants[0].breakdown).toBeNull();
+    expect(m.plants[0].incident).toBeNull();
+  });
+});

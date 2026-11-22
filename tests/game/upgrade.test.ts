@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { generateEnquiry } from '../../src/game/customers';
 import { REFERENCE } from '../../src/game/referenceDesigns';
 import { ProcessGraph, linearGraph, simulate } from '../../src/simulation/treatment/graph';
-import { Plant, contractFor, omFeeQuote, operateWeek, operatorFTE, recommendedMaintenance } from '../../src/game/operations';
+import { OM, Plant, contractFor, omFeeQuote, operateWeek, operatorFTE, recommendedMaintenance } from '../../src/game/operations';
 import { RETROFIT_PREMIUM, changedUnits, retrofitCharge, unitRetrofitCharge } from '../../src/game/project';
 import { completeUpgrade, upgradeQuote, VO_MARKUP } from '../../src/game/upgrade';
 import { INSTRUMENTS } from '../../src/simulation/treatment/instrumentation';
@@ -165,11 +165,13 @@ describe('hand-over', () => {
     // operate until an incident on the precipitation unit's pump occurs; with standby it never stays active as a pump trip
     let pl = done;
     let changeovers = 0;
+    OM.randomFailures = true; // the failure machinery is kept for a future opt-in setting
     for (let w = 2; w < 300 && changeovers === 0; w++) {
       const o = operateWeek({ ...pl, incident: null }, w, initialMarket(), true);
       if (o.messages.some((m) => m.includes('standby took over'))) changeovers++;
       pl = { ...o.plant, incident: null };
     }
+    OM.randomFailures = false;
     expect(changeovers).toBeGreaterThan(0);
   });
 

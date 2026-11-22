@@ -266,7 +266,8 @@ export function migrate(raw: unknown): GameState | null {
       ...d,
       ...v,
       projects: Array.isArray(v.projects) ? v.projects : [],
-      plants: Array.isArray(v.plants) ? v.plants.map((p) => repriceLegacyContract(p, v.reputation ?? 0)) : [],
+      // random failures are off: clear any breakdown or incident a save was left with
+      plants: Array.isArray(v.plants) ? v.plants.map((p) => repriceLegacyContract(OM.randomFailures ? p : { ...p, breakdown: null, incident: null }, v.reputation ?? 0)) : [],
       staff: Array.isArray(v.staff) && v.staff.length ? v.staff : d.staff,
       candidates: Array.isArray(v.candidates) ? v.candidates : d.candidates,
       enquiries: Array.isArray(v.enquiries) ? v.enquiries : d.enquiries,

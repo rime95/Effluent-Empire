@@ -49,6 +49,11 @@ export const OM = {
   growthPerWeek: 0.0015,
   growthCap: 1.3,
   inspectionChance: 0.2,
+  /**
+   * Random equipment breakdowns and process incidents. Switched OFF (user decision 2026-11-23: they made O&M unplayable).
+   * The machinery (BREAKDOWNS, incidents.ts, SCADA field actions) is kept so it can return later as an opt-in setting.
+   */
+  randomFailures: false,
   /** chance per week of a process incident when none is active */
   incidentChance: 0.06,
   /** chance per week that a covering operator diagnoses an incident unaided */
@@ -340,7 +345,7 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   // 2. breakdowns
   if (p.breakdown) {
     p.breakdown = p.breakdown.weeksLeft > 1 ? { ...p.breakdown, weeksLeft: p.breakdown.weeksLeft - 1 } : null;
-  } else {
+  } else if (OM.randomFailures) {
     const chance = 0.01 + (100 - p.condition) * 0.0006;
     if (rng.chance(chance)) {
       const units = p.graph.nodes.filter((n) => n.kind !== 'influent' && n.kind !== 'discharge');
@@ -368,7 +373,7 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
       messages.push(`${p.company} — the supervising engineer diagnosed and fixed the ${INCIDENT_LABEL[p.incident.kind].toLowerCase()} at ${p.incident.tag} on site.`);
       p.incident = null;
     }
-  } else if (!p.breakdown && rng.chance(OM.incidentChance)) {
+  } else if (OM.randomFailures && !p.breakdown && rng.chance(OM.incidentChance)) {
     p.incident = rollIncident(p.graph, week, rng);
     // an incident the standby absorbed is not a reliability problem; the rest are logged for variation orders
     if (p.incident?.unitId && !autoChangeover(p.graph, p.incident)) p.incidentLog = [...(p.incidentLog ?? []), { week, unitId: p.incident.unitId, kind: p.incident.kind }].slice(-30);
