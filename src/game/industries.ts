@@ -5,6 +5,7 @@
 import { Stream, emptyStream } from '../simulation/core/stream';
 import { setCbForPH } from '../simulation/chemistry/acidBase';
 import { Rng } from './rng';
+import { GENERIC_NAMES } from './clientNames';
 
 export type IndustryId = 'plating' | 'food' | 'semiconductor';
 
@@ -75,7 +76,7 @@ export const INDUSTRIES: Record<IndustryId, IndustryTemplate> = {
     inert: [20, 60],
     colloid: [20, 80],
     budgetPerM3d: [3200, 4200],
-    names: ['Delta Plating', 'Sinar Chrome Works', 'Kemas Metal Finishing', 'Perdana Electroplating', 'Jaya Surface Tech'],
+    names: GENERIC_NAMES.plating,
   },
   food: {
     id: 'food',
@@ -101,7 +102,7 @@ export const INDUSTRIES: Record<IndustryId, IndustryTemplate> = {
     colloid: [40, 150],
     budgetPerM3d: [3500, 4800],
     SO4: [0.5, 2],
-    names: ['Beta Foods', 'Seri Snacks Sdn Bhd', 'Mutiara Noodle Factory', 'Harum Sauce Industries', 'Lembah Dairy'],
+    names: GENERIC_NAMES.food,
   },
   semiconductor: {
     id: 'semiconductor',
@@ -126,7 +127,7 @@ export const INDUSTRIES: Record<IndustryId, IndustryTemplate> = {
     colloid: [100, 300],
     budgetPerM3d: [2200, 3000],
     SO4: [1, 6],
-    names: ['Alpha Electronics', 'Kristal Wafer Fab', 'Nusantara Microchips', 'Silikon Lembah Sdn Bhd'],
+    names: GENERIC_NAMES.semiconductor,
   },
 };
 

@@ -31,6 +31,7 @@ import { NumberField } from './NumberField';
 import { PidSheet } from './PidSheet';
 import { applicableInstruments, hasInst, STANDBY_BLOWER_EXTRA_RM, type InstKey } from '../../simulation/treatment/instrumentation';
 import { useHistory } from './useHistory';
+import { isUnitUnlocked } from '../../game/tech';
 import { useSimulation } from './useSimulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
@@ -116,6 +117,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
   const week = useGame((s) => s.week);
   const cash = useGame((s) => s.cash);
   const companyName = useGame((s) => s.companyName);
+  const tech = useGame((s) => s.tech);
   const rf = useReactFlow();
 
   const editable = !!p && (p.status === 'design' || p.status === 'failed');
@@ -311,7 +313,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
   const addUnit = useCallback(
     (kind: UnitType | 'disposal', position?: { x: number; y: number }) => {
-      if (!p || !editable) return;
+      if (!p || !editable || !isUnitUnlocked(kind, tech)) return;
       const node = makeNode(kind, p.datasheet.Q, draft.nodes);
       const isSludgeKind = (k: string) => k === 'disposal' || CATALOGUE[k as UnitType]?.category === 'sludge';
       // process units go along the main line, sludge units along a second row; each row spaced so nozzles never overlap
@@ -323,7 +325,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       setSelNodes(new Set([node.id]));
       setSelEdges(new Set());
     },
-    [p, editable, draft.nodes, snap, setDraft],
+    [p, editable, draft.nodes, snap, setDraft, tech],
   );
 
   // ---------- clipboard (copy / paste / duplicate)
@@ -341,6 +343,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       const map = new Map<string, string>();
       const nodes = [...g.nodes];
       for (const n of src.nodes) {
+        if (!isUnitUnlocked(n.kind, tech)) continue;
         const fresh = makeNode(n.kind, p.datasheet.Q, nodes);
         const pos = n.position ?? { x: 200, y: 200 };
         const added: PNode = { ...fresh, params: { ...n.params }, position: { x: pos.x + 40, y: pos.y + 40 } };
@@ -352,7 +355,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       clip.current = { nodes: src.nodes.map((n) => ({ ...n, position: n.position ? { x: n.position.x + 40, y: n.position.y + 40 } : n.position })), edges: src.edges };
       return { nodes, edges };
     });
-  }, [p, editable, setDraft]);
+  }, [p, editable, setDraft, tech]);
 
   // ---------- keyboard shortcuts (ignored while typing in a field)
   useEffect(() => {
@@ -450,7 +453,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
               {cat}
             </div>
             {UNIT_ORDER.filter((t) => CATALOGUE[t].category === cat).map((t) => (
-              <PaletteItem key={t} type={t} editable={editable} onAdd={addUnit} />
+              <PaletteItem key={t} type={t} editable={editable} locked={!isUnitUnlocked(t, tech)} onAdd={addUnit} />
             ))}
             {cat === 'sludge' && <DisposalPaletteItem editable={editable} onAdd={() => addUnit('disposal')} />}
           </div>
@@ -809,8 +812,16 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
   }
 }
 
-const PaletteItem = memo(function PaletteItem({ type, editable, onAdd }: { type: UnitType; editable: boolean; onAdd: (t: UnitType) => void }) {
+const PaletteItem = memo(function PaletteItem({ type, editable, locked, onAdd }: { type: UnitType; editable: boolean; locked: boolean; onAdd: (t: UnitType) => void }) {
   const cat = CATALOGUE[type].category;
+  if (locked)
+    return (
+      <div className="palette-item" title="Advanced technology — research it in the Technology Tree" style={{ background: '#e9edf1', color: '#7a8796', cursor: 'not-allowed' }}>
+        <UnitSymbol type={type} accent="#9aa7b4" />
+        <span style={{ flex: 1 }}>{CATALOGUE[type].name}</span>
+        <span aria-label="locked">🔒</span>
+      </div>
+    );
   return (
     <div
       className="palette-item"

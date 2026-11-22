@@ -9,7 +9,9 @@ import { linearGraph, simulate } from '../simulation/treatment/graph';
 import { INDUSTRIES, IndustryId, generateWastewater } from './industries';
 import { Datasheet, declaredDatasheet } from './lab';
 import { REFERENCE } from './referenceDesigns';
-import { createRng } from './rng';
+import { Rng, createRng } from './rng';
+import { TechId } from './tech';
+import { ClientVariant, VARIANT_CHANCE, VARIANT_PREMIUM, eligibleVariants } from './variants';
 
 export interface Enquiry {
   id: string;
@@ -29,12 +31,35 @@ export interface Enquiry {
   hidden: { undeclaredZn: boolean; undeclaredCrVI: boolean };
   postedWeek: number;
   expiresWeek: number;
+  /** tough job opened by a researched technology (variants.ts) */
+  variant?: { id: string; label: string; brief: string };
+}
+
+export interface EnquiryOptions {
+  /** researched technologies; undefined = legacy generation (no tough jobs) */
+  tech?: readonly TechId[];
+  /** company names already in play (open enquiries, projects, plants): not reused */
+  usedNames?: ReadonlySet<string>;
+}
+
+/**
+ * Company name: one RNG draw (so the rest of the enquiry is unchanged), then the next unused name in the list if the
+ * drawn one is already in play.
+ */
+function pickName(names: readonly string[], rng: Rng, used?: ReadonlySet<string>): string {
+  const i0 = Math.floor(rng.next() * names.length);
+  if (!used) return names[i0];
+  for (let k = 0; k < names.length; k++) {
+    const n = names[(i0 + k) % names.length];
+    if (!used.has(n)) return n;
+  }
+  return `${names[i0]} (second site)`;
 }
 
 /** Milestone payment schedule (typical design-and-build terms). */
 export const PAYMENT = { advance: 0.3, mechanicalCompletion: 0.6, retention: 0.1 };
 
-export function generateEnquiry(seed: number, week: number, reputation: number): Enquiry {
+export function generateEnquiry(seed: number, week: number, reputation: number, opts: EnquiryOptions = {}): Enquiry {
   const rng = createRng(seed);
   // early game: no semiconductor until some reputation is earned
   const pool: IndustryId[] = reputation >= 40 ? ['plating', 'food', 'semiconductor'] : ['plating', 'food'];
@@ -44,18 +69,30 @@ export function generateEnquiry(seed: number, week: number, reputation: number):
   const sizeFrac = Math.min(1, 0.35 + Math.max(0, reputation) / 100);
   const template = { ...t, Q: [t.Q[0], t.Q[0] + (t.Q[1] - t.Q[0]) * sizeFrac] as [number, number] };
   const ww = generateWastewater(template, rng);
-  const standard: StandardId = rng.chance(0.2 + Math.min(0.3, Math.max(0, reputation) / 400)) ? 'A' : 'B';
+  let standard: StandardId = rng.chance(0.2 + Math.min(0.3, Math.max(0, reputation) / 400)) ? 'A' : 'B';
   const difficult = rng.chance(0.2);
 
-  const ref = simulate(linearGraph(REFERENCE[industry](ww.stream)), ww.stream);
+  // tough job: an independent RNG stream, so the base enquiry for this seed is unchanged
+  let variant: ClientVariant | undefined;
+  if (opts.tech) {
+    const vr = createRng(seed * 7919 + 17);
+    const open = eligibleVariants(industry, opts.tech);
+    if (open.length && vr.chance(VARIANT_CHANCE)) {
+      variant = vr.pick(open);
+      ww.stream = variant.overlay(ww.stream, vr);
+      if (variant.standardA) standard = 'A';
+    }
+  }
+  const refTrain = variant ? variant.reference(ww.stream) : REFERENCE[industry](ww.stream);
+  const ref = simulate(linearGraph(refTrain), ww.stream);
   const markup = rng.range(1.35, 1.6);
   const repFactor = 1 + Math.min(0.15, Math.max(-0.15, reputation / 600));
-  const contractValue = Math.round((ref.capex * markup * (standard === 'A' ? 1.25 : 1) * repFactor * (difficult ? 0.88 : 1)) / 1000) * 1000;
+  const contractValue = Math.round((ref.capex * markup * (standard === 'A' ? 1.25 : 1) * repFactor * (difficult ? 0.88 : 1) * (variant ? VARIANT_PREMIUM : 1)) / 1000) * 1000;
 
   return {
     id: `E${seed}`,
     seed,
-    company: rng.pick(t.names),
+    company: pickName(t.names, rng, opts.usedNames),
     industry,
     standard,
     contractValue,
@@ -68,5 +105,6 @@ export function generateEnquiry(seed: number, week: number, reputation: number):
     hidden: ww.hidden,
     postedWeek: week,
     expiresWeek: week + rng.int(3, 6),
+    ...(variant ? { variant: { id: variant.id, label: variant.label, brief: variant.brief } } : {}),
   };
 }

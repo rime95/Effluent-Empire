@@ -15,8 +15,9 @@ import { Plants } from './screens/Plants';
 import { Scada } from './screens/Scada';
 import { Staff } from './screens/Staff';
 import { Finance } from './screens/Finance';
+import { TechTree } from './screens/TechTree';
 
-export type Screen = 'hq' | 'enquiries' | 'lab' | 'studio' | 'commission' | 'plants' | 'staff' | 'finance' | 'book' | 'scada';
+export type Screen = 'hq' | 'enquiries' | 'lab' | 'studio' | 'commission' | 'plants' | 'staff' | 'finance' | 'book' | 'scada' | 'tech';
 
 const COMPANY: { id: Screen; label: string; icon: string }[] = [
   { id: 'hq', label: 'Company HQ', icon: 'hq' },
@@ -25,6 +26,7 @@ const COMPANY: { id: Screen; label: string; icon: string }[] = [
   { id: 'scada', label: 'SCADA Operations', icon: 'scada' },
   { id: 'staff', label: 'Employees', icon: 'staff' },
   { id: 'finance', label: 'Finance', icon: 'finance' },
+  { id: 'tech', label: 'Technology Tree', icon: 'tree' },
   { id: 'book', label: 'Encyclopedia', icon: 'book' },
 ];
 const PROJECT: { id: Screen; label: string; icon: string }[] = [
@@ -33,7 +35,6 @@ const PROJECT: { id: Screen; label: string; icon: string }[] = [
   { id: 'commission', label: 'Commissioning', icon: 'commission' },
 ];
 const LOCKED = [
-  { label: 'Technology Tree', icon: 'tree' },
   { label: 'World Map', icon: 'map' },
 ];
 
@@ -200,6 +201,7 @@ function Game({ onQuit }: { onQuit: () => void }) {
         {screen === 'finance' && <Finance />}
         {screen === 'book' && <Encyclopedia />}
         {screen === 'scada' && <Scada go={setScreen} />}
+        {screen === 'tech' && <TechTree />}
       </main>
       {g.toast && (
         <div className="toast" onClick={() => g.dismissToast()}>

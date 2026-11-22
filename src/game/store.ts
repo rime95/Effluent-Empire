@@ -12,6 +12,7 @@ import { importLegacy, newSlotId, readSlot, summarize, writeSlot } from './saves
 import { OM, Plant, contractFor, omFeeQuote, operateWeek, plantPosts, recommendedMaintenance } from './operations';
 import { simulate } from '../simulation/treatment/graph';
 import { completeUpgrade, upgradeQuote } from './upgrade';
+import { TECH, TechId, canResearch } from './tech';
 import { Project, ABANDON_PENALTY, commission, constructionWeeks, newProject } from './project';
 import { createRng } from './rng';
 import { Employee, founder, generateCandidates, labDiscount, labWeeks, operatorCapacity, payroll, projectSlots, salesBoost } from './staff';
@@ -25,7 +26,7 @@ export const CREDIT_LINE = 250_000;
 /** weeks of negative cash allowed (bank overdraft) before insolvency */
 export const OVERDRAFT_WEEKS = 6;
 
-export type LedgerCat = 'capital' | 'project' | 'om' | 'opex' | 'maintenance' | 'payroll' | 'overhead' | 'lab' | 'capex' | 'penalty' | 'hiring';
+export type LedgerCat = 'capital' | 'project' | 'om' | 'opex' | 'maintenance' | 'payroll' | 'overhead' | 'lab' | 'capex' | 'penalty' | 'hiring' | 'research';
 
 export interface HistoryEntry {
   week: number;
@@ -68,6 +69,8 @@ export interface GameState {
   toast: string | null;
   /** Engineering Studio shows this operating plant (PFD / P&ID, upgrades) instead of the active project */
   studioPlantId?: string | null;
+  /** advanced technologies researched (Technology Tree); basic units need none */
+  tech: TechId[];
 }
 
 interface Actions {
@@ -95,6 +98,8 @@ interface Actions {
   dismissToast: () => void;
   /** open an operating plant's PFD in the Studio (null = back to the active project) */
   openPlantStudio: (plantId: string | null) => void;
+  /** Technology Tree: buy an advanced technology (cash only, instant) */
+  research: (id: TechId) => { ok: boolean; text: string };
   /** start / edit / discard / submit an upgrade (variation order) of an operating plant */
   startUpgrade: (plantId: string) => void;
   setUpgradeGraph: (plantId: string, g: ProcessGraph) => void;
@@ -145,6 +150,7 @@ function initial(name = 'Effluent Engineering Sdn Bhd'): GameState {
     gameOver: false,
     toast: null,
     studioPlantId: null,
+    tech: [],
   };
   return refill(base);
 }
@@ -159,7 +165,9 @@ function refill(s: GameState): GameState {
   while (open.length < target) {
     seed += 1;
     // sales staff win larger jobs: they act like extra reputation for project size and value
-    open.push(generateEnquiry(seed, s.week, s.reputation + 15 * boost));
+    // names already in play (open enquiries, projects, operated plants) are not reused
+    const usedNames = new Set([...open.map((e) => e.company), ...s.projects.filter((p) => p.status !== 'abandoned').map((p) => p.enquiry.company), ...s.plants.filter((p) => p.status === 'operating').map((p) => p.company)]);
+    open.push(generateEnquiry(seed, s.week, s.reputation + 15 * boost, { tech: s.tech ?? [], usedNames }));
   }
   return { ...s, enquiries: open, seedCounter: seed };
 }
@@ -222,6 +230,7 @@ export function migrate(raw: unknown): GameState | null {
       ledger: Array.isArray(v.ledger) ? v.ledger : [],
       seedCounter: typeof v.seedCounter === 'number' ? v.seedCounter : d.seedCounter,
       negativeWeeks: v.negativeWeeks ?? 0,
+      tech: Array.isArray(v.tech) ? v.tech.filter((t): t is TechId => t in TECH) : [],
       version: 2,
       toast: null,
     } as GameState;
@@ -248,6 +257,7 @@ export function migrate(raw: unknown): GameState | null {
     history: old.history ?? [],
     ledger: (old.ledger ?? []).slice(-400),
     negativeWeeks: 0,
+    tech: [],
     gameOver: old.gameOver ?? false,
     toast: null,
   };
@@ -406,6 +416,21 @@ export const useGame = create<GameState & Actions>((set, get) => {
     decline: (id) => set((s) => ({ enquiries: s.enquiries.filter((x) => x.id !== id) })),
     setActiveProject: (id) => set({ activeProjectId: id, studioPlantId: null }),
     openPlantStudio: (plantId) => set({ studioPlantId: plantId }),
+    research: (id) => {
+      const s = get();
+      if (s.gameOver) return { ok: false, text: 'Company insolvent.' };
+      const chk = canResearch(id, s, CREDIT_LINE);
+      if (!chk.ok) return { ok: false, text: chk.reason };
+      const t = TECH[id];
+      const next = book(s, `Research: ${t.name}`, -t.costRM, 'research');
+      set({
+        ...next,
+        tech: [...s.tech, id],
+        news: [...next.news, { week: s.week, text: `Technology researched: ${t.name}. ${t.clients.length ? `New clients: ${t.clients.join('; ')}.` : ''}` }].slice(-60),
+        toast: `${t.name} researched — available in the Engineering Studio.`,
+      });
+      return { ok: true, text: `${t.name} researched.` };
+    },
     startUpgrade: (plantId) =>
       set((s) => {
         // an upgrade is engineering work: it needs a free engineer until hand-over (or the draft is discarded)

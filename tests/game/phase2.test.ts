@@ -87,7 +87,7 @@ describe('staff effects', () => {
 describe('time and saves', () => {
   const base = (): GameState => ({
     version: 2, companyName: 'T', cash: 500_000, reputation: 0, week: 1, seedCounter: 4242, enquiries: [], projects: [], activeProjectId: null,
-    staff: [founder()], candidates: [], plants: [], market: initialMarket(), news: [], history: [], ledger: [], negativeWeeks: 0, gameOver: false, toast: null,
+    staff: [founder()], candidates: [], plants: [], market: initialMarket(), news: [], history: [], ledger: [], negativeWeeks: 0, gameOver: false, toast: null, tech: [],
   });
   it('a week costs overheads and refills enquiries', () => {
     const s = stepWeek(base());
@@ -129,7 +129,7 @@ describe('time and saves', () => {
 describe('QA regressions', () => {
   const base = (): GameState => ({
     version: 2, companyName: 'T', cash: 500_000, reputation: 0, week: 1, seedCounter: 4242, enquiries: [], projects: [], activeProjectId: null,
-    staff: [founder()], candidates: [], plants: [], market: initialMarket(), news: [], history: [], ledger: [], negativeWeeks: 0, gameOver: false, toast: null,
+    staff: [founder()], candidates: [], plants: [], market: initialMarket(), news: [], history: [], ledger: [], negativeWeeks: 0, gameOver: false, toast: null, tech: [],
   });
   it('a bypassed unit keeps upstream flow splits unchanged', () => {
     const p = plantFor('plating', 10);

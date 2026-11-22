@@ -16,6 +16,7 @@ const CAT_LABEL: Record<LedgerCat, string> = {
   capex: 'Construction',
   penalty: 'Penalties',
   hiring: 'Recruitment',
+  research: 'Research (Technology Tree)',
 };
 
 /** Saves from before Phase 2 have uncategorised ledger lines: infer the category from the label. */
