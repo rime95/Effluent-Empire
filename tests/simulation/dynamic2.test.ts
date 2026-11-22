@@ -110,7 +110,8 @@ describe('SCADA store actions', () => {
     };
   };
   it('wrong action charges and records the attempt; right action clears the incident', () => {
-    useGame.setState({ plants: [mkPlant()], cash: 100_000, gameOver: false });
+    // no engineers → no supervision discount (see tests/game/engineers.test.ts)
+    useGame.setState({ plants: [mkPlant()], cash: 100_000, gameOver: false, staff: [], projects: [] });
     const wrong = useGame.getState().resolveIncident('p1', 'recalibrate');
     expect(wrong.ok).toBe(false);
     expect(useGame.getState().plants[0].incident?.tried).toEqual(['recalibrate']);

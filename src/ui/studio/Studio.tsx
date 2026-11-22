@@ -14,7 +14,8 @@ import {
   type Node,
   type NodeChange,
 } from '@xyflow/react';
-import { useActiveProject, useGame } from '../../game/store';
+import { engineersBusy, useActiveProject, useGame } from '../../game/store';
+import { projectSlots } from '../../game/staff';
 import { designBasis } from '../../game/lab';
 import { constructionWeeks, makeNode, retrofitCharge, RETROFIT_PREMIUM, type Project } from '../../game/project';
 import type { Plant } from '../../game/operations';
@@ -1122,6 +1123,7 @@ function PlantPanel({ plant, draft, sim, busy, week, go, flush }: { plant: Plant
   const discardUpgrade = useGame((s) => s.discardUpgrade);
   const submitUpgrade = useGame((s) => s.submitUpgrade);
   const cash = useGame((s) => s.cash);
+  const engineerFree = useGame((s) => engineersBusy(s) < projectSlots(s.staff));
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const u = plant.upgrade;
   // the as-built plant on today's influent (once per plant state, not per edit)
@@ -1148,9 +1150,12 @@ function PlantPanel({ plant, draft, sim, busy, week, go, flush }: { plant: Plant
           <p className="muted" style={{ fontSize: 12 }}>
             Add standby pumps, control loops or instruments you left out, change options, or add, resize and remove units. You pay the works when ordered. The client pays a variation order (cost + {Math.round((VO_MARKUP - 1) * 100)} %) at hand-over for the units needed to restore compliance after failed samples, and for instruments that remedy recent incidents on that unit; the rest is yours.
           </p>
-          <button className="btn primary" style={{ width: '100%' }} onClick={() => startUpgrade(plant.id)}>
+          <button className="btn primary" style={{ width: '100%' }} disabled={!engineerFree} onClick={() => startUpgrade(plant.id)}>
             Propose upgrade ▸
           </button>
+          <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+            {engineerFree ? 'An upgrade takes one engineer until hand-over or until you discard the draft.' : 'All engineers are busy on projects or upgrades — hire an engineer or finish one first.'}
+          </p>
         </>
       )}
 

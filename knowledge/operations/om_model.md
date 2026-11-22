@@ -99,10 +99,19 @@ A staffed, maintained reference plant is more than 85 % compliant and profitable
 - About RM 120–250k net per year per plant before operator salary (fixed-fee model; `tests/game/omContract.test.ts`). The old lump-sum model gave about RM 90–120k.
 - Neglected plants (no maintenance, no operator) lose more than 40 condition points per year.
 
+## Engineers on O&M (added 2026-11-22, player decision)
+Engineers that are not running a project or a plant upgrade are **free engineers**. In GAME MODEL terms they:
+- **Run upgrades.** An upgrade takes one engineer from "Propose upgrade" until hand-over, or until the draft is discarded. It counts against the same slots as projects (`engineersBusy`).
+- **Supervise plants as CePIETSO.** Each free engineer is the in-house competent person for up to 4 operating plants (`OM.plantsPerEngineer`, portfolio order, `supervisedPlantIds`). Those plants do not pay the external part-time supervisor (the fee's CePIETSO line becomes margin). `verify:` plants per competent person.
+- **Fix incidents on site.** On a supervised plant there is a 50 %/week chance (`OM.engineerFixChance`), from the week after the alarm, that the engineer diagnoses and fixes an open incident. This is independent of the operator's 25 % chance, and it works even when no operator covers the plant.
+- **Narrow the diagnosis.** A SCADA field action that misses the cause costs half (`OM.engineerWrongActionFactor`) on a supervised plant. Correct actions are charged in full.
+
+Tests: `tests/game/engineers.test.ts`.
+
 ## Staff (`src/game/staff.ts`)
 | Role | Effect | Salary (RM/month) |
 |---|---|---|
-| Engineer | 1 concurrent project each (the founder counts) | 5,500–11,500 |
+| Engineer | 1 concurrent project **or plant upgrade** each (the founder counts); free engineers supervise operating plants (see below) | 5,500–11,500 |
 | Lab technician | −15 % lab cost each (max −45 %); 2-week tests take 1 week | 3,000–4,800 |
 | Plant operator | staffs 1 operator post (1.5 when senior); a plant needs 0.5–2.5 posts | 2,800–4,200 |
 | Sales engineer | +1 enquiry each (max +3), larger and better-paid jobs | 5,000–9,500 |

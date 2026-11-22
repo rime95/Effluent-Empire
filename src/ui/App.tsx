@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { closeGame, exportSave, isLive, saveAsNewSlot, saveNow, useActiveProject, useGame } from '../game/store';
+import { closeGame, engineersBusy, exportSave, isLive, saveAsNewSlot, saveNow, useActiveProject, useGame } from '../game/store';
 import { downloadSave } from '../game/saves';
 import { MainMenu } from './screens/MainMenu';
 import { projectSlots } from '../game/staff';
@@ -71,7 +71,7 @@ function Game({ onQuit }: { onQuit: () => void }) {
 
   const weeksLeft = p && isLive(p) ? p.startedWeek + p.enquiry.deadlineWeeks - g.week : null;
   const pending = g.projects.some((x) => x.labQueue.length > 0 || x.building);
-  const live = g.projects.filter(isLive).length;
+  const live = engineersBusy(g);
 
   return (
     <div className="app">

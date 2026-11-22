@@ -1,5 +1,5 @@
 import { plantPosts } from '../../game/operations';
-import { useGame, isLive } from '../../game/store';
+import { engineersBusy, freeEngineers, supervisedPlantIds, useGame } from '../../game/store';
 import { LEVEL_LABEL, ROLES, Role, count, labDiscount, operatorCapacity, payroll, projectSlots, salesBoost, weeklySalary } from '../../game/staff';
 import { rm } from '../format';
 
@@ -16,11 +16,13 @@ export function Staff() {
       </p>
       <div className="grid g4" style={{ marginBottom: 14 }}>
         <div className="panel stat">
-          <div className="label">Project capacity</div>
+          <div className="label">Engineers</div>
           <div className="value">
-            {g.projects.filter(isLive).length} / {projectSlots(g.staff)}
+            {engineersBusy(g)} / {projectSlots(g.staff)}
           </div>
-          <div className="hint">one project per engineer</div>
+          <div className="hint">
+            busy on projects/upgrades · free: {freeEngineers(g)}, supervising {supervisedPlantIds(g).size} of {g.plants.filter((p) => p.status === 'operating').length} plant(s)
+          </div>
         </div>
         <div className="panel stat">
           <div className="label">Lab discount</div>

@@ -1,4 +1,4 @@
-import { isLive, useGame } from '../../game/store';
+import { engineersBusy, useGame } from '../../game/store';
 import { projectSlots } from '../../game/staff';
 import { INDUSTRIES } from '../../game/industries';
 import type { Screen } from '../App';
@@ -9,13 +9,13 @@ const IND_COLOR: Record<string, string> = { plating: 'var(--chem)', food: 'var(-
 export function Enquiries({ go }: { go: (s: Screen) => void }) {
   const g = useGame();
   const slots = projectSlots(g.staff);
-  const live = g.projects.filter(isLive).length;
+  const live = engineersBusy(g);
   const busy = live >= slots;
   return (
     <div className="page">
       <h1>Customer Enquiries</h1>
       <p className="sub">
-        Declared data comes from the customer and is approximate — undeclared contaminants happen. Engineers busy: {live} / {slots}. {busy && <b style={{ color: 'var(--warn)' }}>Hire another engineer to run more projects in parallel.</b>}
+        Declared data comes from the customer and is approximate — undeclared contaminants happen. Engineers busy (projects + plant upgrades): {live} / {slots}. {busy && <b style={{ color: 'var(--warn)' }}>Hire another engineer to run more projects in parallel.</b>}
       </p>
       {g.enquiries.length === 0 && <p className="muted">No open enquiries. Advance a week.</p>}
       <div className="grid g3">

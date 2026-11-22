@@ -1,6 +1,7 @@
 /**
  * Employees. Effects are deliberately simple and readable (GAME MODEL):
- *   engineer  — each runs one active project (founder counts)
+ *   engineer  — runs one project or plant upgrade (founder counts); a free engineer supervises up to 4 O&M plants
+ *               as CePIETSO, fixes incidents on site and halves wrong SCADA guesses (operations.ts OM)
  *   labTech   — lab tests cheaper (−15 % each, max −45 %) and the 2-week test becomes 1 week
  *   operator  — staffs 1 operator post (1.5 when senior); each O&M plant needs the posts its contract bills
  *               (operations.ts operatorFTE); uncovered plants wear faster and stay broken longer
@@ -22,7 +23,7 @@ export interface Employee {
 }
 
 export const ROLES: Record<Role, { label: string; salary: [number, number, number]; effect: string }> = {
-  engineer: { label: 'Process Engineer', salary: [5_500, 8_000, 11_500], effect: 'Runs one active project at a time.' },
+  engineer: { label: 'Process Engineer', salary: [5_500, 8_000, 11_500], effect: 'Runs one project or plant upgrade at a time. When free, supervises up to 4 operating plants as CePIETSO (no external supervision cost), fixes incidents on site and halves the cost of wrong SCADA guesses.' },
   labTech: { label: 'Laboratory Technician', salary: [3_000, 3_800, 4_800], effect: 'Lab tests 15 % cheaper each; long tests take 1 week instead of 2.' },
   operator: { label: 'Plant Operator', salary: [2_800, 3_400, 4_200], effect: 'Staffs 1 operator post (1.5 when senior). Each O&M plant needs the posts its contract bills (0.5–2.5). Uncovered plants wear out and stay broken longer.' },
   sales: { label: 'Sales Engineer', salary: [5_000, 7_000, 9_500], effect: '+1 open enquiry and larger, better-paid projects.' },

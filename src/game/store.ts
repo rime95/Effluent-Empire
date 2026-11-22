@@ -105,6 +105,22 @@ interface Actions {
 const LIVE: Project['status'][] = ['design', 'building', 'failed'];
 export const isLive = (p: Project) => LIVE.includes(p.status);
 
+/** Engineers tied up: one per live project and one per plant upgrade (drafted or under construction). */
+export function engineersBusy(s: Pick<GameState, 'projects' | 'plants'>): number {
+  return s.projects.filter(isLive).length + s.plants.filter((p) => p.status === 'operating' && p.upgrade).length;
+}
+
+/** Engineers with no project or upgrade: they supervise operating plants (CePIETSO, on-site diagnosis). */
+export function freeEngineers(s: Pick<GameState, 'projects' | 'plants' | 'staff'>): number {
+  return Math.max(0, projectSlots(s.staff) - engineersBusy(s));
+}
+
+/** Operating plants supervised by a free engineer, in portfolio order (OM.plantsPerEngineer each). */
+export function supervisedPlantIds(s: Pick<GameState, 'projects' | 'plants' | 'staff'>): Set<string> {
+  const n = freeEngineers(s) * OM.plantsPerEngineer;
+  return new Set(s.plants.filter((p) => p.status === 'operating').slice(0, n).map((p) => p.id));
+}
+
 function initial(name = 'Effluent Engineering Sdn Bhd'): GameState {
   const seed = 1000 + Math.floor(Math.random() * 1e6);
   const base: GameState = {
@@ -292,6 +308,7 @@ export function stepWeek(state: GameState): GameState {
 
   // 2. operated plants
   let capacity = operatorCapacity(s.staff);
+  const supervised = supervisedPlantIds(s);
   const plants: Plant[] = [];
   for (const pl of s.plants) {
     if (pl.status !== 'operating') {
@@ -315,7 +332,7 @@ export function stepWeek(state: GameState): GameState {
       if (u.clientFunded && u.price) s = book(s, `Variation order paid: ${pl.company}`, u.price, 'project');
       notices.push(`${pl.company}: upgrade works handed over${u.clientFunded ? ` — client paid the variation order (RM ${(u.price ?? 0).toLocaleString()})` : ''}. Service fee now RM ${cur.contract?.monthlyFee.toLocaleString() ?? '—'}/month.`);
     }
-    const out = operateWeek(cur, week, s.market, covered);
+    const out = operateWeek(cur, week, s.market, covered, supervised.has(pl.id));
     plants.push(out.plant);
     const rec = out.plant.history[out.plant.history.length - 1];
     if (rec?.fee !== undefined && (rec.fee || rec.deduction || rec.reimbursed)) {
@@ -379,8 +396,7 @@ export const useGame = create<GameState & Actions>((set, get) => {
     accept: (id) =>
       set((s) => {
         if (s.gameOver) return {};
-        const live = s.projects.filter(isLive).length;
-        if (live >= projectSlots(s.staff)) return { toast: `All ${projectSlots(s.staff)} engineer(s) are busy — hire another engineer or finish a project first.` };
+        if (engineersBusy(s) >= projectSlots(s.staff)) return { toast: `All ${projectSlots(s.staff)} engineer(s) are busy on projects or plant upgrades — hire another engineer or finish one first.` };
         const e = s.enquiries.find((x) => x.id === id);
         if (!e) return {};
         const advance = Math.round(e.contractValue * PAYMENT.advance);
@@ -391,9 +407,11 @@ export const useGame = create<GameState & Actions>((set, get) => {
     setActiveProject: (id) => set({ activeProjectId: id, studioPlantId: null }),
     openPlantStudio: (plantId) => set({ studioPlantId: plantId }),
     startUpgrade: (plantId) =>
-      set((s) => ({
-        plants: s.plants.map((p) => (p.id === plantId && p.status === 'operating' && !p.upgrade ? { ...p, upgrade: { graph: structuredClone(p.graph), phase: 'draft' } } : p)),
-      })),
+      set((s) => {
+        // an upgrade is engineering work: it needs a free engineer until hand-over (or the draft is discarded)
+        if (engineersBusy(s) >= projectSlots(s.staff)) return { toast: `All ${projectSlots(s.staff)} engineer(s) are busy — an upgrade needs a free engineer. Hire one or finish a project first.` };
+        return { plants: s.plants.map((p) => (p.id === plantId && p.status === 'operating' && !p.upgrade ? { ...p, upgrade: { graph: structuredClone(p.graph), phase: 'draft' } } : p)) };
+      }),
     setUpgradeGraph: (plantId, g) => set((s) => ({ plants: s.plants.map((p) => (p.id === plantId && p.upgrade?.phase === 'draft' ? { ...p, upgrade: { ...p.upgrade, graph: g } } : p)) })),
     discardUpgrade: (plantId) => set((s) => ({ plants: s.plants.map((p) => (p.id === plantId && p.upgrade?.phase === 'draft' ? { ...p, upgrade: null } : p)) })),
     submitUpgrade: (plantId) => {
@@ -520,11 +538,14 @@ export const useGame = create<GameState & Actions>((set, get) => {
       if (!a) return { ok: false, text: 'That action is not available for this incident on this plant.' };
       const ok = a.fixes.includes(pl.incident.kind);
       const label = INCIDENT_LABEL[pl.incident.kind];
-      const text = ok ? `${a.label}: ${a.explain} Incident closed (${label}).` : `${a.label}: no improvement — the cause lies elsewhere.`;
-      let next: GameState = a.cost ? book(s, `SCADA action at ${pl.company}: ${a.label}`, -a.cost, 'maintenance') : { ...s };
+      // a supervising engineer narrows the diagnosis: a wrong guess is called off early and costs less
+      const assisted = !ok && supervisedPlantIds(s).has(pl.id);
+      const cost = Math.round(a.cost * (assisted ? OM.engineerWrongActionFactor : 1));
+      const text = ok ? `${a.label}: ${a.explain} Incident closed (${label}).` : `${a.label}: no improvement — the cause lies elsewhere.${assisted ? ` Your engineer stopped it early (RM ${cost.toLocaleString()} instead of RM ${a.cost.toLocaleString()}).` : ''}`;
+      let next: GameState = cost ? book(s, `SCADA action at ${pl.company}: ${a.label}`, -cost, 'maintenance') : { ...s };
       next = {
         ...next,
-        plants: next.plants.map((p) => (p.id !== plantId || !p.incident ? p : { ...p, actionCost: (p.actionCost ?? 0) + a.cost, incident: ok ? null : { ...p.incident, tried: [...p.incident.tried, a.id] }, satisfaction: ok ? Math.min(100, p.satisfaction + 2) : p.satisfaction })),
+        plants: next.plants.map((p) => (p.id !== plantId || !p.incident ? p : { ...p, actionCost: (p.actionCost ?? 0) + cost, incident: ok ? null : { ...p.incident, tried: [...p.incident.tried, a.id] }, satisfaction: ok ? Math.min(100, p.satisfaction + 2) : p.satisfaction })),
         news: [...next.news, { week: s.week, text: `${pl.company} — ${text}` }].slice(-60),
       };
       set(next);
@@ -563,7 +584,7 @@ export const useGame = create<GameState & Actions>((set, get) => {
         const e = s.staff.find((x) => x.id === eid);
         if (!e || e.founder) return {};
         const staff = s.staff.filter((x) => x.id !== eid);
-        if (e.role === 'engineer' && s.projects.filter(isLive).length > projectSlots(staff)) return { toast: 'That engineer is running a project — finish it first.' };
+        if (e.role === 'engineer' && engineersBusy(s) > projectSlots(staff)) return { toast: 'That engineer is running a project or an upgrade — finish it first.' };
         const severance = Math.round(e.salaryMonthly);
         return { ...book({ ...s, staff }, `Severance: ${e.name}`, -severance, 'payroll'), toast: `${e.name} has left (one month severance).` };
       }),

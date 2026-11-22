@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { useGame } from '../../game/store';
+import { supervisedPlantIds, useGame } from '../../game/store';
 import { OM, Plant, WEEKS_PER_MONTH, plantPosts, recommendedMaintenance } from '../../game/operations';
 import { OMFeeTable } from '../components/OMFee';
 import type { Screen } from '../App';
@@ -24,6 +24,7 @@ export function Plants({ go }: { go: (s: Screen) => void }) {
   const operating = g.plants.filter((p) => p.status === 'operating');
   const capacity = operatorCapacity(g.staff);
   const postsNeeded = operating.reduce((a, p) => a + plantPosts(p), 0);
+  const supervised = supervisedPlantIds(g);
   // plants are staffed in portfolio order (as in the weekly tick)
   let left = capacity;
   const uncovered = operating.filter((p) => {
@@ -44,7 +45,7 @@ export function Plants({ go }: { go: (s: Screen) => void }) {
     <div className="page">
       <h1>Plants &amp; O&amp;M contracts</h1>
       <p className="sub">
-        Operated plants earn a fixed monthly service fee, and chemicals, power and sludge are re-billed to the client at cost + {Math.round(OM.handling * 100)} %. You pay maintenance, CePIETSO supervision, compliance sampling, repairs and DOE fines; operators are on your payroll. Operator posts: {capacity} staffed / {postsNeeded} needed by {operating.length} plant(s)
+        Operated plants earn a fixed monthly service fee, and chemicals, power and sludge are re-billed to the client at cost + {Math.round(OM.handling * 100)} %. You pay maintenance, CePIETSO supervision, compliance sampling, repairs and DOE fines; operators are on your payroll. Operator posts: {capacity} staffed / {postsNeeded} needed by {operating.length} plant(s). Engineer-supervised: {supervised.size} of {operating.length} (free engineers act as CePIETSO for up to {OM.plantsPerEngineer} plants each, fix incidents on site and save the external supervision cost)
         {uncovered > 0 && <b style={{ color: 'var(--warn)' }}> — {uncovered} plant(s) uncovered (faster wear, longer breakdowns). Hire operators.</b>}
       </p>
       {g.plants.length === 0 && <div className="panel muted">No plants yet. Commission a plant and accept the O&amp;M contract the customer offers.</div>}
@@ -139,6 +140,12 @@ function PlantDetail({ plant, go }: { plant: Plant; go: (s: Screen) => void }) {
           )}
         </div>
         {plant.breakdown && <div className="note error">Breakdown at {plant.breakdown.tag}: {plant.breakdown.description} — {plant.breakdown.weeksLeft} wk to repair.</div>}
+        {plant.status === 'operating' && (
+          <div className="calc">
+            <span>Engineer supervision (CePIETSO)</span>
+            <span style={{ color: supervisedPlantIds(g).has(plant.id) ? undefined : 'var(--warn)' }}>{supervisedPlantIds(g).has(plant.id) ? 'in-house engineer' : 'external — no free engineer'}</span>
+          </div>
+        )}
         <div className="calc">
           <span>Equipment condition</span>
           <span>{plant.condition.toFixed(0)} %</span>

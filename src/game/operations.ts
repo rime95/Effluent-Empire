@@ -57,6 +57,13 @@ export const OM = {
   fineBase: 20_000,
   fineMax: 100_000,
   terminateBelow: 25,
+  // ---- engineers on O&M (GAME MODEL, knowledge/operations/om_model.md "Engineers") ----
+  /** plants one free engineer supervises as the CePIETSO competent person (part-time visits) — verify */
+  plantsPerEngineer: 4,
+  /** chance per week that the supervising engineer diagnoses and fixes an open incident on site */
+  engineerFixChance: 0.5,
+  /** SCADA field actions that miss the cause cost this fraction on an engineer-supervised plant (the engineer narrows the diagnosis) */
+  engineerWrongActionFactor: 0.5,
 };
 
 export interface Breakdown {
@@ -76,6 +83,8 @@ export interface WeekRecord {
   flowFactor: number;
   event?: string;
   fine?: number;
+  /** an engineer supervised the plant this week (CePIETSO in-house, incidents diagnosed on site) */
+  supervised?: boolean;
   /** revenue split (absent on old records): fixed fee, reimbursables billed, performance deduction */
   fee?: number;
   reimbursed?: number;
@@ -214,8 +223,8 @@ export function indexedFee(q: FeeQuote, indexation = 1): number {
  * escalated with the contract. Operators are on payroll; management is head-office overhead recovery (the company
  * already pays office overheads), so it is not charged again to the plant.
  */
-export function weeklyServiceCost(q: FeeQuote, indexation = 1): number {
-  return ((q.supervision + q.lab) * indexation) / WEEKS_PER_MONTH;
+export function weeklyServiceCost(q: FeeQuote, indexation = 1, inHouseCePIETSO = false): number {
+  return (((inHouseCePIETSO ? 0 : q.supervision) + q.lab) * indexation) / WEEKS_PER_MONTH;
 }
 
 /** Instruments that would have prevented or contained each incident kind (for reliability variation orders). */
@@ -282,7 +291,11 @@ export interface WeekOutcome {
   messages: string[];
 }
 
-export function operateWeek(plant: Plant, week: number, market: Market, covered: boolean): WeekOutcome {
+/**
+ * One week of O&M. `covered`: all operator posts staffed. `supervised`: one of the company's free engineers is the
+ * plant's CePIETSO competent person — no external supervision cost, and incidents are diagnosed on site.
+ */
+export function operateWeek(plant: Plant, week: number, market: Market, covered: boolean, supervised = false): WeekOutcome {
   const rng = createRng(plant.seed * 131 + week);
   const p: Plant = { ...plant, history: [...plant.history] };
   const messages: string[] = [];
@@ -308,7 +321,8 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   costs.maintenance = p.maintenanceBudget;
   // CePIETSO supervision and weekly compliance sampling (operators are on payroll, management is overhead recovery)
   if (p.contract) {
-    costs.service = weeklyServiceCost(p.contract.quote, p.contract.indexation ?? 1);
+    // an in-house engineer as CePIETSO replaces the external part-time supervisor; sampling is still bought in
+    costs.service = weeklyServiceCost(p.contract.quote, p.contract.indexation ?? 1, supervised);
     cost += costs.service;
   }
 
@@ -338,6 +352,9 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   if (p.incident) {
     if (covered && week > p.incident.startWeek && rng.chance(OM.operatorFixChance)) {
       messages.push(`${p.company} — operators traced and fixed the ${INCIDENT_LABEL[p.incident.kind].toLowerCase()} at ${p.incident.tag}.`);
+      p.incident = null;
+    } else if (supervised && week > p.incident.startWeek && rng.chance(OM.engineerFixChance)) {
+      messages.push(`${p.company} — the supervising engineer diagnosed and fixed the ${INCIDENT_LABEL[p.incident.kind].toLowerCase()} at ${p.incident.tag} on site.`);
       p.incident = null;
     }
   } else if (!p.breakdown && rng.chance(OM.incidentChance)) {
@@ -410,7 +427,7 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   if (deduction) messages.push(`${p.company}: failed sample — performance deduction RM ${Math.round(deduction).toLocaleString()} from the service fee.`);
   const revenue = fee - deduction + reimbursed;
   // field-action costs were paid when taken (ledger); they are shown in this week's plant costs but not charged again
-  p.history = [...p.history, { week, pass, failed, revenue, cost: cost + costs.actions, condition: p.condition, flowFactor, event, fine, fee, reimbursed, deduction, costs }].slice(-52);
+  p.history = [...p.history, { week, pass, failed, revenue, cost: cost + costs.actions, condition: p.condition, flowFactor, event, fine, fee, reimbursed, deduction, costs, supervised }].slice(-52);
 
   // 5. contract lifecycle
   if (p.contract && p.satisfaction < OM.terminateBelow) {
