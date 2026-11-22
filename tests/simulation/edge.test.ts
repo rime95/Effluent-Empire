@@ -182,4 +182,14 @@ describe('combined metals rule (Reg. 11(2))', () => {
     expect(r.checks.find((c) => c.param === 'MetalsTotal')!.pass).toBe(true);
     expect(r.checks.find((c) => c.param === 'MetalsSoluble')!.pass).toBe(false);
   });
+  it('chromium is not a Reg. 11(2) metal: it neither triggers the rule nor counts in the sum', () => {
+    const cr = eff(0.15, 0.15, 0, 0);
+    cr.precipitated.Cr = 0.15; // within Std A Cr(III) 0.2
+    const r = evaluate(cr, 'A');
+    expect(r.checks.find((c) => c.param === 'MetalsTotal')!.value).toBeCloseTo(0.3, 9);
+    expect(r.checks.find((c) => c.param === 'MetalsTotal')!.pass).toBe(true);
+    const crOnly = eff(0.15, 0, 0, 0);
+    crOnly.precipitated.Cr = 0.15;
+    expect(combinedMetalsApply(crOnly)).toBe(false);
+  });
 });

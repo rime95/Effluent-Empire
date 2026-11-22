@@ -31,7 +31,7 @@ Where **two or more** of Cu, Mn, Ni, Sn and Zn are present:
 - Standard A: total ≤ **0.5 mg/L**.
 - Standard B: total ≤ **3.0 mg/L** and soluble total ≤ **1.0 mg/L**.
 
-A plating effluent can pass every individual metal limit and still fail this rule. The game evaluates it as the `MetalsTotal` and `MetalsSoluble` checks whenever more than 0.01 mg/L of two or more of these metals is present.
+A plating effluent can pass every individual metal limit and still fail this rule. The game evaluates it as the `MetalsTotal` and `MetalsSoluble` checks whenever more than 0.01 mg/L of two or more of these metals is present. Only the listed metals count in the sums (Cu, Ni, Zn in the model — `COMBINED_METALS`); chromium is excluded (fixed 2026-11-22: it had been included in the sums).
 
 **Source conflict:** a consultancy transcription (compliance.com.my) lists Zn 1.0/1.0 and O&G "ND" for Standard A. The gazette gives Zn 2.0/2.0 and O&G 1.0/10, and the game follows the gazette. Amendments after 2009 have not been checked.
 

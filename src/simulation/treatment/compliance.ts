@@ -30,6 +30,12 @@ export function limitsFor(std: StandardId, trade = 'default'): Partial<Record<Pa
   return { ...STANDARDS.standards[std].limits, COD: { max: cod[std] } };
 }
 
+/**
+ * Tracked metals that count toward the Regulation 11(2) combined limits (Cu, Mn, Ni, Sn, Zn; Mn and Sn are not modelled).
+ * Chromium is NOT one of them (knowledge/chemistry/chromium.md) — it has its own Cr(III) / Cr(VI) limits.
+ */
+export const COMBINED_METALS: Metal[] = METALS.filter((m) => STANDARDS.combinedMetals.metals.includes(m));
+
 export function measure(s: Stream): Record<ParamId, number> {
   return {
     T: s.T,
@@ -46,8 +52,8 @@ export function measure(s: Stream): Record<ParamId, number> {
     Fe: s.feSolid + (s.feDissolved ?? 0),
     CrVI: s.CrVI,
     CrIII: metalTotal(s, 'Cr'),
-    MetalsTotal: METALS.reduce((a, m) => a + metalTotal(s, m), 0),
-    MetalsSoluble: METALS.reduce((a, m) => a + metalSoluble(s, m), 0),
+    MetalsTotal: COMBINED_METALS.reduce((a, m) => a + metalTotal(s, m), 0),
+    MetalsSoluble: COMBINED_METALS.reduce((a, m) => a + metalSoluble(s, m), 0),
     Sulphide: (s.sulfideS ?? 0) * 32060,
   };
 }
@@ -216,7 +222,7 @@ export function evaluate(effluent: Stream, std: StandardId, sim: SimResult | nul
         break;
       case 'MetalsTotal':
       case 'MetalsSoluble': {
-        const parts = METALS.map((m) => `${m} ${(param === 'MetalsTotal' ? metalTotal(effluent, m) : effluent.dissolved[m]).toFixed(2)}`).join(' + ');
+        const parts = COMBINED_METALS.map((m) => `${m} ${(param === 'MetalsTotal' ? metalTotal(effluent, m) : metalSoluble(effluent, m)).toFixed(2)}`).join(' + ');
         why = pass
           ? `Two or more regulated metals present, so Regulation 11(2) applies: ${parts} mg/L.`
           : `Regulation 11(2) caps the SUM of Cu, Mn, Ni, Sn and Zn when two or more are present (${parts} mg/L) — each metal can pass its own limit and the plant still fails. Remove ${param === 'MetalsSoluble' ? 'dissolved metal (precipitation pH, avoid re-dissolution by final pH correction)' : 'metal more completely (precipitation pH and solids separation)'}.`;

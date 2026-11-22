@@ -67,6 +67,7 @@ Process review (wwtp-process-engineer). Nothing blocking.
 9. LOW The Studio stream table and commissioning report list the main inlet only; side inlets appear only through their own pipes.
 
 ## Done
+- Reg. 11(2) combined metals: measure() summed every tracked metal including chromium; it now sums only the listed metals that are modelled (Cu, Ni, Zn — `COMBINED_METALS`). The rule trigger already ignored Cr. Regression test in edge.test.ts.
 - Segregated streams: the SCADA replay scaled production growth on the main stream only. Now it scales every inlet.
 - Segregated streams: the dynamic EQ pumped out at the main-stream flow only, so side-stream water accumulated until the tank overflowed (found in the browser check). It now pumps the total inflow. Regression test added; single-stream plants are unchanged.
 - Segregated streams: the chrome, EN and drag-out reference trains are now sized on total flow.
