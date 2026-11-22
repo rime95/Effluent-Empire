@@ -1,2 +1,0 @@
-supervised false: 3 plants × 104 wk → rep -8, incidents 14, breakdowns 3, failed samples 17/312, DOE fines 1, terminations 0
-supervised true: 3 plants × 104 wk → rep -8, incidents 15, breakdowns 3, failed samples 10/312, DOE fines 1, terminations 0
