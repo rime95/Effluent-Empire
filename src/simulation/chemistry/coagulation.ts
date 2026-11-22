@@ -57,7 +57,7 @@ export const COAGULANTS: Record<Coagulant, CoagulantSpec> = {
  * (colloids, unflocculated precipitates, particulate organics). Calibrated so 100 mg/L colloids ≈ 125 mg/L alum.
  */
 export function optimumMetalDose_mmol(s: Stream, c: Coagulant): number {
-  const load = 0.004 * s.colloid + 0.0015 * poolMass(s, 'precipitate') + 0.002 * poolMass(s, 'organic') + 0.0005 * s.OGemulsified;
+  const load = 0.004 * s.colloid + 0.0015 * poolMass(s, 'precipitate') + 0.002 * poolMass(s, 'organic') + 0.004 * s.OGemulsified;
   return (0.02 + load) / COAGULANTS[c].efficiency;
 }
 
@@ -161,11 +161,12 @@ export function coagulate(s: Stream, p: CoagulationInput): ProcessResult {
   // anionic polymer bridges hydroxide precipitate directly (no charge neutralisation needed). verify: bridging share 0.8
   if (polyEff > 0) out.v50.precipitate += (vFloc - out.v50.precipitate) * POLYMER.bridging * Math.min(1, polyEff) * (1 - E);
   out.v50.organic = out.v50.organic * (1 - E) + vFloc * E;
-  // emulsion breaking: destabilised emulsified oil becomes separable free oil (GAME MODEL): 70 % of E with coagulant
-  // alone, up to 92 % of E when polymer bridges the micro-droplets into floc (chemically assisted DAF practice, verify)
+  // emulsion breaking (GAME MODEL): 70 % of E with coagulant alone, up to 92 % of E with polymer bridging. The broken
+  // oil is enmeshed in floc of near-neutral density (OGfloc): it barely settles or rises — bubble attachment (DAF) floats
+  // it (process review 2026-11-22; chemically assisted DAF practice, verify)
   const broken = out.OGemulsified * (0.7 + 0.22 * Math.min(1, polyEff)) * E;
   out.OGemulsified -= broken;
-  out.OGfree += broken;
+  out.OGfloc = (out.OGfloc ?? 0) + broken;
 
   // alkalinity actually consumed: stoichiometric, less what the metal still dissolved did not use (relative to the
   // neutral solid: Al3+ +3, aluminate −1 …) — an overdose cannot consume more alkalinity than the water has

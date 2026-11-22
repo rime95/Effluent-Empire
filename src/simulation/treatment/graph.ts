@@ -19,7 +19,7 @@ export type NodeKind = UnitType | 'influent' | 'discharge' | 'disposal';
 export const isLiquidHaul = (n: { kind: string; params?: Record<string, unknown> }) => n.kind === 'disposal' && n.params?.liquid === 'yes';
 export type PortId = 'out' | 'sludge' | 'a' | 'b' | 'ras';
 /** unit kinds with a sludge draw-off port */
-export const SLUDGE_PORT_KINDS: NodeKind[] = ['clarifier', 'oilSep', 'daf', 'sandFilter', 'thickener', 'filterPress'];
+export const SLUDGE_PORT_KINDS: NodeKind[] = ['clarifier', 'oilSep', 'daf', 'sandFilter', 'thickener', 'filterPress', 'dryer'];
 
 export interface PNode {
   id: string;
@@ -109,7 +109,7 @@ export function validateGraph(g: ProcessGraph): Note[] {
     const sludgeLine = isSludgeEdge(g, e);
     if (to.kind === 'disposal' && !sludgeLine && !isLiquidHaul(to)) errs.push({ level: 'error', code: 'graph.disposalWater', text: `Only sludge lines can go to ${to.tag ?? 'sludge disposal'} — treated water must go to the final discharge.` });
     if (sludgeLine && to.kind === 'discharge') errs.push({ level: 'error', code: 'graph.sludgeToRiver', text: `Sludge from ${from.tag ?? from.kind} reaches the final discharge — send it to a thickener, filter press or sludge disposal.` });
-    if (sludgeLine && e.fromPort !== 'ras' && !['thickener', 'filterPress', 'disposal', 'mixer', 'splitter'].includes(to.kind)) errs.push({ level: 'warn', code: 'graph.sludgeIntoProcess', text: `Sludge is piped into ${to.tag ?? to.kind} — treatment units are not designed for 1 % solids feed.` });
+    if (sludgeLine && e.fromPort !== 'ras' && !['thickener', 'filterPress', 'dryer', 'disposal', 'mixer', 'splitter'].includes(to.kind)) errs.push({ level: 'warn', code: 'graph.sludgeIntoProcess', text: `Sludge is piped into ${to.tag ?? to.kind} — treatment units are not designed for 1 % solids feed.` });
   }
   // advice: a secondary clarifier after activated sludge should show its RAS line (the model assumes the return either way)
   for (const c of g.nodes.filter((x) => x.kind === 'clarifier')) {
@@ -219,7 +219,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
       const metalMgL = METALS.reduce((a, m) => a + metalTotal(inlet, m), 0) + (inlet.CrVI ?? 0);
       const metal = metalMgL > METAL_LIQUOR_MGL;
       const costRMd = m3d * (metal ? PRICES.liquidHaul_m3.metal : PRICES.liquidHaul_m3.other);
-      const dryKgD = (inlet.Q * (POOLS.reduce((a, p) => a + poolMass(inlet, p), 0) + inlet.OGfree + inlet.OGemulsified)) / 1000;
+      const dryKgD = (inlet.Q * (POOLS.reduce((a, p) => a + poolMass(inlet, p), 0) + inlet.OGfree + inlet.OGemulsified + (inlet.OGfloc ?? 0))) / 1000;
       res.disposal.push({ id, wetKgD: m3d * 1000, dryKgD, costRMd, metal, liquid: true, m3d });
       res.opexSplit.sludge += costRMd;
       res.opexRMd += costRMd;
@@ -228,7 +228,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
       continue;
     }
     if (node.kind === 'disposal') {
-      const dryKgD = (inlet.Q * (POOLS.reduce((a, p) => a + poolMass(inlet, p), 0) + inlet.OGfree + inlet.OGemulsified)) / 1000;
+      const dryKgD = (inlet.Q * (POOLS.reduce((a, p) => a + poolMass(inlet, p), 0) + inlet.OGfree + inlet.OGemulsified + (inlet.OGfloc ?? 0))) / 1000;
       const wetKgD = inlet.Q * 1000; // ρ ≈ 1000 kg/m³ (cake ≈ 1200: conservative for tankered sludge)
       const metal = isMetalSludge(inlet);
       const costRMd = wetKgD * (metal ? PRICES.disposalWet_kg.metal : PRICES.disposalWet_kg.other);

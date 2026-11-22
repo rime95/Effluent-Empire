@@ -32,13 +32,15 @@ import { PidSheet } from './PidSheet';
 import { applicableInstruments, hasInst, STANDBY_BLOWER_EXTRA_RM, type InstKey } from '../../simulation/treatment/instrumentation';
 import { useHistory } from './useHistory';
 import { isUnitUnlocked } from '../../game/tech';
+import { evaluateRequirements } from '../../game/requirements';
+import { RequirementsTable } from '../components/RequirementsTable';
 import { useSimulation } from './useSimulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
 
-const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'daf', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'coagulation', 'activatedSludge', 'thickener', 'filterPress', 'splitter', 'mixer'];
+const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'daf', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'coagulation', 'activatedSludge', 'thickener', 'filterPress', 'dryer', 'splitter', 'mixer'];
 /** kinds that may receive a sludge line */
-const SLUDGE_RECEIVERS: PNode['kind'][] = ['thickener', 'filterPress', 'disposal', 'mixer'];
+const SLUDGE_RECEIVERS: PNode['kind'][] = ['thickener', 'filterPress', 'dryer', 'disposal', 'mixer'];
 const GRID = 20;
 /** fixed end points (one inlet, one discharge) — cannot be deleted */
 const isTerminal = (n: PNode) => n.kind === 'influent' || n.kind === 'discharge';
@@ -706,6 +708,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
         </div>
         {drawerTab === 'compliance' && !report && <p className="muted">Connect raw wastewater → units → final discharge to see the predicted effluent.</p>}
         {drawerTab === 'compliance' && report && <ComplianceTable checks={report.checks} />}
+        {drawerTab === 'compliance' && sim?.ok && p.enquiry.requirements && <RequirementsTable checks={evaluateRequirements(sim, p.enquiry.requirements)} title="Contract requirements (predicted)" />}
         {drawerTab === 'streams' && (
           <StreamBalanceTable
             graph={draft}

@@ -138,7 +138,7 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
   //   g(pH*) = pH_computed(pH*) − pH* = 0.
   // Several roots can exist (a healthy reactor and a "soured" dead one). A commissioned plant is seeded with active
   // sludge, so we take the HIGHEST root: scan downward from pH 10 and refine by bisection.
-  const OGin = s.OGfree + s.OGemulsified;
+  const OGin = s.OGfree + s.OGemulsified + (s.OGfloc ?? 0);
   const ogFracAt = (mlss: number) => (KINETICS.K_OG_ads * mlss) / (1 + KINETICS.K_OG_ads * mlss);
   const alk = ALK_REAGENTS[p.alkReagent ?? 'NaOH'];
   /** reactorPH: assumed pH for the biology; dose: alkali dosed, mol/L of feed */
@@ -182,6 +182,7 @@ export function activatedSludge(s: Stream, p: ActivatedSludgeInput, ctx: { clari
 
     out.OGfree = s.OGfree * (1 - ogFrac);
     out.OGemulsified = s.OGemulsified * (1 - ogFrac);
+    out.OGfloc = (s.OGfloc ?? 0) * (1 - ogFrac);
 
     // CO2: respiration produces it, the aeration air strips it (steady-state balance, aeration.ts / acidBase.ts)
     const heteroO2 = bio.washout ? 0 : S0 - bio.S - COD_PER_VSS * (bio.PxH + bio.Pxd); // g/m³

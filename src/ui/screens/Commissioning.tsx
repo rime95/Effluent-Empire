@@ -4,6 +4,7 @@ import { ABANDON_PENALTY } from '../../game/project';
 import { OM } from '../../game/operations';
 import { OMFeeTable } from '../components/OMFee';
 import { ComplianceTable } from '../studio/Studio';
+import { RequirementsTable } from '../components/RequirementsTable';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
 
@@ -129,6 +130,7 @@ export function Commissioning({ go }: { go: (s: Screen) => void }) {
       <div className="panel" style={{ marginBottom: 14 }}>
         <h2>Discharge compliance</h2>
         <ComplianceTable checks={r.compliance.checks} />
+        {r.requirements && <RequirementsTable checks={r.requirements} />}
       </div>
 
       <div className="panel">

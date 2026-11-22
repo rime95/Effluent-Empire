@@ -64,6 +64,8 @@ export interface Stream {
   /** oil & grease, mg/L (tracked separately from COD fractions — GAME MODEL simplification) */
   OGfree: number;
   OGemulsified: number;
+  /** destabilised (coagulated) oil enmeshed in floc, mg/L: near-neutral density — floats with bubbles, barely settles or rises; absent on older saves */
+  OGfloc?: number;
 
   // ---- nitrogen, mg N/L ----
   NH4N: number;
@@ -123,6 +125,7 @@ export function emptyStream(Q = 0): Stream {
     biomass: 0,
     OGfree: 0,
     OGemulsified: 0,
+    OGfloc: 0,
     NH4N: 0,
     NO3N: 0,
     grit: 0,
@@ -141,6 +144,7 @@ export function cloneStream(s: Stream): Stream {
     v50: { ...s.v50 },
     ml: s.ml ? { ...s.ml } : undefined,
     feDissolved: s.feDissolved ?? 0,
+    OGfloc: s.OGfloc ?? 0,
   };
 }
 
@@ -198,7 +202,7 @@ export function metalTotal(s: Stream, m: Metal): number {
 }
 
 export function oilGrease(s: Stream): number {
-  return s.OGfree + s.OGemulsified;
+  return s.OGfree + s.OGemulsified + (s.OGfloc ?? 0);
 }
 
 /** Total N excluding organic N (not modelled in Phase 1), mg/L */
@@ -224,7 +228,7 @@ export function blend(streams: Stream[]): Stream {
     out.dissolved[m] = w((s) => s.dissolved[m]);
     out.precipitated[m] = w((s) => s.precipitated[m]);
   }
-  const scalarKeys = ['SO4T', 'alSolid', 'feSolid', 'alDissolved', 'feDissolved', 'CrVI', 'SS', 'SI', 'XS', 'XI', 'biomass', 'OGfree', 'OGemulsified', 'NH4N', 'NO3N', 'grit', 'inert', 'colloid', 'floc'] as const;
+  const scalarKeys = ['SO4T', 'alSolid', 'feSolid', 'alDissolved', 'feDissolved', 'CrVI', 'SS', 'SI', 'XS', 'XI', 'biomass', 'OGfree', 'OGemulsified', 'OGfloc', 'NH4N', 'NO3N', 'grit', 'inert', 'colloid', 'floc'] as const;
   for (const k of scalarKeys) out[k] = w((s) => s[k] ?? 0);
   // settling velocity: mass-weighted average per pool
   for (const p of POOLS) {

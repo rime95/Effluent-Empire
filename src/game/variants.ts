@@ -6,7 +6,10 @@
  */
 import { Stream } from '../simulation/core/stream';
 import { IndustryId } from './industries';
-import { TrainSpec, dafFoodTrain } from './referenceDesigns';
+import { TrainSpec, dafFoodTrain, metalTrain, sludgeLineGraph } from './referenceDesigns';
+import { ProcessGraph, SimResult, linearGraph } from '../simulation/treatment/graph';
+import { Requirements } from './requirements';
+import { defaultParams } from '../simulation/treatment/catalogue';
 import { Rng } from './rng';
 import { TechId } from './tech';
 
@@ -21,7 +24,9 @@ export interface ClientVariant {
   /** reshape the true wastewater */
   overlay: (s: Stream, rng: Rng) => Stream;
   /** reference design (with the advanced technology) used to price the job */
-  reference: (s: Stream) => TrainSpec;
+  reference: (s: Stream) => TrainSpec | ProcessGraph;
+  /** contract requirements derived from the reference design's simulation (e.g. a disposal-cost cap) */
+  requirements?: (ref: SimResult) => Requirements;
   /** force a discharge standard (tight limits are often the reason the technology is needed) */
   standard?: 'A' | 'B';
 }
@@ -49,8 +54,39 @@ export const VARIANTS: ClientVariant[] = [
     reference: (s) => dafFoodTrain(s),
     standard: 'B',
   },
+  {
+    id: 'sludgeCap',
+    industry: 'plating',
+    requires: ['dryer'],
+    label: 'Heavy-metal finisher — disposal-cost cap',
+    brief: 'High-load nickel/copper lines make a lot of hydroxide sludge, and the client caps what it will pay for scheduled-waste haulage. Wet cake will not fit under the cap.',
+    overlay: (s, rng) => {
+      s.dissolved = { ...s.dissolved, Ni: rng.range(25, 60), Cu: rng.range(10, 35), Zn: rng.range(5, 20) };
+      return s;
+    },
+    reference: (s) => {
+      const train = metalTrain(s.Q, s.CrVI > 0.05);
+      const clar = train.findIndex((u) => u.kind === 'clarifier');
+      const q = (k: 'thickener' | 'filterPress' | 'dryer', over: Record<string, number | string>) => ({ kind: k, params: { ...defaultParams(k, s.Q), ...over } });
+      // sludge line sized on the dry-solids load: thickener at ~15 kg/m²·d, press for 3 cycles/d of ~25 % DS cake, dryer to 80 % DS
+      const dryKgD = (s.Q * (2.5 * (s.dissolved.Ni + s.dissolved.Cu + s.dissolved.Zn) + 150)) / 1000;
+      return sludgeLineGraph(train, clar, [
+        q('thickener', { area: Math.max(2, Math.ceil(dryKgD / 15)) }),
+        q('filterPress', { volume: Math.max(0.2, Math.ceil((dryKgD / 0.25 / 1000 / 3) * 1.6 * 20) / 20), cycles: 3, conditioning: 'polymer' }),
+        q('dryer', { targetDS: 80 }),
+      ]);
+    },
+    requirements: (ref) => ({ sludgeCapRMd: Math.round(ref.opexSplit.sludge * 1.3) }),
+    standard: 'B',
+  },
 ];
 
 export function eligibleVariants(industry: IndustryId, tech: readonly TechId[]): ClientVariant[] {
   return VARIANTS.filter((v) => v.industry === industry && v.requires.every((r) => tech.includes(r)));
+}
+
+/** The variant's reference design as a process graph. */
+export function referenceGraph(v: ClientVariant, s: Stream): ProcessGraph {
+  const d = v.reference(s);
+  return Array.isArray(d) ? linearGraph(d) : d;
 }

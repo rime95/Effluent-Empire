@@ -35,7 +35,7 @@ const NOZZLE: Partial<Record<UnitType, { in: number; out: number }>> = {
   filterPress: { in: 40, out: 40 },
 };
 /** sludge draw-off nozzle x (symbol coordinates) — at the hopper / underdrain */
-export const SLUDGE_UNITS: Partial<Record<UnitType, number>> = { clarifier: 60, oilSep: 94, daf: 60, sandFilter: 100, thickener: 60, filterPress: 60 };
+export const SLUDGE_UNITS: Partial<Record<UnitType, number>> = { clarifier: 60, oilSep: 94, daf: 60, sandFilter: 100, thickener: 60, filterPress: 60, dryer: 60 };
 
 function UnitNodeImpl({ data, selected }: NodeProps<Node<UnitNodeData>>) {
   const def = CATALOGUE[data.kind];

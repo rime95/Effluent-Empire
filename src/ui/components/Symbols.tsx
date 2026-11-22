@@ -182,6 +182,20 @@ export function UnitSymbol({ type, accent }: { type: UnitType; accent: string })
           <path d="M0 40 h10 M110 40 h10" {...L} />
         </svg>
       );
+    case 'dryer':
+      return (
+        <svg viewBox="0 0 120 80">
+          <rect x="14" y="30" width="92" height="30" rx="15" {...L} />
+          {liquid('M18 48 Q60 40 102 48 V54 Q60 60 18 54 Z')}
+          <path d="M22 45 h76" {...thin} />
+          {[30, 46, 62, 78, 94].map((x) => (
+            <path key={x} d={`M${x} 38 v14`} {...thin} />
+          ))}
+          <path d="M40 30 C38 22 44 20 42 12 M60 30 C58 22 64 20 62 12 M80 30 C78 22 84 20 82 12" {...thin} />
+          <path d="M26 66 l6 -6 l6 6 Z" fill={accent} opacity={0.6} />
+          <path d="M0 44 h14 M106 44 h14" {...L} />
+        </svg>
+      );
     case 'splitter':
       return (
         <svg viewBox="0 0 120 80">

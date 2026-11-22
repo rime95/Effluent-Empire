@@ -6,7 +6,7 @@ import { coagulate } from '../../src/simulation/chemistry/coagulation';
 import { generateEnquiry } from '../../src/game/customers';
 import { linearGraph, simulate } from '../../src/simulation/treatment/graph';
 import { evaluate } from '../../src/simulation/treatment/compliance';
-import { VARIANTS } from '../../src/game/variants';
+import { VARIANTS, referenceGraph } from '../../src/game/variants';
 import { foodTrain } from '../../src/game/referenceDesigns';
 
 const oily = () => {
@@ -40,7 +40,7 @@ describe('flotation performance', () => {
     const lo = flotate(oily(), { area_m2: 10, recycle_pct: 5, pressure_kPa: 300 });
     const hi = flotate(oily(), { area_m2: 10, recycle_pct: 50, pressure_kPa: 550 });
     expect(hi.out.OGfree).toBeLessThan(lo.out.OGfree);
-    expect(hi.out.OGfree / 300).toBeLessThan(0.1);
+    expect(hi.out.OGfree / 300).toBeLessThan(0.12); // unconditioned free oil: φ 0.9
     expect(hi.out.OGemulsified / 100).toBeGreaterThan(0.85); // < 15 % capture of a stable emulsion
     expect(hi.notes.some((n) => n.code === 'daf.emulsion')).toBe(false); // 25 % emulsified: below the 30 % advice threshold
     expect(lo.notes.some((n) => n.code === 'daf.lowAS')).toBe(true);
@@ -83,11 +83,70 @@ describe('emulsified-oil client (DAF variant)', () => {
 
   it('the DAF reference design passes; the gravity separator design does not', () => {
     for (const e of find(6)) {
-      const ref = simulate(linearGraph(VARIANTS.find((v) => v.id === 'emulsifiedOil')!.reference(e.trueStream)), e.trueStream);
+      const ref = simulate(referenceGraph(VARIANTS.find((v) => v.id === 'emulsifiedOil')!, e.trueStream), e.trueStream);
       expect(ref.balance?.ok).toBe(true);
       expect(evaluate(ref.effluent!, e.standard, ref).pass).toBe(true);
       const grav = simulate(linearGraph(foodTrain(e.trueStream.Q)), e.trueStream);
       expect(evaluate(grav.effluent!, e.standard, grav).pass).toBe(false);
     }
+  });
+});
+
+describe('DAF review fixes (2026-11-22)', () => {
+  it('flotation conserves mass (oil and solids move to the float)', async () => {
+    const { components, addComponents } = await import('../../src/simulation/core/massBalance');
+    const s = oily();
+    s.OGfloc = 50;
+    const r = flotate(s, { area_m2: 10, recycle_pct: 30, pressure_kPa: 450 });
+    const inC = components(s);
+    const outC = addComponents(components(r.out), components(r.removed!));
+    expect(outC.OG).toBeCloseTo(inC.OG, 6);
+    expect(outC.COD).toBeCloseTo(inC.COD, 6);
+  });
+
+  it('A/S falls as temperature rises and rises with saturator pressure', () => {
+    const base = { pressure_kPa: 450, recycle_m3d: 30, feed_m3d: 100, solids_mgL: 500 };
+    expect(airToSolids({ ...base, T: 35 })).toBeLessThan(airToSolids({ ...base, T: 20 }));
+    expect(airToSolids({ ...base, T: 30, pressure_kPa: 600 })).toBeGreaterThan(airToSolids({ ...base, T: 30 }));
+  });
+
+  it('unconditioned floc floats far less than coagulated floc; solids overload cuts capture', () => {
+    const raw = oily();
+    raw.v50.floc = 0.2;
+    const cond = oily();
+    cond.v50.floc = 3;
+    const a = flotate(raw, { area_m2: 10, recycle_pct: 50, pressure_kPa: 550 });
+    const b = flotate(cond, { area_m2: 10, recycle_pct: 50, pressure_kPa: 550 });
+    expect(b.out.floc).toBeLessThan(0.5 * a.out.floc);
+    const heavy = oily();
+    heavy.floc = 4000;
+    heavy.v50.floc = 3;
+    const ok = flotate(heavy, { area_m2: 40, recycle_pct: 100, pressure_kPa: 600 });
+    const over = flotate(heavy, { area_m2: 1.2, recycle_pct: 100, pressure_kPa: 600 }); // SLR ≈ 15 kg/m²·h, HLR ≈ 7 m/h
+    expect(over.notes.some((n) => n.code === 'daf.slr')).toBe(true);
+    expect(over.out.floc / heavy.floc).toBeGreaterThan(ok.out.floc / heavy.floc);
+  });
+
+  it('coagulated (floc-bound) oil: a clarifier catches little of it, a DAF floats it', async () => {
+    const { clarify } = await import('../../src/simulation/physical/units');
+    const s = oily();
+    s.OGfree = 0;
+    s.OGemulsified = 0;
+    s.OGfloc = 200;
+    const clar = clarify(s, { area_m2: 5 }); // primary clarifier at SOR ≈ 0.8 m/h
+    const daf = flotate(s, { area_m2: 10, recycle_pct: 50, pressure_kPa: 550 });
+    expect((clar.out.OGfloc ?? 0) / 200).toBeGreaterThan(0.5);
+    expect((daf.out.OGfloc ?? 0) / 200).toBeLessThan(0.15);
+  });
+
+  it('oil blinds a sand filter above ~15 mg/L', async () => {
+    const { filter } = await import('../../src/simulation/physical/units');
+    const s = oily();
+    s.OGfree = 0;
+    s.OGemulsified = 0;
+    s.OGfloc = 80;
+    const r = filter(s, { area_m2: 10 });
+    expect(r.notes.some((n) => n.code === 'filt.oil')).toBe(true);
+    expect((r.out.OGfloc ?? 0) / 80).toBeGreaterThan(0.7);
   });
 });

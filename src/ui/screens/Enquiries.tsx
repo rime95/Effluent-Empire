@@ -82,6 +82,7 @@ export function Enquiries({ go }: { go: (s: Screen) => void }) {
               {e.variant && (
                 <div className="note info">
                   <b>Tough job — {e.variant.label}.</b> {e.variant.brief}
+                  {e.requirements?.sludgeCapRMd !== undefined && <div style={{ marginTop: 4 }}>Contract term: sludge disposal cost ≤ RM {e.requirements.sludgeCapRMd}/d (checked at commissioning).</div>}
                 </div>
               )}
               <div className="row">

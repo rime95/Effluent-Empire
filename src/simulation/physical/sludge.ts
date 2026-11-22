@@ -7,11 +7,11 @@ import { Note, ProcessResult, result } from '../treatment/types';
 
 /** Dry-solids mass flow of a removed stream (concentrations relative to its Q), kg/d. */
 export function removedDryKgD(removed: Stream): number {
-  return (removed.Q * (POOLS.reduce((a, p) => a + poolMass(removed, p), 0) + removed.OGfree + removed.OGemulsified)) / 1000;
+  return (removed.Q * (POOLS.reduce((a, p) => a + poolMass(removed, p), 0) + removed.OGfree + removed.OGemulsified + (removed.OGfloc ?? 0))) / 1000;
 }
 
 /** Particulate fields copied/scaled when sludge water is split from a unit outlet. */
-const PART_SCALARS = ['grit', 'inert', 'colloid', 'floc', 'XS', 'XI', 'biomass', 'alSolid', 'feSolid', 'OGfree', 'OGemulsified'] as const;
+const PART_SCALARS = ['grit', 'inert', 'colloid', 'floc', 'XS', 'XI', 'biomass', 'alSolid', 'feSolid', 'OGfree', 'OGemulsified', 'OGfloc'] as const;
 
 /**
  * Split a unit's outlet into the main stream and a real sludge stream of flow Qs carrying the removed solids.
@@ -66,7 +66,7 @@ export function clarifierUnderflowFraction(removed: Stream): number {
     m += x;
     v += x / UNDERFLOW_SOLIDS[p];
   }
-  const oil = removed.OGfree + removed.OGemulsified;
+  const oil = removed.OGfree + removed.OGemulsified + (removed.OGfloc ?? 0);
   m += oil;
   v += oil / 0.05;
   return m > 0 && v > 0 ? m / v : 0.01;
@@ -103,6 +103,8 @@ function captureAll(s: Stream, capture: number) {
   const { out, removed } = splitPools(s, removal);
   removed.OGfree = s.OGfree * capture;
   removed.OGemulsified = s.OGemulsified * capture;
+  removed.OGfloc = (s.OGfloc ?? 0) * capture;
+  out.OGfloc = (s.OGfloc ?? 0) * (1 - capture);
   out.OGfree = s.OGfree * (1 - capture);
   out.OGemulsified = s.OGemulsified * (1 - capture);
   return { out, removed };

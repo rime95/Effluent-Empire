@@ -3,7 +3,7 @@ import { clarifierUnderflowFraction, removedDryKgD } from './sludge';
  * Physical separation units: equalisation, gravity oil separator, clarifier, rapid sand filter.
  * Ref: knowledge/physical/sedimentation.md, knowledge/physical/filtration.md, knowledge/design/design_parameters.md
  */
-import { POOLS, Pool, Stream, cloneStream, poolMass, splitPools } from '../core/stream';
+import { POOLS, Pool, Stream, cloneStream, oilGrease, poolMass, splitPools } from '../core/stream';
 import { hrtDays, surfaceOverflowRate_mh } from '../core/units';
 import { Note, ProcessResult, result } from '../treatment/types';
 import { hazenRemoval, stokesVelocity_mh, vesilind_mh } from './settling';
@@ -38,6 +38,8 @@ export function equalise(s: Stream, p: { volume_m3: number }): ProcessResult {
  * Free-oil droplet median diameter 100 µm, ρ_oil 900 kg/m³ (GAME MODEL defaults; API design droplet = 150 µm).
  */
 export const FREE_OIL_D50_M = 100e-6;
+/** separation velocity of coagulated, floc-bound oil (oil + Fe/Al/organic floc ≈ water density), m/h — GAME MODEL, verify */
+export const FLOC_OIL_V50 = 0.2;
 export const OIL_DENSITY = 900;
 
 export function separateOil(s: Stream, p: { area_m2: number }): ProcessResult {
@@ -150,10 +152,15 @@ export function clarify(s: Stream, p: { area_m2: number; depth_m?: number; plate
   // scum skimming: free oil rises (Stokes) and is skimmed; emulsified oil enmeshed in floc settles with it
   const rOilC = hazenRemoval(-stokesVelocity_mh(FREE_OIL_D50_M, OIL_DENSITY, s.T), SOR, 1.0);
   calcs.rOil = { label: 'Free-oil skimming', value: rOilC * 100, unit: '%', digits: 0 };
+  // floc-bound (coagulated) oil: near-neutral density, settles/rises at ~FLOC_OIL_V50 — a clarifier catches little of it
+  const rOilFloc = hazenRemoval(FLOC_OIL_V50, SOR);
+  calcs.rOilFloc = { label: 'Floc-bound oil captured', value: rOilFloc * 100, unit: '%', digits: 0 };
   const separate = () => {
     const r = splitPools(s, removal);
     r.removed.OGfree = s.OGfree * rOilC;
     r.out.OGfree = s.OGfree * (1 - rOilC);
+    r.removed.OGfloc = (s.OGfloc ?? 0) * rOilFloc;
+    r.out.OGfloc = (s.OGfloc ?? 0) * (1 - rOilFloc);
     return r;
   };
   let { out, removed } = separate();
@@ -213,6 +220,8 @@ export function clarify(s: Stream, p: { area_m2: number; depth_m?: number; plate
  * following the decline of single-collector efficiency with approach velocity (Yao et al. 1971).
  * λ0 at 5 m/h (1/m) per pool; floc-like particles are captured best.
  */
+/** feed O&G above which granular media blind (mg/L, verify) */
+export const FILTER_OIL_MAX = 15;
 const LAMBDA0: Record<Pool, number> = { grit: 6, inert: 3, colloid: 0.15, floc: 3.5, organic: 2, precipitate: 1.2, alFloc: 3.5, feFloc: 3.5, biomass: 2.5 };
 
 export function filter(s: Stream, p: { area_m2: number; depth_m?: number }): ProcessResult {
@@ -227,15 +236,23 @@ export function filter(s: Stream, p: { area_m2: number; depth_m?: number }): Pro
   const { out, removed } = splitPools(s, removal);
   // oil retained in the bed (GAME MODEL λ0: free 1.5 /m, emulsified 0.3 /m)
   const vf = Math.pow(5 / Math.max(rate, 0.1), 0.7) * L;
-  const rFree = 1 - Math.exp(-1.5 * vf);
-  const rEm = 1 - Math.exp(-0.3 * vf);
+  // oil blinds granular media: above ~15 mg/L feed O&G the bed coats, capture of oil falls in proportion and runs
+  // shorten (filter feed O&G is normally kept below 10–15 mg/L; GAME MODEL, verify)
+  const oilIn = oilGrease(s);
+  const blind = oilIn > FILTER_OIL_MAX ? FILTER_OIL_MAX / oilIn : 1;
+  const rFree = (1 - Math.exp(-1.5 * vf)) * blind;
+  const rEm = (1 - Math.exp(-0.3 * vf)) * blind;
   removed.OGfree = s.OGfree * rFree;
   removed.OGemulsified = s.OGemulsified * rEm;
+  const rOF = (1 - Math.exp(-LAMBDA0.floc * vf)) * blind;
+  removed.OGfloc = (s.OGfloc ?? 0) * rOF;
+  out.OGfloc = (s.OGfloc ?? 0) * (1 - rOF);
   out.OGfree = s.OGfree * (1 - rFree);
   out.OGemulsified = s.OGemulsified * (1 - rEm);
   const notes: Note[] = [];
   const tssIn = POOLS.reduce((a, pl) => a + poolMass(s, pl), 0);
   if (rate > 12) notes.push({ level: 'warn', code: 'filt.rate', text: `Filtration rate ${rate.toFixed(1)} m/h at peak exceeds 12 m/h — breakthrough risk.` });
+  if (blind < 1) notes.push({ level: 'warn', code: 'filt.oil', text: `Filter feed carries ${oilIn.toFixed(0)} mg/L oil — oil blinds sand media above ~15 mg/L: little of it is retained and runs are short. Remove the oil upstream (DAF, oil separator).` });
   if (tssIn > 80) notes.push({ level: 'warn', code: 'filt.load', text: `Filter feed TSS ${tssIn.toFixed(0)} mg/L is high (> 80): very short runs between backwashes.` });
   return result(out, {
     removed,

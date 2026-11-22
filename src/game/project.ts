@@ -1,5 +1,5 @@
 /** Project lifecycle: design → commission → (pass → paid) | (fail → retrofit | abandon). Pure functions. */
-import { Stream, METALS, cloneStream, codTotal, tss, metalTotal } from '../simulation/core/stream';
+import { Stream, METALS, cloneStream, codTotal, tss, metalTotal, oilGrease } from '../simulation/core/stream';
 import { setCbForPH } from '../simulation/chemistry/acidBase';
 import { CATALOGUE, defaultParams } from '../simulation/treatment/catalogue';
 import { ComplianceReport, evaluate } from '../simulation/treatment/compliance';
@@ -8,6 +8,7 @@ import { applicableInstruments, hasInst, instCapex } from '../simulation/treatme
 import { Note } from '../simulation/treatment/types';
 import { Enquiry, PAYMENT } from './customers';
 import { Datasheet, LabTestId } from './lab';
+import { ReqCheck, evaluateRequirements } from './requirements';
 import { createRng } from './rng';
 import { SETPOINTS } from './incidents';
 import type { FeeQuote } from './operations';
@@ -32,6 +33,8 @@ export interface CommissionReport {
   attempt: number;
   pass: boolean;
   compliance: ComplianceReport;
+  /** contract requirements beyond the standard (tough clients); absent on older reports */
+  requirements?: ReqCheck[];
   stages: StageRow[];
   capexCharged: number;
   totalCapex: number;
@@ -189,17 +192,19 @@ export function commission(p: Project, week: number): CommissionReport {
     .map((id) => {
       const n = sim.nodes[id];
       const o = n.result.out;
-      return { tag: n.node.tag ?? id, name: CATALOGUE[n.node.kind as keyof typeof CATALOGUE].name, pH: o.pH, COD: codTotal(o), TSS: tss(o), Ni: metalTotal(o, 'Ni'), Cu: metalTotal(o, 'Cu'), Zn: metalTotal(o, 'Zn'), OG: o.OGfree + o.OGemulsified, notes: n.result.notes };
+      return { tag: n.node.tag ?? id, name: CATALOGUE[n.node.kind as keyof typeof CATALOGUE].name, pH: o.pH, COD: codTotal(o), TSS: tss(o), Ni: metalTotal(o, 'Ni'), Cu: metalTotal(o, 'Cu'), Zn: metalTotal(o, 'Zn'), OG: oilGrease(o), notes: n.result.notes };
     });
   if (!sim.effluent) {
     return { week, attempt: p.attempts + 1, pass: false, compliance: { standard: e.standard, version: '', pass: false, checks: [] }, stages, capexCharged: 0, totalCapex: 0, opexRMd: 0, milestone: 0, payment: 0, lateWeeks: 0, reputationDelta: 0, messages: ['Design is incomplete.'], errors: sim.errors };
   }
   const compliance = evaluate(sim.effluent, e.standard, sim);
+  const requirements = evaluateRequirements(sim, e.requirements);
+  const pass = compliance.pass && requirements.every((r) => r.pass);
   const deadline = p.startedWeek + e.deadlineWeeks;
   const lateWeeks = Math.max(0, week - deadline);
   let rep = 0;
   let payment = 0;
-  if (compliance.pass) {
+  if (pass) {
     const ld = Math.min(0.2, lateWeeks * LD_RATE_PER_WEEK) * e.contractValue;
     payment = e.contractValue * PAYMENT.retention - ld;
     rep += 10;
@@ -227,8 +232,9 @@ export function commission(p: Project, week: number): CommissionReport {
     }
   } else {
     rep -= 5;
-    messages.push('Commissioning failed the discharge test (−5 reputation). Retrofit the design or abandon the project.');
+    messages.push(compliance.pass ? 'Commissioning failed a contract requirement (−5 reputation). Retrofit the design or abandon the project.' : 'Commissioning failed the discharge test (−5 reputation). Retrofit the design or abandon the project.');
+    for (const r of requirements.filter((x) => !x.pass)) messages.push(`${r.label}: ${r.why}`);
   }
   const milestone = p.built ? 0 : e.contractValue * PAYMENT.mechanicalCompletion;
-  return { week, attempt: p.attempts + 1, pass: compliance.pass, compliance, stages, capexCharged, totalCapex: p.spent.capex + capexCharged, opexRMd: sim.opexRMd, milestone, payment, lateWeeks, reputationDelta: rep, messages, errors: sim.errors };
+  return { week, attempt: p.attempts + 1, pass, compliance, requirements, stages, capexCharged, totalCapex: p.spent.capex + capexCharged, opexRMd: sim.opexRMd, milestone, payment, lateWeeks, reputationDelta: rep, messages, errors: sim.errors };
 }

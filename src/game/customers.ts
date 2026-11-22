@@ -11,6 +11,7 @@ import { Datasheet, declaredDatasheet } from './lab';
 import { REFERENCE } from './referenceDesigns';
 import { Rng, createRng } from './rng';
 import { TechId } from './tech';
+import { Requirements } from './requirements';
 import { ClientVariant, VARIANT_CHANCE, VARIANT_PREMIUM, eligibleVariants } from './variants';
 
 export interface Enquiry {
@@ -33,6 +34,8 @@ export interface Enquiry {
   expiresWeek: number;
   /** tough job opened by a researched technology (variants.ts) */
   variant?: { id: string; label: string; brief: string };
+  /** contract requirements beyond the discharge standard (requirements.ts) */
+  requirements?: Requirements;
 }
 
 export interface EnquiryOptions {
@@ -83,8 +86,9 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
       if (variant.standard) standard = variant.standard;
     }
   }
-  const refTrain = variant ? variant.reference(ww.stream) : REFERENCE[industry](ww.stream);
-  const ref = simulate(linearGraph(refTrain), ww.stream);
+  const refDesign = variant ? variant.reference(ww.stream) : REFERENCE[industry](ww.stream);
+  const ref = simulate(Array.isArray(refDesign) ? linearGraph(refDesign) : refDesign, ww.stream);
+  const requirements = variant?.requirements?.(ref);
   const markup = rng.range(1.35, 1.6);
   const repFactor = 1 + Math.min(0.15, Math.max(-0.15, reputation / 600));
   const contractValue = Math.round((ref.capex * markup * (standard === 'A' ? 1.25 : 1) * repFactor * (difficult ? 0.88 : 1) * (variant ? VARIANT_PREMIUM : 1)) / 1000) * 1000;
@@ -106,5 +110,6 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
     postedWeek: week,
     expiresWeek: week + rng.int(3, 6),
     ...(variant ? { variant: { id: variant.id, label: variant.label, brief: variant.brief } } : {}),
+    ...(requirements ? { requirements } : {}),
   };
 }

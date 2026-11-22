@@ -48,7 +48,7 @@ export const TECH: Record<TechId, TechDef> = {
   },
   dryer: {
     id: 'dryer', name: 'Sludge dryer', tier: 1, category: 'sludge', costRM: 150_000, reputation: TIER_REPUTATION[1], requires: [], units: ['dryer'],
-    blurb: 'Thermal drying of press cake to 70–90 % dry solids: far fewer tonnes of scheduled waste to haul.', clients: ['Sludge-heavy metal finishers with a disposal-cost cap'], available: false,
+    blurb: 'Thermal drying of press cake to 70–90 % dry solids: far fewer tonnes of scheduled waste to haul.', clients: ['Sludge-heavy metal finishers with a disposal-cost cap'], available: true,
   },
   uf: {
     id: 'uf', name: 'Ultrafiltration (UF)', tier: 2, category: 'membrane', costRM: 160_000, reputation: TIER_REPUTATION[2], requires: [], units: ['uf'],

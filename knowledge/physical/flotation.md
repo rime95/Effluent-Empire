@@ -62,3 +62,20 @@ Stable emulsions (droplets below about 20 µm) do not attach to bubbles. They mu
 
 ## Tough client opened (`variants.ts`: `emulsifiedOil`)
 **Edible-oil refinery and food plant with emulsified oil.** The overlay raises total O&G to 200–500 mg/L with only 20–40 % free oil (oil is tracked separately from COD in the model). The reference design is EQ → coagulation (ferric at the jar-test optimum × 1.1, pH 7, polymer 1 mg/L) → DAF (60 % recycle, 550 kPa) → activated sludge (SRT 15 d, alkalinity held at pH 7) → clarifier → sand filter. It passes Standard B on every generated feed tested; the old gravity design never does. Standard B is forced: the Standard A O&G limit (1 mg/L) is not realistic for this feed.
+
+## Review changes (wwtp-process-engineer, 2026-11-22)
+- **Floc-bound oil (`OGfloc`).** Oil released by emulsion breaking is no longer counted as free 100 µm oil, which a plain clarifier would skim. It is enmeshed in Fe/Al/organic floc of near-neutral density, separating at about 0.2 m/h (`FLOC_OIL_V50`, `verify:`). A clarifier therefore catches little of it, and a DAF floats it (φ 0.95). It counts in O&G for compliance and the mass balance.
+- **Chemical conditioning.**
+  - Floc-type pools float with φ = φmax·(0.55 + 0.45·min(1, v₅₀/2 m/h)).
+  - Unconditioned solids reach about 50–60 % and coagulated, polymer-aided floc about 95 % (WEF MOP 8: TSS 40–65 % without chemicals, 85–95 % with).
+  - Free oil without chemicals has φ 0.9.
+- **Solids-loading penalty:** h_S = exp(−(SLR − 10)/5) above 10 kg/m²·h, multiplied with the hydraulic penalty.
+- **Sizing and cost.**
+  - Default area is sized on a peak of 2 plus recycle at 8 m/h; recycle is a % of **average** flow.
+  - Reference DAF after EQ is sized on PF 1.3.
+  - Auxiliary power 0.5 kW.
+  - Saturator CAPEX scales with recycle flow: RM 60k at 100 m³/d, six-tenths rule.
+- **Notes:** recycle > 50 % (high-solids duty), pressure > 620 kPa(g) (vessel rating), and unconditioned feed.
+- **Sand-filter blinding** (`units.ts`): above 15 mg/L feed O&G, oil capture in the filter falls ∝ 15/O&G, with a warning. This closed a loophole where a filter polished heavy oil loads.
+- **Honest limit:** on the lighter half of the emulsified-oil feeds, a chemically assisted primary clarifier followed by activated sludge and a filter can still meet Standard B. The DAF is needed for the heavier half and gives a smaller, drier-sludge plant. That matches practice for weak emulsions.
+- **Not modelled yet:** phosphorus. Large ferric doses would strip P ahead of biology, so P-deficiency is flagged for later.

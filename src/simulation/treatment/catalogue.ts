@@ -13,10 +13,11 @@ import { reduceChromium } from '../chemistry/chromiumReduction';
 import { adsorb } from '../physical/carbon';
 import { clarify, equalise, filter, separateOil } from '../physical/units';
 import { flotate } from '../physical/flotation';
+import { dry } from '../physical/dryer';
 import { ProcessResult } from './types';
 import { filterPress, passThrough, thicken } from '../physical/sludge';
 
-export type UnitType = 'eq' | 'oilSep' | 'daf' | 'crReduction' | 'neutralisation' | 'precipitation' | 'coagulation' | 'clarifier' | 'activatedSludge' | 'sandFilter' | 'carbon' | 'thickener' | 'filterPress' | 'splitter' | 'mixer';
+export type UnitType = 'eq' | 'oilSep' | 'daf' | 'crReduction' | 'neutralisation' | 'precipitation' | 'coagulation' | 'clarifier' | 'activatedSludge' | 'sandFilter' | 'carbon' | 'thickener' | 'filterPress' | 'dryer' | 'splitter' | 'mixer';
 export type Category = 'physical' | 'chemical' | 'biological' | 'sludge' | 'hydraulic';
 export type ParamValue = number | string;
 export type Params = Record<string, ParamValue>;
@@ -84,12 +85,12 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     category: 'physical',
     summary: 'Pressurised recycle releases micro-bubbles that float oil, grease and light floc; float is skimmed to the sludge line. Emulsions must be broken by coagulation first.',
     params: [
-      { key: 'area', label: 'Flotation area', unit: 'm²', min: 1, max: 500, step: 0.5, default: (Q) => round((Q * 1.3) / 24 / 8, 0.5), help: 'Hydraulic loading (feed + recycle) 5–12 m/h.' },
-      { key: 'recycle', label: 'Pressurised recycle', unit: '% of Q', min: 5, max: 100, step: 5, default: () => 30, help: 'Sets the air-to-solids ratio: aim for A/S 0.02–0.04 mL/mg on oily feeds.' },
+      { key: 'area', label: 'Flotation area', unit: 'm²', min: 1, max: 500, step: 0.5, default: (Q) => round((Q * (2.0 + 0.3)) / 24 / 8, 0.5), help: 'Hydraulic loading (peak feed + recycle) 5–12 m/h. Sized for a peak of 2× — less area is needed after an EQ tank.' },
+      { key: 'recycle', label: 'Pressurised recycle', unit: '% of avg Q', min: 5, max: 100, step: 5, default: () => 30, help: 'Percent of the average design flow. Sets the air-to-solids ratio: aim for A/S 0.02–0.04 mL/mg on oily feeds.' },
       { key: 'pressure', label: 'Saturator pressure', unit: 'kPa(g)', min: 200, max: 700, step: 10, default: () => 450, help: '350–600 kPa(g) is typical; more pressure dissolves more air.' },
     ],
     run: (s, p) => flotate(s, { area_m2: n(p, 'area'), recycle_pct: n(p, 'recycle'), pressure_kPa: n(p, 'pressure') }),
-    capex: (p) => scale(250_000, n(p, 'area'), 10) + 60_000,
+    capex: (p, _s, r) => scale(250_000, n(p, 'area'), 10) + scale(60_000, Math.max(Number(r.calcs.rec?.value ?? 0), 5), 100),
     footprint: (p) => n(p, 'area') * 1.6 + 8,
   },
   crReduction: {
@@ -244,6 +245,17 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     run: (s, p) => filterPress(s, { chamber_m3: n(p, 'volume'), cycles: n(p, 'cycles'), conditioning: (p.conditioning as 'polymer' | 'lime') ?? 'polymer' }),
     capex: (p) => scale(250_000, n(p, 'volume'), 1),
     footprint: (p) => 25 + 30 * n(p, 'volume'),
+  },
+  dryer: {
+    type: 'dryer',
+    name: 'Sludge Dryer',
+    tagPrefix: 'DR',
+    category: 'sludge',
+    summary: 'Indirect thermal dryer: evaporates cake moisture to 70–90 % dry solids, cutting scheduled-waste tonnage 3–4×. LPG-fired; condensate returns to the works.',
+    params: [{ key: 'targetDS', label: 'Product dry solids', unit: '%', min: 40, max: 95, step: 5, default: () => 80, help: '80–85 % is typical; above 90 % granules get dusty and can self-heat.' }],
+    run: (s, p) => dry(s, { targetDS_pct: n(p, 'targetDS') }),
+    capex: (_p, _s, r) => scale(650_000, Math.max(Number(r.calcs.evapH?.value ?? 0), 5), 100),
+    footprint: () => 40,
   },
   splitter: {
     type: 'splitter',

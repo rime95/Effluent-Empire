@@ -37,3 +37,13 @@ Module: `src/game/tech.ts`, screen `src/ui/screens/TechTree.tsx`. Player decisio
 ## Customer names (`src/game/clientNames.ts`)
 - **Generic names:** about 40 fictional names per industry (common Malaysian company-name parts).
 - **No repeats in play:** a name already used by an open enquiry, a live project or an operated plant is skipped. The next unused name in the list is taken with no extra RNG draw, so only the name changes. If every name is in play, "(second site)" is appended.
+
+## Contract requirements (`src/game/requirements.ts`)
+Some tough clients set terms beyond the discharge standard. Each term is evaluated like a regulated parameter, with a value, a limit, pass/fail and a why-trace.
+- **Where they appear:** the predicted result is shown in the Studio's compliance drawer, and the actual result on the commissioning report.
+- **A failed requirement fails commissioning** even when the effluent meets the standard.
+
+Requirements so far:
+- `sludgeCapRMd`: sludge and waste disposal cost cap in RM/d (sludge dryer client). The cap is set at the reference design's disposal cost × 1.3.
+
+Reuse fraction, ZLD and the green scorecard follow with RO, reclaim and the evaporator.

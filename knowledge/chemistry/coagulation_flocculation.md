@@ -50,7 +50,7 @@ Real coagulation depends on colloid surface charge (zeta potential), particle co
     E = max(E_cn, E_sw) · f_pH
     f_pH = 1 inside the pH window, Gaussian (σ = 0.8 pH units) outside
 
-**Optimum metal dose (mmol/L)** = (0.02 + 0.004·colloid + 0.0015·precipitate + 0.002·particulate organics + 0.0005·emulsified O&G) / efficiency. All loads are in mg/L. It is calibrated so 100 mg/L of colloids needs about 125 mg/L alum, inside the typical 20–300 mg/L industrial range.
+**Optimum metal dose (mmol/L)** = (0.02 + 0.004·colloid + 0.0015·precipitate + 0.002·particulate organics + 0.004·emulsified O&G) / efficiency. The emulsion term was raised from 0.0005 to 0.004 mmol/mg (≈ 0.65 mg FeCl₃ per mg emulsified oil) on review: chemical demulsification needs 0.3–1 mg coagulant per mg oil, surfactant-dependent. `verify:` All loads are in mg/L. It is calibrated so 100 mg/L of colloids needs about 125 mg/L alum, inside the typical 20–300 mg/L industrial range.
 
 | Coagulant | pH window | Relative efficiency |
 |---|---|---|
@@ -63,7 +63,7 @@ verify: these windows are typical published operating ranges, not hard limits. F
 The destabilised fraction E has these effects:
 - E of the colloids moves into the floc pool.
 - Precipitate and organic-particle v₅₀ shift towards the floc v₅₀.
-- 70 % × E of the emulsified oil becomes free, separable oil with coagulant alone, rising to 92 % × E with polymer at its optimum (+22 % × polymer effect). Polymer bridging enmeshes the destabilised micro-droplets into floc, which is why chemically assisted DAF reaches 90–97 % O&G removal on refinery and food emulsions. GAME MODEL, `verify:` (2026-11-22, DAF stage).
+- 70 % × E of the emulsified oil is destabilised into floc-bound oil (`OGfloc`, near-neutral density: a DAF floats it, a clarifier barely catches it) with coagulant alone, rising to 92 % × E with polymer at its optimum (+22 % × polymer effect). Polymer bridging enmeshes the destabilised micro-droplets into floc, which is why chemically assisted DAF reaches 90–97 % O&G removal on refinery and food emulsions. GAME MODEL, `verify:` (2026-11-22, DAF stage).
 
 Floc growth with flocculation time t: v₅₀,floc = (0.3 + 2.7·(1 − e^(−t/8 min)))·(1 + 0.4·eff_poly) m/h.
 

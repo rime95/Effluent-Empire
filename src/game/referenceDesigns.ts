@@ -4,13 +4,28 @@
  * every industry is solvable. They are not shown to the player.
  * Ref: knowledge/chemistry/precipitation.md, knowledge/biological/activated_sludge.md (reference trains)
  */
-import { Params, UnitType, defaultParams } from '../simulation/treatment/catalogue';
+import { CATALOGUE, Params, UnitType, defaultParams } from '../simulation/treatment/catalogue';
+import { ProcessGraph, linearGraph } from '../simulation/treatment/graph';
 import { IndustryId } from './industries';
 import { Stream } from '../simulation/core/stream';
 import { optimumMetalDose_mmol } from '../simulation/chemistry/coagulation';
 import { MW } from '../simulation/core/units';
 
 export type TrainSpec = { kind: UnitType; params: Params }[];
+
+/**
+ * A linear train with a sludge line: the sludge port of main unit `fromIdx` feeds the sludge units in series, the last
+ * one to a disposal point; each sludge unit's filtrate / supernatant / condensate returns to the head of the works (u0).
+ */
+export function sludgeLineGraph(train: TrainSpec, fromIdx: number, sludge: TrainSpec): ProcessGraph {
+  const g = linearGraph(train);
+  sludge.forEach((s, i) => g.nodes.push({ id: `s${i}`, kind: s.kind, tag: `${CATALOGUE[s.kind].tagPrefix}-S${i + 1}`, params: s.params }));
+  g.nodes.push({ id: 'sd', kind: 'disposal', tag: 'SD-01', params: {} });
+  const ids = [`u${fromIdx}`, ...sludge.map((_, i) => `s${i}`), 'sd'];
+  for (let i = 0; i < ids.length - 1; i++) g.edges.push({ id: `sl${i}`, from: ids[i], to: ids[i + 1], fromPort: 'sludge' });
+  sludge.forEach((_, i) => g.edges.push({ id: `rt${i}`, from: `s${i}`, to: 'u0' }));
+  return g;
+}
 
 const u = (kind: UnitType, Q: number, over: Params = {}) => ({ kind, params: { ...defaultParams(kind, Q), ...over } });
 
@@ -34,7 +49,8 @@ export const dafFoodTrain = (s: Stream): TrainSpec => {
   return [
   u('eq', Q),
   u('coagulation', Q, { coagulant: 'ferric', dose: ferric, pHset: 7, polymer: 1 }),
-  u('daf', Q, { area: Math.max(1, Math.ceil(((Q * 2.2 + Q * 0.6) / 24 / 8) * 2) / 2), recycle: 60, pressure: 550 }),
+  // after EQ the peak factor is ~1.3: HLR (peak feed + 60 % recycle) ≈ 8 m/h
+  u('daf', Q, { area: Math.max(1, Math.ceil(((Q * 1.3 + Q * 0.6) / 24 / 8) * 2) / 2), recycle: 60, pressure: 550 }),
   // ferric emulsion breaking consumes alkalinity: hold the aeration tank at pH 7 so nitrification is not lost
   u('activatedSludge', Q, { volume: Math.ceil(Q * 3.5), srt: 15, control: 'srt', alkPH: 7, alkReagent: 'NaOH' }),
   u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.4) }),

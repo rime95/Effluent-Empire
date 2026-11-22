@@ -184,7 +184,17 @@ export function evaluate(effluent: Stream, std: StandardId, sim: SimResult | nul
         why = explainCOD(effluent, sim, pass, true);
         break;
       case 'OG':
-        why = pass ? `Free ${effluent.OGfree.toFixed(1)}, emulsified ${effluent.OGemulsified.toFixed(1)} mg/L.` : effluent.OGfree >= effluent.OGemulsified ? 'Free oil remains — an oil separator with lower surface loading removes it.' : 'Emulsified oil remains — gravity cannot separate it; coagulation breaks emulsions and activated sludge adsorbs oil.';
+        {
+          const fl = effluent.OGfloc ?? 0;
+          const top = Math.max(effluent.OGfree, effluent.OGemulsified, fl);
+          why = pass
+            ? `Free ${effluent.OGfree.toFixed(1)}, emulsified ${effluent.OGemulsified.toFixed(1)}, floc-bound ${fl.toFixed(1)} mg/L.`
+            : top === effluent.OGfree
+              ? 'Free oil remains — an oil separator or DAF with lower surface loading removes it.'
+              : top === fl
+                ? 'Coagulated, floc-bound oil remains — it is nearly neutrally buoyant, so gravity units barely catch it; a DAF floats it.'
+                : 'Emulsified oil remains — gravity cannot separate it: break the emulsion with coagulation, then float it in a DAF; activated sludge adsorbs the rest.';
+        }
         break;
       case 'NH3N':
         why = pass ? 'Within limit.' : has(sim, 'activatedSludge') ? 'Nitrification incomplete — nitrifiers grow slowly: increase SRT, keep DO ≥ 2 mg/L and keep pH ≥ 6.8 (nitrification consumes 7.1 mg alkalinity per mg N).' : 'Ammonia passes through physical–chemical treatment; biological nitrification is required.';
