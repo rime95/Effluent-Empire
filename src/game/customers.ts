@@ -227,10 +227,13 @@ export function enquiryReferenceGraph(e: Enquiry, tech: readonly TechId[]): Proc
     g = Array.isArray(d) ? linearGraph(d) : d;
   }
   // main train in a row, side units (reclaim, sludge line, brine treatment) on a second row
-  const main = g.nodes.filter((n) => n.kind === 'influent' || /^u\d+$/.test(n.id));
-  const side = g.nodes.filter((n) => !main.includes(n) && n.kind !== 'discharge');
+  const main = g.nodes.filter((n) => (n.kind === 'influent' && !n.params.source) || /^u\d+$/.test(n.id));
+  // segregated inlets start the second row at the left, followed by their own pretreatment; other side units after them
+  const sideIn = g.nodes.filter((n) => n.kind === 'influent' && n.params.source);
+  const side = g.nodes.filter((n) => !main.includes(n) && !sideIn.includes(n) && n.kind !== 'discharge');
   main.forEach((n, i) => (n.position = { x: i * 190, y: 160 }));
-  side.forEach((n, i) => (n.position = { x: 380 + i * 190, y: 420 }));
+  sideIn.forEach((n, i) => (n.position = { x: 0, y: 420 + i * 220 }));
+  side.forEach((n, i) => (n.position = { x: (sideIn.length ? 190 : 380) + i * 190, y: 420 }));
   const out = g.nodes.find((n) => n.kind === 'discharge');
   if (out) out.position = { x: main.length * 190, y: 160 };
   return g;

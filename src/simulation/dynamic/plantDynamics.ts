@@ -15,10 +15,11 @@ import { equilibrate, aerationCarbonate } from '../chemistry/acidBase';
 import { AERATION, ALK_REAGENTS, AlkReagent, airForO2_mold, isAlkReagent, mixingAir_mold } from '../biological/aeration';
 import { vesilind_mh } from '../physical/settling';
 import { CATALOGUE, UnitType } from '../treatment/catalogue';
-import { ProcessGraph, simulate, PNode } from '../treatment/graph';
+import { ProcessGraph, REJECT_KINDS, SimResult, simulate, PNode } from '../treatment/graph';
 import { evaluate, measure, StandardId } from '../treatment/compliance';
 import { ASM1, ASM1_SUBSTEP, AS1State, step as asmStep, mlss as mlssOf, oxygenSaturation } from './asm1';
 import { metalInhibition, pHInhibition, pHInhibitionNitrifier, KINETICS } from '../biological/activatedSludge';
+import { waterQualityIndex } from '../treatment/waterQuality';
 
 export type Disturbance =
   | { kind: 'flowSurge'; factor: number; fromH: number; toH: number }
@@ -44,6 +45,8 @@ export interface TrendPoint {
   pass: boolean;
   failed: string[];
   units: Record<string, Record<string, number>>;
+  /** per pipe: flow (m³/d) and display water-quality index 0–1 (waterQuality.ts); sludge/RAS lines from the steady model, flagged */
+  edges: Record<string, { Q: number; wq: number; sludge?: boolean }>;
 }
 
 export interface DynamicResult {
@@ -272,6 +275,22 @@ function initialise(g: ProcessGraph, base: Stream) {
 
 const warmCache = new Map<string, ReturnType<typeof initialise>>();
 
+/** Live-view pipe data for one step: dynamic flows and quality; sludge lines (quasi-static here) from the steady model. */
+function edgeView(g: ProcessGraph, edge: Map<string, Stream>, steady: SimResult, standard: StandardId): TrendPoint['edges'] {
+  const out: TrendPoint['edges'] = {};
+  for (const e of g.edges) {
+    if (e.fromPort === 'sludge' || e.fromPort === 'ras') {
+      const st = steady.edges[e.id];
+      const reject = REJECT_KINDS.includes(g.nodes.find((n) => n.id === e.from)?.kind as never);
+      out[e.id] = { Q: st?.Q ?? 0, wq: st && reject ? waterQualityIndex(st, standard) : 1, sludge: !reject };
+      continue;
+    }
+    const s = edge.get(e.id);
+    out[e.id] = { Q: s?.Q ?? 0, wq: s ? waterQualityIndex(s, standard) : 0 };
+  }
+  return out;
+}
+
 export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, opts: DynamicOptions): DynamicResult {
   const warm = opts.warmBase ?? base;
   // full design + full warm stream (incl. bypass flags, metals, T, Cb …) so no stale state can leak between plants or runs
@@ -458,6 +477,7 @@ export function runDynamic(g: ProcessGraph, base: Stream, standard: StandardId, 
       pass: !rep || rep.pass,
       failed: failed.map((c) => c.param),
       units,
+      edges: edgeView(g, edge, init.steady, standard),
     });
   }
   return { points, compliantFraction: compliant / points.length, worst, overflowM3, energy_kWh: energy, reagent_kg: reagent };

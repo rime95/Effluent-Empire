@@ -10,17 +10,9 @@ import { DynamicResult, runDynamic } from '../../simulation/dynamic/plantDynamic
 import { CATALOGUE, UnitType } from '../../simulation/treatment/catalogue';
 import { limitsFor } from '../../simulation/treatment/compliance';
 import { hasInst } from '../../simulation/treatment/instrumentation';
-import type { PNode } from '../../simulation/treatment/graph';
+import { TAG_DP, TAG_LABEL, TAG_UNITS, defaultTags, tagVisible } from '../scada/tags';
+import { LivePlant, WaterLegend } from '../scada/LivePlant';
 
-/** Tags a unit can show in SCADA: without the instrument there is no signal (knowledge/operations/instrumentation.md). */
-function tagVisible(n: PNode | undefined, key: string): boolean {
-  if (!n) return true;
-  if (key === 'bypassed') return false;
-  if (['pH', 'pHmeasured', 'pump', 'sp'].includes(key) && ['neutralisation', 'precipitation', 'coagulation'].includes(n.kind)) return hasInst(n, 'pHLoop');
-  if (['DO', 'blower'].includes(key) && n.kind === 'activatedSludge') return hasInst(n, 'doLoop');
-  if (['level', 'overflow'].includes(key) && n.kind === 'eq') return hasInst(n, 'level');
-  return true;
-}
 import { fmt, INDUSTRY_LABEL, rm } from '../format';
 import type { Screen } from '../App';
 import { brand } from '../prefs';
@@ -29,18 +21,6 @@ import { brand } from '../prefs';
 const BG = '#050c14';
 const PANEL = '#0a1622';
 const LINE = '#16304a';
-const CAT_COLOR: Record<string, string> = { chemical: 'var(--chem)', biological: 'var(--bio)', physical: 'var(--phys)' };
-const TAG_UNITS: Record<string, string> = { level: '%', outflow: 'm³/d', overflow: 'm³/d', pH: '', pHmeasured: '', pump: '%', sp: '', DO: 'mg/L', MLSS: 'mg/L', NH4: 'mg N/L', NO3: 'mg N/L', OUR: 'mg/L·h', blower: '%', carry: '%', TSS: 'mg/L', SOR: 'm/h' };
-const TAG_LABEL: Record<string, string> = { level: 'Level', outflow: 'Outflow', overflow: 'Overflow', pH: 'pH (true)', pHmeasured: 'pH (probe)', pump: 'Dosing pump', sp: 'Set-point', DO: 'DO', MLSS: 'MLSS', NH4: 'NH₄-N', NO3: 'NO₃-N', OUR: 'OUR', blower: 'Blower', carry: 'Solids carry-over', TSS: 'TSS', SOR: 'SOR (peak)' };
-/** mimic labels (fit the 110 px faceplate) and display decimals per tag */
-const TAG_SHORT: Record<string, string> = { level: 'Level', outflow: 'Out Q', overflow: 'Overflow', pH: 'pH', pHmeasured: 'pH probe', pump: 'Pump', DO: 'DO', MLSS: 'MLSS', NH4: 'NH₄-N', NO3: 'NO₃-N', OUR: 'OUR', blower: 'Blower', carry: 'Carry-ov', TSS: 'TSS', SOR: 'SOR' };
-const TAG_DP: Record<string, number> = { pH: 2, pHmeasured: 2, DO: 2, NH4: 1, NO3: 1, carry: 1, SOR: 2, OUR: 1 };
-/** tags trended by default when a unit is selected */
-function defaultTags(kind: string, keys: string[]): string[] {
-  const pref: Record<string, string[]> = { neutralisation: ['pH', 'pHmeasured', 'pump'], precipitation: ['pH', 'pHmeasured', 'pump'], coagulation: ['pH', 'pHmeasured'], crReduction: ['pH', 'pHmeasured'], activatedSludge: ['DO', 'blower'], eq: ['level', 'outflow'], clarifier: ['TSS'] };
-  const want = (pref[kind] ?? keys.slice(0, 2)).filter((k) => keys.includes(k));
-  return want.length ? want : keys.slice(0, 1);
-}
 const SERIES = ['#22d3ee', '#f59e0b', '#a3e635', '#f472b6', '#c084fc', '#94a3b8', '#fb7185'];
 
 interface Alarm {
@@ -81,6 +61,8 @@ export function Scada({ go }: { go: (s: Screen) => void }) {
   const [result, setResult] = useState<DynamicResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [cursor, setCursor] = useState(48);
+  const [playing, setPlaying] = useState(true);
+  const [speed, setSpeed] = useState(4);
   const [actionMsg, setActionMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [effParam, setEffParam] = useState('pH');
   const [tagSel, setTagSel] = useState<Record<string, string[]>>({});
@@ -115,6 +97,12 @@ export function Scada({ go }: { go: (s: Screen) => void }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runKey]);
 
+  // live feed: loop the 48 h replay at `speed` replay hours per second (the trend cursors follow)
+  useEffect(() => {
+    if (!playing || !result) return;
+    const t = setInterval(() => setCursor((c) => { const n = Math.round((c + speed * 0.25) * 4) / 4; return n > 48 ? 0 : n; }), 250);
+    return () => clearInterval(t);
+  }, [playing, speed, result]);
   const limits = plant ? limitsFor(plant.standard) : {};
   const alarms = useMemo(() => (result && plant ? alarmsOf(result, plant) : []), [result, plant]);
   const at = result ? result.points.reduce((best, p) => (Math.abs(p.t - cursor) < Math.abs(best.t - cursor) ? p : best), result.points[0]) : null;
@@ -192,77 +180,27 @@ export function Scada({ go }: { go: (s: Screen) => void }) {
         </div>
       )}
 
-      {/* mimic */}
-      <div className="panel" style={{ background: PANEL, borderColor: LINE, marginBottom: 12, overflowX: 'auto' }}>
-        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-          <b style={{ color: '#cfe3f7' }}>Process mimic {at ? `— ${clockLabel(at.t)}` : ''}</b>
-          <div className="row" style={{ gap: 8 }}>
-            <input type="range" min={0} max={48} step={0.25} value={cursor} onChange={(e) => setCursor(Number(e.target.value))} style={{ width: 220 }} disabled={!result} />
+      {/* live plant view: the PFD running (knowledge/operations/scada.md, "Live plant view") */}
+      <div className="panel" style={{ background: PANEL, borderColor: LINE, marginBottom: 12 }}>
+        <div className="row" style={{ justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+          <b style={{ color: '#cfe3f7' }}>Live plant {at ? `— ${clockLabel(at.t)}` : ''}</b>
+          <WaterLegend />
+          <div className="row" style={{ gap: 6, alignItems: 'center' }}>
+            <button className={`btn sm ${playing ? 'primary' : ''}`} onClick={() => setPlaying((x) => !x)} disabled={!result} title="Play the 48 h replay as a live feed">
+              {playing ? '❚❚ Pause' : '▶ Live'}
+            </button>
+            {[1, 4, 12].map((sp) => (
+              <button key={sp} className={`btn sm ${speed === sp ? 'primary' : 'ghost'}`} onClick={() => setSpeed(sp)} title={`${sp} replay hour(s) per second`}>
+                {sp}×
+              </button>
+            ))}
+            <input type="range" min={0} max={48} step={0.25} value={cursor} onChange={(e) => { setPlaying(false); setCursor(Number(e.target.value)); }} style={{ width: 180 }} disabled={!result} />
             <button className="btn sm" onClick={run} disabled={busy}>
               {busy ? 'Simulating…' : 'Re-run 48 h'}
             </button>
           </div>
         </div>
-        <svg width={Math.max(640, units.length * 150 + 160)} height={140} style={{ display: 'block' }}>
-          <defs>
-            <marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-              <path d="M0,0 L8,4 L0,8 z" fill="var(--flow)" />
-            </marker>
-          </defs>
-          <text x={8} y={70} fill="#8aa0b8" fontSize={11} fontFamily="var(--mono)">
-            IN {at && flowMeter ? fmt(at.Qin, 0) : '—'}
-          </text>
-          <text x={8} y={84} fill="#5f7891" fontSize={10} fontFamily="var(--mono)">
-            m³/d
-          </text>
-          {units.map((u, i) => {
-            const x = 80 + i * 150;
-            const cat = CATALOGUE[u.kind as UnitType]?.category ?? 'physical';
-            const vals = at?.units[u.id] ?? {};
-            const alarm = (vals.DO !== undefined && vals.DO < 0.5) || (vals.sp !== undefined && Math.abs(vals.pHmeasured - vals.sp) > 0.5) || (vals.level !== undefined && vals.level > 95);
-            const vis = Object.keys(vals).filter((k) => k !== 'sp' && tagVisible(u, k));
-            const entries = [...new Set([...defaultTags(u.kind, vis), ...vis])].slice(0, 3).map((k) => [k, vals[k]] as const);
-            return (
-              <g key={u.id} onClick={() => setUnitSel(u.id)} style={{ cursor: 'pointer' }}>
-                <line x1={x - 40} y1={60} x2={x} y2={60} stroke="var(--flow)" strokeWidth={2} markerEnd="url(#arr)" />
-                <rect x={x} y={20} width={110} height={100} rx={6} fill="#0d1f31" stroke={alarm ? 'var(--alarm)' : unit?.id === u.id ? '#cfe3f7' : CAT_COLOR[cat]} strokeWidth={alarm || unit?.id === u.id ? 2 : 1.2}>
-                  {alarm && <animate attributeName="stroke-opacity" values="1;0.3;1" dur="1.2s" repeatCount="indefinite" />}
-                </rect>
-                <rect x={x} y={20} width={110} height={18} rx={6} fill={CAT_COLOR[cat]} opacity={0.25} />
-                <text x={x + 6} y={33} fill="#fff" fontSize={11} fontWeight={600} fontFamily="var(--mono)">
-                  {u.tag}
-                </text>
-                <text x={x + 104} y={33} fill="#8aa0b8" fontSize={9} textAnchor="end">
-                  {CATALOGUE[u.kind as UnitType]?.name.split(' ')[0]}
-                </text>
-                {vals.bypassed ? (
-                  <text x={x + 6} y={60} fill="#f3c95a" fontSize={10.5} fontFamily="var(--mono)">
-                    BYPASSED
-                  </text>
-                ) : (
-                  entries.map(([k, v], j) => (
-                    <g key={k}>
-                      <text x={x + 6} y={56 + j * 18} fill="#8aa0b8" fontSize={10} fontFamily="var(--mono)">
-                        {TAG_SHORT[k] ?? k}
-                      </text>
-                      <text x={x + 104} y={56 + j * 18} fill="#cfe3f7" fontSize={10.5} fontFamily="var(--mono)" textAnchor="end">
-                        {fmt(v, TAG_DP[k] ?? 0)}
-                        {TAG_UNITS[k] === '%' ? ' %' : ''}
-                      </text>
-                    </g>
-                  ))
-                )}
-              </g>
-            );
-          })}
-          <line x1={80 + units.length * 150 - 40} y1={60} x2={80 + units.length * 150} y2={60} stroke="var(--clean)" strokeWidth={2} markerEnd="url(#arr)" />
-          <text x={80 + units.length * 150 + 6} y={56} fill={at && !at.pass ? '#ff8a8a' : '#6fd39a'} fontSize={11} fontFamily="var(--mono)">
-            OUT {at ? (at.pass ? 'OK' : at.failed.join(',')) : '—'}
-          </text>
-          <text x={80 + units.length * 150 + 6} y={72} fill="#8aa0b8" fontSize={10} fontFamily="var(--mono)">
-            pH {at ? fmt(at.effluent.pH, 2) : '—'}
-          </text>
-        </svg>
+        <LivePlant plant={plant} at={at} selected={unit?.id} onSelect={setUnitSel} />
       </div>
 
       <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(280px, 1fr)' }}>

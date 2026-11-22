@@ -45,3 +45,19 @@ These replaced per-series hidden autoscaled axes, which had made a pH held at 9.
 - **EQ conservation:** outflow stops at the 5 % low-level cut-out, and overflowed volume is not blended into the tank. The volume balance is tested.
 - Probe drift reading **high** on an acid-dosing loop only drives the pump to 100 % (pump-capacity limited). Reading **low** under-doses and fails the pH maximum. This asymmetry is physical and tested.
 - **Set-points from SCADA** (pH SP, DO SP, SRT, coagulant dose) persist into the operated plant's graph. Only whitelisted keys are accepted, clamped to their bounds (`SETPOINTS` in `incidents.ts`); anything else is a design change.
+
+## Live plant view (added 2026-11-22)
+The SCADA screen opens on a **live plant view**: the as-built PFD (same node positions as the Studio, `src/ui/studio/layout.ts`), with each unit drawn as a side-view cross-section tank (`src/ui/scada/tanks.tsx`). The 48 h replay plays as a live feed: play/pause at 1×, 4× or 12× replay hours per second. The trend cursors follow, and dragging the slider pauses playback.
+
+- **Water colour.** Each pipe and tank is coloured by a display water-quality index (`src/simulation/treatment/waterQuality.ts`, GAME MODEL, visual only). The index is not regulated.
+  - It is the worst value ÷ limit ratio over COD, BOD₅, TSS, O&G, NH₃-N, the metals and Cr(VI) against the plant's own standard. pH counts each unit outside the range as a 10× exceedance.
+  - It is mapped as `wq = clamp(log10(ratio) / log10(30), 0, 1)`. Meeting every limit gives 0, clean blue; 30× the worst limit or more gives 1, brown.
+  - The log scale means the colour shifts step by step as each unit removes its share.
+- **Pipe data.** Each replay step records, per pipe, the flow and `wq` (`TrendPoint.edges`). Sludge and RAS lines are quasi-static in the replay, so their flow comes from the steady model; they are drawn brown and flagged `sludge`. Reject lines (brine, backwash, eluate, concentrate) keep their real quality.
+- **Movement.** Dash speed and pipe width scale with log flow. A pipe with no flow at that hour is grey and still.
+- **Tank animations.** EQ fills to its live level. Stirred reactors turn while the dosing pump runs. Aeration basins bubble with the blower. Clarifiers show a sludge blanket.
+- **Reduced motion.** With `prefers-reduced-motion` the animation stops, and only colours and readings update.
+- **Readouts.** A faceplate under every unit shows 2–4 live tags at the playback hour. The tag choice follows the trend panel (`src/ui/scada/tags.ts`).
+  - Alarm thresholds match the alarm log: DO < 0.5, EQ level > 95 %, probe more than 0.5 pH from the set-point, pump at 100 %.
+  - A tag whose instrument is not installed shows "no instrument".
+  - Units with no tags show outlet flow and a quality word (clean / treated / turbid / raw).

@@ -25,6 +25,7 @@ import { PNode, PortId, ProcessGraph, SimResult } from '../../simulation/treatme
 import { evaluate, measure, STANDARDS } from '../../simulation/treatment/compliance';
 import { Stream, mainInlet } from '../../simulation/core/stream';
 import { DisposalSymbol, TankerSymbol, UnitSymbol } from '../components/Symbols';
+import { defaultPos } from './layout';
 import { CATEGORY_COLOR, edgeTypes, nodeTypes, type DosingTag, type UnitNodeData } from './nodes';
 import { NumberField } from './NumberField';
 import { PidSheet } from './PidSheet';
@@ -60,7 +61,7 @@ function shortChem(name: string): string {
 
 /** Stream numbers in flow order (topological when a simulation is available), so the PFD reads left to right. */
 function numberStreams(g: ProcessGraph, order: string[] | undefined): Map<string, number> {
-  const pos = new Map(g.nodes.map((n, i) => [n.id, defaultPos(n, i)]));
+  const pos = new Map(g.nodes.map((n, i) => [n.id, defaultPos(n, i, g.nodes.length)]));
   const seq = order && order.length ? order : [...g.nodes].sort((a, b) => (pos.get(a.id)!.x - pos.get(b.id)!.x)).map((n) => n.id);
   const map = new Map<string, number>();
   let k = 1;
@@ -82,9 +83,6 @@ export function Studio(props: { go: (s: Screen) => void }) {
   );
 }
 
-function defaultPos(n: PNode, i: number) {
-  return n.position ?? (n.kind === 'influent' ? { x: 0, y: n.params.source ? 400 : 160 } : n.kind === 'discharge' ? { x: 1100, y: 160 } : { x: 160 + i * 190, y: 160 });
-}
 
 /**
  * An operating plant shown in the Studio as a read-only project: the as-built drawing, or the upgrade draft
@@ -173,7 +171,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
     if (!p) return [];
     const next = new Map<string, Node>();
     const out = draft.nodes.map((n, i) => {
-      const position = dragPos[n.id] ?? defaultPos(n, i);
+      const position = dragPos[n.id] ?? defaultPos(n, i, draft.nodes.length);
       const selected = selNodes.has(n.id);
       let type: string;
       let data: Record<string, unknown>;

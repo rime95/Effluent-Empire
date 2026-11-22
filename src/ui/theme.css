@@ -248,3 +248,29 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 0 4px; border: 1px s
 
 .pfd-eq .react-flow__handle.ras-port { border-color: var(--sludge); background: var(--sludge); border-radius: 50%; }
 .pfd-portlabels { position: absolute; left: 24px; right: 24px; top: 100px; display: flex; justify-content: space-between; font-family: var(--mono); font-size: 8px; color: var(--sludge); pointer-events: none; }
+
+/* ---- SCADA live view (restrained motion) ---- */
+@keyframes live-flow { to { stroke-dashoffset: -28; } }
+.live-pipe { animation: live-flow linear infinite; }
+@keyframes tank-spin { to { transform: rotate(360deg); } }
+.tank-mixer { animation: tank-spin linear infinite; }
+@keyframes tank-rise { 0% { transform: translateY(0); opacity: 0.9; } 100% { transform: translateY(-58px); opacity: 0; } }
+.tank-bubble { animation: tank-rise 2s ease-in infinite; }
+@keyframes tank-blink { 50% { opacity: 0.2; } }
+.tank-blink { animation: tank-blink 1.2s step-end infinite; }
+@keyframes tank-vapour { 0% { opacity: 0.2; transform: translateY(4px); } 50% { opacity: 0.8; } 100% { opacity: 0; transform: translateY(-6px); } }
+.tank-vapour { animation: tank-vapour 2.4s ease-out infinite; }
+.live-node { width: 130px; }
+.live-tag { display: flex; justify-content: space-between; align-items: center; font: 600 11px var(--mono); color: var(--ink); padding: 0 2px 2px; }
+.live-tag .lamp { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+.live-face { background: #0d1f31; border: 1px solid #24405f; border-radius: 4px; padding: 4px 6px; font: 11px var(--mono); color: #8aa0b8; margin-top: 2px; }
+.live-face .row2 { display: flex; justify-content: space-between; gap: 6px; line-height: 16px; }
+.live-face .v { color: #e6eef7; }
+.live-face .v.warn { color: #f3c95a; }
+.live-face .v.alarm { color: #ff8a8a; }
+.live-face .noinst { color: #5f7891; font-style: italic; }
+.live-node.alarm .live-tank { outline: 2px solid var(--alarm); outline-offset: 1px; border-radius: 3px; animation: tank-blink 1.2s step-end infinite; }
+.live-node.sel .live-tank { outline: 2px solid var(--clean); outline-offset: 1px; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .live-pipe, .tank-mixer, .tank-bubble, .tank-blink, .tank-vapour, .live-node.alarm .live-tank { animation: none; }
+}
