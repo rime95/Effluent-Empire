@@ -21,6 +21,11 @@
     "MetalsSoluble": { "label": "Cu+Mn+Ni+Sn+Zn soluble (Reg. 11(2))", "unit": "mg/L" },
     "Sulphide": { "label": "Sulphide (as S)", "unit": "mg/L" }
   },
+  "reuseSpec": {
+    "label": "Process-water reuse (client quality spec)",
+    "source": "GAME MODEL — typical make-up / rinse-water quality for industrial reuse (verify against the client's own spec). Not a discharge standard.",
+    "limits": { "TDS": { "max": 500 }, "TSS": { "max": 2 }, "COD": { "max": 30 }, "NH3N": { "max": 5 } }
+  },
   "standards": {
     "A": {
       "label": "Standard A",

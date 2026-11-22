@@ -52,7 +52,7 @@ export const TECH: Record<TechId, TechDef> = {
   },
   uf: {
     id: 'uf', name: 'Ultrafiltration (UF)', tier: 2, category: 'membrane', costRM: 160_000, reputation: TIER_REPUTATION[2], requires: [], units: ['uf'],
-    blurb: 'Hollow-fibre membranes remove suspended solids and colloids almost completely: the pretreatment for RO and MBR.', clients: ['Clients needing particle-free effluent'], available: false,
+    blurb: 'Hollow-fibre membranes remove suspended solids and colloids almost completely: the pretreatment for RO and MBR.', clients: ['Pretreatment for RO (no client of its own)'], available: true,
   },
   sulfide: {
     id: 'sulfide', name: 'Sulfide precipitation', tier: 2, category: 'chemical', costRM: 140_000, reputation: TIER_REPUTATION[2], requires: [], units: ['sulfide'],
@@ -60,35 +60,35 @@ export const TECH: Record<TechId, TechDef> = {
   },
   ionExchange: {
     id: 'ionExchange', name: 'Ion exchange (chelating resin)', tier: 2, category: 'chemical', costRM: 180_000, reputation: TIER_REPUTATION[2], requires: [], units: ['ionExchange'],
-    blurb: 'Selective resin polishes trace heavy metals; acid regenerant concentrates them.', clients: ['Semiconductor Standard A copper polishing'], available: false,
+    blurb: 'Selective resin polishes trace heavy metals; acid regenerant concentrates them.', clients: ['Pays through metal recovery: eluate to electrowinning'], available: true,
   },
   uasb: {
     id: 'uasb', name: 'Anaerobic UASB + biogas', tier: 2, category: 'biological', costRM: 300_000, reputation: TIER_REPUTATION[2], requires: [], units: ['uasb'],
-    blurb: 'Anaerobic sludge blanket converts high-strength COD to methane; biogas powers the plant.', clients: ['Palm oil mills (POME)'], available: false,
+    blurb: 'Anaerobic sludge blanket converts high-strength COD to methane; biogas powers the plant.', clients: ['Cuts aeration power and earns a biogas credit on high-strength food waste'], available: true,
   },
   ro: {
     id: 'ro', name: 'Reverse osmosis (RO)', tier: 3, category: 'membrane', costRM: 350_000, reputation: TIER_REPUTATION[3], requires: ['uf'], units: ['ro'],
-    blurb: 'High-pressure membranes reject dissolved salts: process-grade permeate and a brine stream.', clients: ['High-TDS clients'], available: false,
+    blurb: 'High-pressure membranes reject dissolved salts: process-grade permeate and a brine stream.', clients: ['Water-stressed finishers with reuse targets (with the reclaim system)'], available: true,
   },
   reclaim: {
     id: 'reclaim', name: 'Water reclaim system', tier: 3, category: 'recovery', costRM: 200_000, reputation: TIER_REPUTATION[3], requires: ['ro'], units: ['reclaim'],
-    blurb: 'Returns treated water to the client’s process: a reuse credit and a smaller discharge.', clients: ['Water-scarce clients with reuse targets'], available: false,
+    blurb: 'Returns treated water to the client’s process: a reuse credit and a smaller discharge.', clients: ['Water-stressed finishers: ≥ 30 % reuse'], available: true,
   },
   electrowinning: {
     id: 'electrowinning', name: 'Electrowinning', tier: 3, category: 'recovery', costRM: 250_000, reputation: TIER_REPUTATION[3], requires: ['ionExchange'], units: ['electrowinning'],
-    blurb: 'Plates copper and nickel out of concentrated liquors as saleable metal.', clients: ['Concentrated drag-out and rinse streams'], available: false,
+    blurb: 'Plates copper and nickel out of concentrated liquors as saleable metal.', clients: ['Earns metal sales from concentrated eluate / drag-out'], available: true,
   },
   aop: {
     id: 'aop', name: 'Advanced oxidation (Fenton / ozone)', tier: 3, category: 'chemical', costRM: 220_000, reputation: TIER_REPUTATION[3], requires: [], units: ['aop'],
-    blurb: 'Hydroxyl radicals break down refractory COD and colour that biology cannot.', clients: ['Textile dyeing mills'], available: false,
+    blurb: 'Hydroxyl radicals break down refractory COD and colour that biology cannot.', clients: ['Refractory (inert) COD polishing'], available: true,
   },
   mbr: {
     id: 'mbr', name: 'Membrane bioreactor (MBR)', tier: 3, category: 'biological', costRM: 280_000, reputation: TIER_REPUTATION[3], requires: ['uf'], units: ['mbr'],
-    blurb: 'Activated sludge at high MLSS with membranes instead of a clarifier: compact, solids-free effluent.', clients: ['High-strength food on Standard A with little site space'], available: false,
+    blurb: 'Activated sludge at high MLSS with membranes instead of a clarifier: compact, solids-free effluent.', clients: ['Compact plants; solids-free feed for RO'], available: true,
   },
   evaporator: {
     id: 'evaporator', name: 'Vacuum evaporator (MVR)', tier: 4, category: 'recovery', costRM: 500_000, reputation: TIER_REPUTATION[4], requires: ['ro'], units: ['evaporator'],
-    blurb: 'Boils water off under vacuum: distillate for reuse, a small concentrate for haulage — zero liquid discharge.', clients: ['Zero-liquid-discharge clients'], available: false,
+    blurb: 'Boils water off under vacuum: distillate for reuse, a small concentrate for haulage — zero liquid discharge.', clients: ['Zero-liquid-discharge electronics finishers'], available: true,
   },
 };
 

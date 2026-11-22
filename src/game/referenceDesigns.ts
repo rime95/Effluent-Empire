@@ -78,6 +78,53 @@ export const sulfideMetalTrain = (s: Stream): TrainSpec => {
   ];
 };
 
+/**
+ * Reuse plant: the treated effluent is split, the reuse share goes through UF + RO, permeate to the reclaim system;
+ * RO brine and UF backwash blend with the rest at the discharge.
+ */
+export function reuseGraph(train: TrainSpec, Q: number, splitPct: number): ProcessGraph {
+  // activated carbon first: RO brine concentrates the residual COD ~4×, so it must be low before the split
+  const g = linearGraph([...train, u('carbon', Q), u('splitter', Q, { split: splitPct }), u('uf', Q * splitPct / 100), u('ro', Q, { recovery: 75, antiscalant: 'yes' }), u('mixer', Q), u('neutralisation', Q, { targetPH: 7.5 })]);
+  const id = (k: string) => g.nodes.find((x) => x.kind === k)!.id;
+  const sp = id('splitter'), uf = id('uf'), ro = id('ro'), mx = id('mixer');
+  g.edges = g.edges.filter((e) => e.from !== sp && e.from !== ro);
+  g.nodes.push({ id: 'rw', kind: 'disposal', tag: 'RW-01', params: { reuse: 'yes' } });
+  g.edges.push(
+    { id: 'ra', from: sp, to: uf, fromPort: 'a' },
+    { id: 'rb', from: sp, to: mx, fromPort: 'b' },
+    { id: 'rp', from: ro, to: 'rw' },
+    { id: 'rbr', from: ro, to: mx, fromPort: 'sludge' },
+    { id: 'rbw', from: uf, to: mx, fromPort: 'sludge' },
+  );
+  return g;
+}
+
+/**
+ * Zero-liquid-discharge plant: treated effluent → UF → RO → permeate to reclaim; brine → pH 6 → MVR evaporator →
+ * distillate to reclaim, concentrate tankered as liquid waste; UF backwash back to the head of the works.
+ */
+export function zldGraph(train: TrainSpec, Q: number): ProcessGraph {
+  const g = linearGraph([...train, u('uf', Q), u('ro', Q, { recovery: 75, antiscalant: 'yes' })]);
+  const id = (k: string) => g.nodes.find((x) => x.kind === k)!.id;
+  const uf = id('uf'), ro = id('ro');
+  g.edges = g.edges.filter((e) => e.from !== ro);
+  g.nodes.push(
+    { id: 'zn', kind: 'neutralisation', tag: 'NT-Z1', params: { ...defaultParams('neutralisation', Q * 0.25), targetPH: 6.0 } },
+    { id: 'ev', kind: 'evaporator', tag: 'EV-01', params: { ...defaultParams('evaporator', Q * 0.25), recovery: 97 } },
+    { id: 'rw', kind: 'disposal', tag: 'RW-01', params: { reuse: 'yes' } },
+    { id: 'lh', kind: 'disposal', tag: 'LH-01', params: { liquid: 'yes' } },
+  );
+  g.edges.push(
+    { id: 'zp', from: ro, to: 'rw' },
+    { id: 'zb', from: ro, to: 'zn', fromPort: 'sludge' },
+    { id: 'zn1', from: 'zn', to: 'ev' },
+    { id: 'zd', from: 'ev', to: 'rw' },
+    { id: 'zc', from: 'ev', to: 'lh', fromPort: 'sludge' },
+    { id: 'zbw', from: uf, to: 'u0', fromPort: 'sludge' },
+  );
+  return g;
+}
+
 export const foodTrain = (Q: number): TrainSpec => [
   u('oilSep', Q, { area: Math.ceil((Q * 2.2) / 24 / 1.0) }),
   u('eq', Q),

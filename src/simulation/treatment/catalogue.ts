@@ -15,10 +15,17 @@ import { clarify, equalise, filter, separateOil } from '../physical/units';
 import { flotate } from '../physical/flotation';
 import { dry } from '../physical/dryer';
 import { precipitateSulfide } from '../chemistry/sulfide';
+import { reverseOsmosis, ultrafilter } from '../physical/membranes';
+import { ionExchange } from '../chemistry/ionExchange';
+import { evaporate } from '../physical/evaporator';
+import { electrowin } from '../chemistry/electrowinning';
+import { fenton } from '../chemistry/fenton';
+import { uasb } from '../biological/uasb';
+import { membraneBioreactor } from '../biological/mbr';
 import { ProcessResult } from './types';
 import { filterPress, passThrough, thicken } from '../physical/sludge';
 
-export type UnitType = 'eq' | 'oilSep' | 'daf' | 'crReduction' | 'neutralisation' | 'precipitation' | 'sulfide' | 'coagulation' | 'clarifier' | 'activatedSludge' | 'sandFilter' | 'carbon' | 'thickener' | 'filterPress' | 'dryer' | 'splitter' | 'mixer';
+export type UnitType = 'eq' | 'oilSep' | 'daf' | 'crReduction' | 'neutralisation' | 'precipitation' | 'sulfide' | 'coagulation' | 'clarifier' | 'activatedSludge' | 'sandFilter' | 'carbon' | 'thickener' | 'filterPress' | 'dryer' | 'uf' | 'ro' | 'ionExchange' | 'evaporator' | 'electrowinning' | 'aop' | 'uasb' | 'mbr' | 'splitter' | 'mixer';
 export type Category = 'physical' | 'chemical' | 'biological' | 'sludge' | 'hydraulic';
 export type ParamValue = number | string;
 export type Params = Record<string, ParamValue>;
@@ -153,6 +160,49 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     capex: (p) => scale(70_000, n(p, 'volume'), 10) + 55_000,
     footprint: (p) => n(p, 'volume') / 2.5 + 10,
   },
+  ionExchange: {
+    type: 'ionExchange',
+    name: 'Ion Exchange (chelating resin)',
+    tagPrefix: 'IX',
+    category: 'chemical',
+    summary: 'Lead–lag columns of chelating resin take the last traces of dissolved Cu, Ni and Zn. Acid regeneration concentrates the metal into a small eluate (reject outlet). Polishing only — feed must be filtered and low in metal.',
+    params: [
+      { key: 'resin', label: 'Resin volume (per column)', unit: 'm³', min: 0.05, max: 100, step: 0.05, default: (Q) => round(Q / 24 / 12, 0.05), help: 'Service flow 8–20 bed volumes per hour.' },
+    ],
+    run: (s, p) => ionExchange(s, { resin_m3: n(p, 'resin') }),
+    capex: (p) => scale(160_000, n(p, 'resin'), 2) + 60_000,
+    footprint: (p) => n(p, 'resin') * 3 + 15,
+  },
+  electrowinning: {
+    type: 'electrowinning',
+    name: 'Electrowinning Cell',
+    tagPrefix: 'EW',
+    category: 'chemical',
+    summary: 'DC current plates copper (then nickel) out of a concentrated liquor as saleable cathode metal. Feed it the IX eluate or drag-out; spent electrolyte goes back to treatment.',
+    params: [
+      { key: 'area', label: 'Cathode area', unit: 'm²', min: 0.5, max: 500, step: 0.5, default: () => 10 },
+      { key: 'j', label: 'Current density', unit: 'A/m²', min: 20, max: 600, step: 10, default: () => 200, help: 'Plate cathodes 150–300 A/m² in concentrated (> 10 g/L) liquor; dilute liquor needs a lower current density.' },
+    ],
+    run: (s, p) => electrowin(s, { area_m2: n(p, 'area'), currentDensity: n(p, 'j') }),
+    capex: (p) => scale(120_000, n(p, 'area') * n(p, 'j'), 2000) + 40_000,
+    footprint: (p) => n(p, 'area') / 2 + 12,
+  },
+  aop: {
+    type: 'aop',
+    name: 'Fenton Oxidation (AOP)',
+    tagPrefix: 'OX',
+    category: 'chemical',
+    summary: 'Acidify to pH 3, dose iron + hydrogen peroxide: hydroxyl radicals destroy refractory (inert) COD that biology cannot. Neutralised afterwards — the iron floc needs a clarifier.',
+    params: [
+      { key: 'h2o2', label: 'H₂O₂ dose (as 100 %)', unit: 'mg/L', min: 0, max: 5000, step: 10, default: () => 200, help: '≈ 2.1 g H₂O₂ per g COD in theory; field use 4–8 g/g (30–60 % utilisation).' },
+      { key: 'fe', label: 'Fe : H₂O₂ ratio', unit: 'w/w', min: 0, max: 0.5, step: 0.01, default: () => 0.1, help: '0.1–0.2 by mass.' },
+      { key: 'pHset', label: 'Reaction pH', unit: '', min: 2, max: 7, step: 0.1, default: () => 3.0 },
+      { key: 'volume', label: 'Reactor volume', unit: 'm³', min: 0.5, max: 5000, step: 0.5, default: (Q) => round(Q / 24, 0.5), help: '45–90 min reaction time.' },
+    ],
+    run: (s, p) => fenton(s, { h2o2_mgL: n(p, 'h2o2'), feRatio: n(p, 'fe'), pHset: n(p, 'pHset'), volume_m3: n(p, 'volume') }),
+    capex: (p) => scale(150_000, n(p, 'volume'), 20) + 90_000,
+    footprint: (p) => n(p, 'volume') / 3 + 20,
+  },
   coagulation: {
     type: 'coagulation',
     name: 'Coagulation / Flocculation',
@@ -207,6 +257,76 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
       activatedSludgeControlled(s, { volume_m3: n(p, 'volume'), srt_d: n(p, 'srt'), do_mgL: n(p, 'do'), alkPH: Number(p.alkPH ?? 0) || 0, alkReagent: isAlkReagent(p.alkReagent) ? p.alkReagent : 'NaOH', control: p.control === 'mlss' ? 'mlss' : 'srt', mlssTarget_mgL: Number(p.mlss ?? 3000) || 3000, ras: Number(p.ras ?? 0.75) || 0.75 }, ctx),
     capex: (p, _s, r) => scale(450_000, n(p, 'volume'), 500) + scale(150_000, Math.max(r.calcs.o2?.value ?? 1, 1), 500) * (0.8 + 0.1 * n(p, 'do')) + ((Number(p.alkPH ?? 0) || 0) > 0 ? 35_000 : 0), // alkali day tank, metering pump, pH probe
     footprint: (p) => (n(p, 'volume') / 5) * 1.2 + 30,
+  },
+  uasb: {
+    type: 'uasb',
+    name: 'UASB Anaerobic Reactor',
+    tagPrefix: 'AN',
+    category: 'biological',
+    summary: 'Granular anaerobic sludge blanket turns high-strength COD into methane — little sludge, no aeration, and the biogas runs a gas engine. Leaves 10–30 % of the COD and the ammonia: aerobic polishing must follow.',
+    params: [
+      { key: 'volume', label: 'Reactor volume', unit: 'm³', min: 10, max: 50000, step: 10, default: (Q) => round(Q * 0.5, 10), help: 'Size on 5–15 kg COD/m³·d and ≤ 1 m/h upflow.' },
+    ],
+    run: (s, p) => uasb(s, { volume_m3: n(p, 'volume') }),
+    capex: (p) => scale(700_000, n(p, 'volume'), 1000) + 250_000, // reactor + gas handling, flare, CHP
+    footprint: (p) => n(p, 'volume') / 6 + 60,
+  },
+  mbr: {
+    type: 'mbr',
+    name: 'Membrane Bioreactor (MBR)',
+    tagPrefix: 'MB',
+    category: 'biological',
+    summary: 'Activated sludge at 8–12 g/L MLSS with submerged membranes instead of a clarifier: a third of the footprint, solids-free permeate fit for RO. Waste sludge leaves from the sludge outlet.',
+    params: [
+      { key: 'volume', label: 'Bioreactor volume', unit: 'm³', min: 10, max: 30000, step: 10, default: (Q) => round(Q * 0.6, 10) },
+      { key: 'mlss', label: 'MLSS set-point', unit: 'mg/L', min: 3000, max: 18000, step: 500, default: () => 10000 },
+      { key: 'area', label: 'Membrane area', unit: 'm²', min: 10, max: 200000, step: 10, default: (Q) => round((Q * 1000) / 24 / 20, 10), help: 'Design flux 15–25 L/m²·h.' },
+      { key: 'do', label: 'DO set-point', unit: 'mg/L', min: 0.5, max: 4, step: 0.1, default: () => 2.0 },
+    ],
+    run: (s, p) => membraneBioreactor(s, { volume_m3: n(p, 'volume'), mlss_mgL: n(p, 'mlss'), area_m2: n(p, 'area'), do_mgL: n(p, 'do') }),
+    capex: (p) => scale(450_000, n(p, 'volume'), 500) + scale(300_000, n(p, 'area'), 2000),
+    footprint: (p) => n(p, 'volume') / 5 + n(p, 'area') / 400 + 25,
+  },
+  uf: {
+    type: 'uf',
+    name: 'Ultrafiltration (UF)',
+    tagPrefix: 'UF',
+    category: 'physical',
+    summary: 'Hollow-fibre membranes (≈ 0.02 µm) take out suspended solids, colloids and emulsion almost completely. Backwash water leaves from the reject outlet. The pretreatment for RO.',
+    params: [
+      { key: 'area', label: 'Membrane area', unit: 'm²', min: 5, max: 100000, step: 5, default: (Q) => round((Q * 1000) / 24 / 50, 5), help: 'Design net flux 30–60 L/m²·h.' },
+      { key: 'recovery', label: 'Recovery', unit: '%', min: 70, max: 98, step: 1, default: () => 92, help: 'The rest is backwash/CEB water (reject outlet).' },
+    ],
+    run: (s, p) => ultrafilter(s, { area_m2: n(p, 'area'), recovery_pct: n(p, 'recovery') }),
+    capex: (p) => scale(300_000, n(p, 'area'), 1000) + 60_000,
+    footprint: (p) => n(p, 'area') / 150 + 20,
+  },
+  ro: {
+    type: 'ro',
+    name: 'Reverse Osmosis (RO)',
+    tagPrefix: 'RO',
+    category: 'physical',
+    summary: 'High-pressure polyamide membranes reject ~98 % of dissolved salts and metals: reuse-grade permeate and a concentrated brine (reject outlet). Feed must be particle-free (UF).',
+    params: [
+      { key: 'recovery', label: 'Recovery', unit: '%', min: 30, max: 95, step: 1, default: () => 70, help: '60–75 % typical; higher needs antiscalant and low-scaling feed.' },
+      { key: 'antiscalant', label: 'Antiscalant dosing', unit: '', options: [{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }], default: () => 'yes' },
+    ],
+    run: (s, p) => reverseOsmosis(s, { recovery_pct: n(p, 'recovery'), antiscalant: p.antiscalant !== 'no' }),
+    capex: (_p, s) => scale(450_000, Math.max(s.Q, 1), 500) + 80_000,
+    footprint: () => 60,
+  },
+  evaporator: {
+    type: 'evaporator',
+    name: 'Vacuum Evaporator (MVR)',
+    tagPrefix: 'EV',
+    category: 'physical',
+    summary: 'Boils the water off under vacuum with a vapour compressor: near-pure distillate (main outlet) and a small concentrate (reject outlet) for haulage or drying. The end of a zero-liquid-discharge line.',
+    params: [
+      { key: 'recovery', label: 'Distillate recovery', unit: '%', min: 10, max: 99, step: 1, default: () => 90, help: 'Limited by salt saturation of the concentrate (~300 g/L).' },
+    ],
+    run: (s, p) => evaporate(s, { recovery_pct: n(p, 'recovery') }),
+    capex: (p, s) => scale(900_000, Math.max(s.Q * n(p, 'recovery') / 100, 0.5), 20) + 150_000,
+    footprint: () => 50,
   },
   sandFilter: {
     type: 'sandFilter',
@@ -312,4 +432,6 @@ export const PRICES = {
   liquidHaul_m3: { metal: 900, other: 350 },
   /** tanker load used for the "loads per day" check, m³ */
   tanker_m3: 10,
+  /** verify: value of reclaimed water to the client = avoided industrial water tariff (Malaysia ~RM 2–3.5/m³), RM/m³. GAME MODEL */
+  reuseCredit_m3: 3.0,
 };

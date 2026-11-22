@@ -7,7 +7,8 @@
  * - recycle loops are solved by successive substitution on tear streams (knowledge/design/recycle_streams.md).
  */
 import { BalanceCheck, Components, addComponents, checkMassBalance, components, zeroComponents } from '../core/massBalance';
-import { METALS, POOLS, Stream, blend, cloneStream, codTotal, emptyStream, metalTotal, poolMass, tss } from '../core/stream';
+import { METALS, POOLS, Stream, blend, cloneStream, codTotal, emptyStream, metalTotal, poolMass, tdsTotal, tss } from '../core/stream';
+import standardsJson from '../regulations/standards.json';
 import { effectiveParams, instCapex, type InstKey } from './instrumentation';
 import { BACKWASH_FRACTION, defaultSludgeFraction, removedDryKgD, splitSludge } from '../physical/sludge';
 import { equilibrate } from '../chemistry/acidBase';
@@ -17,9 +18,25 @@ import { Note, ProcessResult } from './types';
 export type NodeKind = UnitType | 'influent' | 'discharge' | 'disposal';
 /** A disposal point in liquid mode: licensed tanker haulage of concentrated liquid waste (accepts any line). */
 export const isLiquidHaul = (n: { kind: string; params?: Record<string, unknown> }) => n.kind === 'disposal' && n.params?.liquid === 'yes';
+/** A disposal point in reuse mode: treated water returned to the client's process (water reclaim system). */
+export const isReuse = (n: { kind: string; params?: Record<string, unknown> }) => n.kind === 'disposal' && n.params?.reuse === 'yes';
 export type PortId = 'out' | 'sludge' | 'a' | 'b' | 'ras';
+/** unit kinds whose second port carries a liquid reject (brine, concentrate, backwash, regenerant) rather than sludge */
+export const REJECT_KINDS: NodeKind[] = ['uf', 'ro', 'ionExchange', 'evaporator'];
 /** unit kinds with a sludge draw-off port */
-export const SLUDGE_PORT_KINDS: NodeKind[] = ['clarifier', 'oilSep', 'daf', 'sandFilter', 'thickener', 'filterPress', 'dryer'];
+export const SLUDGE_PORT_KINDS: NodeKind[] = ['clarifier', 'oilSep', 'daf', 'sandFilter', 'thickener', 'filterPress', 'dryer', 'mbr', 'aop', ...REJECT_KINDS];
+/** Reuse-water quality spec (standards.json → reuseSpec). */
+export const REUSE_SPEC = (standardsJson as unknown as { reuseSpec: { limits: Record<'TDS' | 'TSS' | 'COD' | 'NH3N', { max: number }> } }).reuseSpec.limits;
+export function reuseOffSpec(s: Stream): string[] {
+  const v = { TDS: tdsTotal(s), TSS: tss(s), COD: codTotal(s), NH3N: s.NH4N };
+  return (Object.keys(REUSE_SPEC) as (keyof typeof v)[]).filter((k) => v[k] > REUSE_SPEC[k].max).map((k) => `${k} ${v[k].toFixed(k === 'TDS' ? 0 : 1)} > ${REUSE_SPEC[k].max}`);
+}
+
+/** Sludge-side mass of a unit result: removed solids (no water) + any liquid reject (with its water). */
+export function unitSideComponents(r: ProcessResult): Components {
+  const a = r.removed ? components(r.removed, false) : zeroComponents();
+  return r.reject ? addComponents(a, components(r.reject)) : a;
+}
 
 export interface PNode {
   id: string;
@@ -72,7 +89,13 @@ export interface SimResult {
   footprint: number;
   opexRMd: number;
   /** OPEX split at base prices, RM/d (market indices are applied by the game layer) */
-  opexSplit: { chemicals: number; energy: number; sludge: number };
+  opexSplit: { chemicals: number; energy: number; sludge: number; /** revenue offsets (reuse credit, metal sales, biogas power), RM/d */ credit?: number };
+  /** water returned to the client's process: total, on-spec share and the credit earned */
+  /** raw-wastewater flow of this run, m³/d */
+  influentQ?: number;
+  reuse?: { m3d: number; onSpecM3d: number; creditRMd: number; offSpec: string[] };
+  /** revenue lines (reuse credit, metal sales, biogas), RM/d */
+  credits?: { name: string; RMd: number }[];
   energy_kWhd: number;
   sludgeKgD: number;
   chemicals: { name: string; kgPerDay: number; costRMd: number }[];
@@ -107,9 +130,12 @@ export function validateGraph(g: ProcessGraph): Note[] {
     if (to.kind === 'influent') errs.push({ level: 'error', code: 'graph.influentInlet', text: 'The raw-wastewater inlet cannot receive a pipe.' });
     if (e.fromPort === 'sludge' && !SLUDGE_PORT_KINDS.includes(from.kind)) errs.push({ level: 'error', code: 'graph.noSludgePort', text: `${from.tag ?? from.kind} has no sludge outlet.` });
     const sludgeLine = isSludgeEdge(g, e);
-    if (to.kind === 'disposal' && !sludgeLine && !isLiquidHaul(to)) errs.push({ level: 'error', code: 'graph.disposalWater', text: `Only sludge lines can go to ${to.tag ?? 'sludge disposal'} — treated water must go to the final discharge.` });
-    if (sludgeLine && to.kind === 'discharge') errs.push({ level: 'error', code: 'graph.sludgeToRiver', text: `Sludge from ${from.tag ?? from.kind} reaches the final discharge — send it to a thickener, filter press or sludge disposal.` });
-    if (sludgeLine && e.fromPort !== 'ras' && !['thickener', 'filterPress', 'dryer', 'disposal', 'mixer', 'splitter'].includes(to.kind)) errs.push({ level: 'warn', code: 'graph.sludgeIntoProcess', text: `Sludge is piped into ${to.tag ?? to.kind} — treatment units are not designed for 1 % solids feed.` });
+    const rejectLine = e.fromPort === 'sludge' && REJECT_KINDS.includes(from.kind);
+    if (isReuse(to) && sludgeLine && !rejectLine) errs.push({ level: 'error', code: 'graph.sludgeToReuse', text: `Sludge cannot go to ${to.tag ?? 'the reclaim system'} — only treated water is returned to the process.` });
+    if (isReuse(to) && rejectLine) errs.push({ level: 'error', code: 'graph.brineToReuse', text: `${from.tag ?? from.kind}'s reject/concentrate cannot go to the reclaim system — send the clean outlet (permeate/distillate) there.` });
+    if (to.kind === 'disposal' && !sludgeLine && !isLiquidHaul(to) && !isReuse(to)) errs.push({ level: 'error', code: 'graph.disposalWater', text: `Only sludge lines can go to ${to.tag ?? 'sludge disposal'} — treated water must go to the final discharge.` });
+    if (sludgeLine && !rejectLine && to.kind === 'discharge') errs.push({ level: 'error', code: 'graph.sludgeToRiver', text: `Sludge from ${from.tag ?? from.kind} reaches the final discharge — send it to a thickener, filter press or sludge disposal.` });
+    if (sludgeLine && !rejectLine && e.fromPort !== 'ras' && !['thickener', 'filterPress', 'dryer', 'disposal', 'mixer', 'splitter'].includes(to.kind)) errs.push({ level: 'warn', code: 'graph.sludgeIntoProcess', text: `Sludge is piped into ${to.tag ?? to.kind} — treatment units are not designed for 1 % solids feed.` });
   }
   // advice: a secondary clarifier after activated sludge should show its RAS line (the model assumes the return either way)
   for (const c of g.nodes.filter((x) => x.kind === 'clarifier')) {
@@ -127,7 +153,8 @@ export function validateGraph(g: ProcessGraph): Note[] {
   for (const n of g.nodes) {
     const ins = g.edges.filter((e) => e.to === n.id).length;
     const mainOuts = g.edges.filter((e) => e.from === n.id && e.fromPort !== 'sludge' && e.fromPort !== 'ras').length;
-    if (n.kind !== 'influent' && ins === 0) errs.push({ level: 'error', code: 'graph.noInlet', text: `${n.tag ?? n.kind} has no inlet pipe.` });
+    const zld = n.kind === 'discharge' && g.nodes.some((x) => isReuse(x));
+    if (n.kind !== 'influent' && ins === 0 && !zld) errs.push({ level: 'error', code: 'graph.noInlet', text: `${n.tag ?? n.kind} has no inlet pipe.` });
     if (n.kind !== 'discharge' && n.kind !== 'disposal' && mainOuts === 0) errs.push({ level: 'error', code: 'graph.noOutlet', text: `${n.tag ?? n.kind} has no outlet pipe.` });
   }
   return errs;
@@ -135,8 +162,10 @@ export function validateGraph(g: ProcessGraph): Note[] {
 
 /** A pipe carries sludge if it leaves a sludge port, or leaves a mixer/splitter fed by sludge. */
 export function isSludgeEdge(g: ProcessGraph, e: PEdge, seen = new Set<string>()): boolean {
-  if (e.fromPort === 'sludge' || e.fromPort === 'ras') return true;
   const from = g.nodes.find((n) => n.id === e.from);
+  // a brine / concentrate / backwash / eluate line is liquid, not sludge
+  if (e.fromPort === 'sludge' && from && REJECT_KINDS.includes(from.kind)) return false;
+  if (e.fromPort === 'sludge' || e.fromPort === 'ras') return true;
   if (!from || (from.kind !== 'mixer' && from.kind !== 'splitter') || seen.has(from.id)) return false;
   seen.add(from.id);
   return g.edges.filter((x) => x.to === from.id).some((x) => isSludgeEdge(g, x, seen));
@@ -192,6 +221,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
   const chem = new Map<string, { kg: number; price: number }>();
   let sysIn = zeroComponents();
   let sysOut = zeroComponents();
+  const creditLines: { name: string; RMd: number }[] = [];
   const sysTerms = { sludge: zeroComponents(), gas: zeroComponents(), consumed: zeroComponents(), produced: zeroComponents() };
 
   for (const id of order) {
@@ -202,6 +232,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
     if (node.kind === 'influent') {
       inlet = cloneStream(influent);
       sysIn = components(inlet);
+      res.influentQ = inlet.Q;
       res.capex += instCapex(node); // inlet flow meter
     } else {
       // RAS lines are internal to the activated-sludge model (MLSS retention), shown but not re-added as flow
@@ -210,6 +241,18 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
     }
     if (node.kind === 'discharge') {
       res.effluent = inlet;
+      sysOut = addComponents(sysOut, components(inlet));
+      continue;
+    }
+    if (node.kind === 'disposal' && isReuse(node)) {
+      // water reclaim: returned to the client's process; credited only when it meets the reuse spec
+      const off = inlet.Q > 0 ? reuseOffSpec(inlet) : [];
+      const on = off.length ? 0 : inlet.Q;
+      const credit = on * PRICES.reuseCredit_m3;
+      const prev = res.reuse ?? { m3d: 0, onSpecM3d: 0, creditRMd: 0, offSpec: [] };
+      res.reuse = { m3d: prev.m3d + inlet.Q, onSpecM3d: prev.onSpecM3d + on, creditRMd: prev.creditRMd + credit, offSpec: [...prev.offSpec, ...off] };
+      if (credit > 0) creditLines.push({ name: `Reuse water credit (${node.tag ?? 'RW'})`, RMd: credit });
+      if (off.length) res.errors.push({ level: 'warn', code: 'reuse.offSpec', text: `${node.tag ?? 'Reclaim'}: the water is off the reuse spec (${off.join(', ')}) — the client will not accept it; no reuse credit. Polish it (RO for TDS, UF/sand filter for TSS).` });
       sysOut = addComponents(sysOut, components(inlet));
       continue;
     }
@@ -253,7 +296,7 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
         const h2s = 1 / (1 + Math.pow(10, r.out.pH - 7));
         r.notes.push({ level: 'warn', code: 'sulf.h2s', text: `${((r.out.sulfideS ?? 0) * 32060).toFixed(1)} mg/L residual sulfide at pH ${r.out.pH.toFixed(1)}: ${(100 * h2s).toFixed(0)} % is H₂S — toxic off-gas. Scavenge or oxidise the sulfide before lowering the pH.` });
       }
-      const sludge = r.removed ? components(r.removed, false) : zeroComponents();
+      const sludge = unitSideComponents(r);
       const balance = checkMassBalance({
         in: components(inlet),
         out: components(r.out),
@@ -266,12 +309,21 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
       const footprint = def.footprint(node.params);
       const dry = r.removed ? removedDryKgD(r.removed) : 0;
       const routed = sludgeEdges.length > 0 && !!r.removed && dry > 0;
+      const rejectRouted = !!r.reject && sludgeEdges.length > 0;
       const metalSludge = r.removed ? isMetalSludge(r.removed) : false;
       const chemCost = r.chemicals.reduce((a, c) => a + c.kgPerDay * c.priceRMkg, 0);
       const energyCost = r.energy_kWhd * PRICES.electricity_kWh;
       // routed sludge is costed where it leaves the system (disposal point); unrouted → contractor at the dry price
-      const sludgeCost = routed ? 0 : dry * (metalSludge ? PRICES.sludgeDisposal_kg.metal : PRICES.sludgeDisposal_kg.other);
-      const opex = chemCost + energyCost + sludgeCost;
+      let sludgeCost = routed ? 0 : dry * (metalSludge ? PRICES.sludgeDisposal_kg.metal : PRICES.sludgeDisposal_kg.other);
+      if (r.reject && !rejectRouted && r.reject.Q > 0) {
+        // an unpiped reject is tankered away as liquid waste — almost always the expensive option
+        const metalRej = METALS.reduce((a, m) => a + metalTotal(r.reject!, m), 0) > METAL_LIQUOR_MGL;
+        sludgeCost += r.reject.Q * (metalRej ? PRICES.liquidHaul_m3.metal : PRICES.liquidHaul_m3.other);
+        r.notes.push({ level: 'warn', code: 'unit.rejectUnpiped', text: `The ${r.reject.Q.toFixed(1)} m³/d reject/concentrate outlet is not piped — it is costed as tankered liquid waste. Pipe it (brown nozzle) to a discharge, an evaporator or liquid haulage.` });
+      }
+      for (const c of r.credits ?? []) creditLines.push({ name: `${c.name} (${node.tag ?? node.kind})`, RMd: c.RMd });
+      const unitCredit = (r.credits ?? []).reduce((a, c) => a + c.RMd, 0);
+      const opex = chemCost + energyCost + sludgeCost - unitCredit;
       res.opexSplit.chemicals += chemCost;
       res.opexSplit.energy += energyCost;
       res.opexSplit.sludge += sludgeCost;
@@ -297,7 +349,11 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
         rasOut = cloneStream(wasLike);
         rasOut.Q = inlet.ml.ras * inlet.Q;
       }
-      if (routed) {
+      if (r.reject) {
+        if (rejectRouted) sludgeOut = r.reject;
+        else sysTerms.sludge = addComponents(sysTerms.sludge, components(r.reject));
+        if (r.removed) sysTerms.sludge = addComponents(sysTerms.sludge, components(r.removed, false));
+      } else if (routed) {
         const frac = r.sludgeSolidsFrac ?? defaultSludgeFraction(node.kind, inlet, r.removed);
         const Qs = frac === null ? BACKWASH_FRACTION * inlet.Q : dry / (Math.max(frac, 1e-4) * 1000);
         const split = r.sludgeAll ? splitSludge(r.out, r.removed!, inlet.Q, inlet.Q, 1) : splitSludge(r.out, r.removed!, inlet.Q, Qs);
@@ -342,8 +398,13 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
     }
   }
   res.chemicals = [...chem.entries()].map(([name, v]) => ({ name, kgPerDay: v.kg, costRMd: v.kg * v.price }));
+  res.credits = creditLines;
+  const credit = creditLines.reduce((a, c) => a + c.RMd, 0);
+  res.opexSplit.credit = credit;
+  // unit credits are already netted out of res.opexRMd (unit opex); the reuse credit is netted here
+  res.opexRMd -= res.reuse?.creditRMd ?? 0;
   res.balance = checkMassBalance({ in: sysIn, out: sysOut, ...sysTerms });
-  res.ok = !!res.effluent && res.effluent.Q > 0;
+  res.ok = !!res.effluent && (res.effluent.Q > 0 || (res.reuse?.m3d ?? 0) > 0);
   return res;
 }
 

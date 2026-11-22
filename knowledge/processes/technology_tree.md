@@ -47,3 +47,30 @@ Requirements so far:
 - `sludgeCapRMd`: sludge and waste disposal cost cap in RM/d (sludge dryer client). The cap is set at the reference design's disposal cost × 1.3.
 
 Reuse fraction, ZLD and the green scorecard follow with RO, reclaim and the evaporator.
+
+
+## Stage: remaining technologies (2026-11-22, simplified per user request)
+All twelve technologies are now researchable. The models are deliberately simple; see each module's doc.
+
+**Engine additions**
+- Background TDS (`salinity_tds.md`).
+- A liquid **reject** port (`ProcessResult.reject`) for RO brine, UF backwash, IX eluate and evaporator concentrate. An unpiped reject is costed as tankered liquid waste.
+- Unit **credits** (metal sales, biogas power), netted off OPEX (`opexSplit.credit`).
+- The **water reclaim system:** a disposal node with `params.reuse='yes'`. On-spec water (`standards.json → reuseSpec`) earns RM 3/m³.
+- **ZLD:** the final discharge may have no inlet when a reclaim system exists.
+
+**New contract terms (`requirements.ts`)**
+- `reuseMin`: on-spec reuse ÷ influent.
+- `zld`: discharge ≤ 0.5 % of influent.
+
+**New tough clients**
+| Variant | Needs | Feed | Terms | Reference design |
+|---|---|---|---|---|
+| `waterReuse` (plating) | RO + reclaim | TDS ×1.2–2 | Std B, ≥ 30 % reuse | metal train → GAC → 50 % split → UF → RO 75 %; brine and backwash blended back → pH 7.5 |
+| `zld` (plating) | RO + reclaim + evaporator | – | Std A, ZLD | metal train → UF → RO 75 % → reclaim; brine → pH 6 → MVR 97 % → reclaim; concentrate → liquid haulage |
+
+The base design fails both requirements. Both references pass on every generated feed tested.
+
+**No dedicated client yet:** UF (pretreatment), IX and electrowinning (they pay by metal recovery), AOP (textile pending), UASB (POME pending), MBR.
+
+**Still pending from the plan:** client tiers (medium/MNC with real names, green scorecard, fictional-names toggle), segregated second influent (drag-out → nickel-only evaporator), and the textile, POME and glove industries.

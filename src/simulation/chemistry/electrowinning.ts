@@ -1,0 +1,71 @@
+/**
+ * Electrowinning: plating dissolved Cu and Ni out of a concentrated liquor as saleable cathode metal.
+ * Ref: knowledge/chemistry/electrowinning.md
+ *
+ * GAME MODEL (well-mixed cell):
+ *  - Faraday: metal deposited = CE·I·t·M/(n·F); current I = j·A;
+ *  - mass-transfer limit: a metal can deposit no faster than k_m·A·C_out (k_m ≈ 1×10⁻⁵ m/s, plain plate cathodes),
+ *    so a well-mixed cell reaches C_out = C_in/(1 + k_m·A/Q); the current takes the more noble metal first (Cu, then Ni)
+ *    and the rest of the current evolves hydrogen (current efficiency falls in dilute liquor);
+ *  - Ni needs pH > 3 (else H₂ wins) — below pH 3 no Ni plates;
+ *  - anode O₂ evolution releases 2 H⁺ per M²⁺ plated (automatic in the charge balance: the metal cation leaves);
+ *  - cell voltage 2.2 V (Cu) / 3.5 V (Ni), verify; plated metal leaves the water as product (consumed term) and is sold.
+ */
+import { Stream, cloneStream } from '../core/stream';
+import { MW } from '../core/units';
+import { equilibrate } from './acidBase';
+import { Note, ProcessResult, result } from '../treatment/types';
+
+/** verify: value paid for recovered cathode / high-grade scrap metal, RM/kg (LME-linked, GAME MODEL) */
+export const METAL_VALUE_RMkg = { Cu: 35, Ni: 70 };
+export const EW = { F: 96485, km: 1e-5, ceMax: 0.92, volts: { Cu: 2.2, Ni: 3.5 } as const };
+
+export function electrowin(s: Stream, p: { area_m2: number; currentDensity: number }): ProcessResult {
+  const notes: Note[] = [];
+  const A = Math.max(p.area_m2, 0.01);
+  const j = Math.max(p.currentDensity, 1);
+  const I = j * A; // A
+  const Qs = s.Q / 86400; // m³/s
+  let charge = I; // C/s still available
+  const out = cloneStream(s);
+  const plated: Record<'Cu' | 'Ni', number> = { Cu: 0, Ni: 0 }; // kg/d
+  let energyW = 0;
+  for (const m of ['Cu', 'Ni'] as const) {
+    const cin = s.dissolved[m]; // g/m³
+    if (cin <= 0 || charge <= 0) continue;
+    if (m === 'Ni' && s.pH < 3) {
+      if (cin > 50) notes.push({ level: 'warn', code: 'ew.niAcid', text: `Nickel will not plate at pH ${s.pH.toFixed(1)} — hydrogen evolution takes the current. Run nickel cells at pH 3–4.` });
+      continue;
+    }
+    const cMT = cin / (1 + (EW.km * A) / Math.max(Qs, 1e-12)); // mass-transfer-limited outlet, g/m³
+    const mtRate = Qs * (cin - cMT); // g/s
+    const curRate = (EW.ceMax * charge * MW[m]) / (2 * EW.F); // g/s
+    const rate = Math.min(mtRate, curRate);
+    const used = (rate * 2 * EW.F) / MW[m] / EW.ceMax;
+    charge -= used;
+    energyW += used * EW.volts[m];
+    out.dissolved[m] = cin - (Qs > 0 ? rate / Qs : 0);
+    plated[m] = (rate * 86400) / 1000;
+  }
+  energyW += charge * EW.volts.Cu; // remaining current: hydrogen / oxygen evolution
+  const kgTotal = plated.Cu + plated.Ni;
+  const ce = I > 0 ? (((plated.Cu * 1000) / 86400 / MW.Cu + (plated.Ni * 1000) / 86400 / MW.Ni) * 2 * EW.F) / I : 0;
+  const credit = plated.Cu * METAL_VALUE_RMkg.Cu + plated.Ni * METAL_VALUE_RMkg.Ni;
+  if (kgTotal > 0 && ce < 0.3) notes.push({ level: 'warn', code: 'ew.dilute', text: `Current efficiency only ${(ce * 100).toFixed(0)} %: the liquor is too dilute for plate cathodes (mass-transfer limited) — feed a concentrated stream (eluate, drag-out, > 1 g/L) or lower the current density.` });
+  if ((s.dissolved.Cu + s.dissolved.Ni) < 100) notes.push({ level: 'info', code: 'ew.feed', text: 'Electrowinning recovers metal from concentrated liquors (IX eluate, drag-out). It is not a polishing step — the spent electrolyte goes back to treatment.' });
+  if ((s.complexed?.Ni ?? 0) + (s.complexed?.Cu ?? 0) > 1) notes.push({ level: 'info', code: 'ew.complexed', text: 'Complexed metal is not modelled as plateable (it plates poorly from most complexing baths).' });
+  return result(equilibrate(out), {
+    consumed: { Cu: plated.Cu, Ni: plated.Ni },
+    credits: credit > 0 ? [{ name: 'Recovered metal sales', RMd: credit }] : [],
+    notes,
+    energy_kWhd: (energyW * 24) / 1000,
+    calcs: {
+      I: { label: 'Cell current', value: I, unit: 'A', digits: 0 },
+      cu: { label: 'Copper plated', value: plated.Cu, unit: 'kg/d', digits: 2 },
+      ni: { label: 'Nickel plated', value: plated.Ni, unit: 'kg/d', digits: 2 },
+      ce: { label: 'Current efficiency', value: ce * 100, unit: '%', digits: 0 },
+      spec: { label: 'Specific energy', value: kgTotal > 0 ? (energyW * 24) / 1000 / kgTotal : 0, unit: 'kWh/kg metal', digits: 1 },
+      credit: { label: 'Metal value', value: credit, unit: 'RM/d', digits: 0 },
+    },
+  });
+}

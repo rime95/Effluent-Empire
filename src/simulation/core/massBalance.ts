@@ -9,12 +9,12 @@
 import { METALS, Stream, codTotal, metalTotal, nitrogenTotal, oilGrease } from './stream';
 import { MW, kgPerDay } from './units';
 
-export const COMPONENTS = ['Q', 'Ni', 'Cu', 'Zn', 'Cr', 'Al', 'Fe', 'SO4', 'COD', 'N', 'OG', 'mineral'] as const;
+export const COMPONENTS = ['Q', 'Ni', 'Cu', 'Zn', 'Cr', 'Al', 'Fe', 'SO4', 'COD', 'N', 'OG', 'mineral', 'TDS'] as const;
 export type Component = (typeof COMPONENTS)[number];
 export type Components = Record<Component, number>;
 
 export function zeroComponents(): Components {
-  return { Q: 0, Ni: 0, Cu: 0, Zn: 0, Cr: 0, Al: 0, SO4: 0, Fe: 0, COD: 0, N: 0, OG: 0, mineral: 0 };
+  return { Q: 0, Ni: 0, Cu: 0, Zn: 0, Cr: 0, Al: 0, SO4: 0, Fe: 0, COD: 0, N: 0, OG: 0, mineral: 0, TDS: 0 };
 }
 
 /** Component mass flows of a stream, kg/d (Q in m³/d). includeWater=false for sludge streams. */
@@ -31,6 +31,7 @@ export function components(s: Stream, includeWater = true): Components {
   c.N = k(nitrogenTotal(s));
   c.OG = k(oilGrease(s));
   c.mineral = k(s.grit + s.inert + s.colloid + s.floc);
+  c.TDS = k(s.tds ?? 0); // background salts (tracked ions are counted under their own components)
   return c;
 }
 

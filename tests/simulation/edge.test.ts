@@ -1,4 +1,5 @@
 // Edge cases and graph topology (QA review). Ref: knowledge/README.md §Mass balance
+import { unitSideComponents } from '../../src/simulation/treatment/graph';
 import { checkMassBalance, components, zeroComponents } from '../../src/simulation/core/massBalance';
 import { emptyStream, METALS, cloneStream, tss } from '../../src/simulation/core/stream';
 import { setCbForPH } from '../../src/simulation/chemistry/acidBase';
@@ -39,7 +40,7 @@ describe('activated sludge behaviour', () => {
     const r = activatedSludge(s, { volume_m3: 16, srt_d: 0.04, do_mgL: 2 }, { clarifierFollows: false }); // HRT 1 h < SRT_min
     expect(r.notes.some((n) => n.code === 'as.washout')).toBe(true);
     expect(r.out.XS).toBeCloseTo(s.XS, 6);
-    const bal = checkMassBalance({ in: components(s), out: components(r.out), sludge: r.removed ? components(r.removed, false) : zeroComponents(), gas: zeroComponents(), consumed: { ...zeroComponents(), ...r.consumed }, produced: { ...zeroComponents(), ...r.produced } });
+    const bal = checkMassBalance({ in: components(s), out: components(r.out), sludge: unitSideComponents(r), gas: zeroComponents(), consumed: { ...zeroComponents(), ...r.consumed }, produced: { ...zeroComponents(), ...r.produced } });
     expect(bal.ok).toBe(true);
   });
   it('secondary clarifier: effluent TSS rises with SOR, and a sensible design meets 100 mg/L', () => {
@@ -147,7 +148,7 @@ describe('property test: random parameters and fully populated streams (incl. mi
       const bal = checkMassBalance({
         in: components(inS),
         out: components(r.out),
-        sludge: r.removed ? components(r.removed, false) : zeroComponents(),
+        sludge: unitSideComponents(r),
         gas: { ...zeroComponents(), ...r.gas },
         consumed: { ...zeroComponents(), ...r.consumed },
         produced: { ...zeroComponents(), ...r.produced },

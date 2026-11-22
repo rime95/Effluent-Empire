@@ -68,6 +68,7 @@ export function UnitSymbol({ type, accent }: { type: UnitType; accent: string })
     case 'neutralisation':
     case 'precipitation':
     case 'sulfide':
+    case 'aop':
     case 'crReduction':
       return (
         <svg viewBox="0 0 120 80">
@@ -195,6 +196,81 @@ export function UnitSymbol({ type, accent }: { type: UnitType; accent: string })
           <path d="M40 30 C38 22 44 20 42 12 M60 30 C58 22 64 20 62 12 M80 30 C78 22 84 20 82 12" {...thin} />
           <path d="M26 66 l6 -6 l6 6 Z" fill={accent} opacity={0.6} />
           <path d="M0 44 h14 M106 44 h14" {...L} />
+        </svg>
+      );
+    case 'uf':
+    case 'ro':
+      // pressure vessels (RO: two in series) with the membrane drawn as a dashed line
+      return (
+        <svg viewBox="0 0 120 80">
+          {[type === 'ro' ? 30 : 36, type === 'ro' ? 52 : 52].slice(0, type === 'ro' ? 2 : 1).map((y) => (
+            <g key={y}>
+              <rect x="16" y={y - 8} width="88" height="16" rx="8" {...L} />
+              <path d={`M22 ${y} h76`} stroke={accent} strokeWidth={1.2} strokeDasharray="4 3" />
+            </g>
+          ))}
+          {type === 'ro' && <path d="M8 44 l6 -5 v10 z" fill={INK} />}
+          <path d="M0 44 h16 M104 44 h16" {...L} />
+          <text x="48" y="74" fontSize="8" fontFamily="var(--mono)" fill={INK}>{type === 'ro' ? 'RO' : 'UF'}</text>
+        </svg>
+      );
+    case 'mbr':
+      return (
+        <svg viewBox="0 0 120 80">
+          {liquid('M12 26 H108 V68 H12 Z')}
+          <path d="M12 16 V68 H108 V16" {...L} />
+          {level(12, 108, 26)}
+          <rect x="56" y="32" width="36" height="26" {...thin} />
+          {[62, 68, 74, 80, 86].map((x) => <path key={x} d={`M${x} 34 v22`} stroke={accent} strokeWidth={1} />)}
+          {[20, 30, 40].map((x) => <circle key={x} cx={x} cy={62} r={1.6} {...thin} />)}
+          <path d="M0 44 h12 M92 40 h28" {...L} />
+        </svg>
+      );
+    case 'ionExchange':
+      return (
+        <svg viewBox="0 0 120 80">
+          {[32, 76].map((x) => (
+            <g key={x}>
+              <rect x={x - 12} y="12" width="24" height="58" rx="10" {...L} />
+              <rect x={x - 10} y="30" width="20" height="32" fill={accent} opacity={0.25} stroke="none" />
+            </g>
+          ))}
+          <path d="M0 44 h20 M44 20 h20 M88 44 h32" {...L} />
+          <text x="50" y="76" fontSize="8" fontFamily="var(--mono)" fill={INK}>IX</text>
+        </svg>
+      );
+    case 'evaporator':
+      return (
+        <svg viewBox="0 0 120 80">
+          <rect x="22" y="10" width="34" height="58" rx="12" {...L} />
+          {liquid('M24 50 H54 V64 Q39 70 24 64 Z')}
+          {[30, 38, 46].map((x) => <path key={x} d={`M${x} 22 v24`} {...thin} />)}
+          <circle cx="84" cy="26" r="11" {...L} />
+          <path d="M77 20 l14 12 M77 32 l14 -12" {...thin} />
+          <path d="M56 18 H73 M95 26 h8 V44 H120 M0 44 h22" {...L} />
+          <text x="78" y="56" fontSize="8" fontFamily="var(--mono)" fill={INK}>MVR</text>
+        </svg>
+      );
+    case 'electrowinning':
+      return (
+        <svg viewBox="0 0 120 80">
+          {liquid('M14 30 H106 V66 H14 Z')}
+          <path d="M14 22 V66 H106 V22" {...L} />
+          {[30, 46, 62, 78, 94].map((x, i) => <path key={x} d={`M${x} 18 v40`} stroke={i % 2 ? '#b87333' : INK} strokeWidth={2.2} />)}
+          <text x="24" y="14" fontSize="9" fontFamily="var(--mono)" fill={INK}>+ −</text>
+          <path d="M0 44 h14 M106 44 h14" {...L} />
+        </svg>
+      );
+    case 'uasb':
+      return (
+        <svg viewBox="0 0 120 80">
+          {liquid('M36 22 H84 V72 H36 Z')}
+          <rect x="36" y="58" width="48" height="14" fill="#6b4f2a" opacity="0.35" />
+          <path d="M36 10 V72 H84 V10" {...L} />
+          <path d="M42 34 L60 24 L78 34" {...L} />
+          <path d="M60 24 V4 h20" {...thin} />
+          <text x="84" y="8" fontSize="7" fontFamily="var(--mono)" fill={INK}>CH₄</text>
+          <path d="M0 66 h36 M84 30 h20 V44 h16" {...L} />
         </svg>
       );
     case 'splitter':

@@ -37,6 +37,13 @@ export interface ProcessResult {
   sludgeSolidsFrac?: number;
   /** the whole feed leaves through the sludge port (holding tank, no decant); main outlet = emergency overflow only */
   sludgeAll?: boolean;
+  /**
+   * a liquid side stream at its own flow and concentrations (RO brine, UF backwash, evaporator concentrate, IX regenerant)
+   * leaving through the second (sludge/brine) port. out.Q + reject.Q = inlet Q (+ any regenerant water, listed in produced.Q).
+   */
+  reject?: Stream;
+  /** revenue earned by the unit, RM/d (metal sold, biogas power) — offsets running cost */
+  credits?: { name: string; RMd: number }[];
 }
 
 export function result(out: Stream, extra: Partial<ProcessResult> = {}): ProcessResult {

@@ -22,7 +22,7 @@ export type UnitNodeData = {
   /** secondary clarifier after activated sludge: offers a RAS (return activated sludge) nozzle */
   rasPort?: boolean;
 };
-export type TerminalNodeData = { kind: 'influent' | 'discharge' | 'disposal'; label: string; sub: string; tag?: string; liquid?: boolean };
+export type TerminalNodeData = { kind: 'influent' | 'discharge' | 'disposal'; label: string; sub: string; tag?: string; liquid?: boolean; reuse?: boolean };
 
 const STATUS_COLOR = { ok: 'var(--ok)', warn: 'var(--warn)', error: 'var(--alarm)', idle: '#9aa7b4' };
 /** symbol is 120×80 drawn below an 18 px tag row; nozzle heights (symbol y) per unit kind */
@@ -35,7 +35,7 @@ const NOZZLE: Partial<Record<UnitType, { in: number; out: number }>> = {
   filterPress: { in: 40, out: 40 },
 };
 /** sludge draw-off nozzle x (symbol coordinates) — at the hopper / underdrain */
-export const SLUDGE_UNITS: Partial<Record<UnitType, number>> = { clarifier: 60, oilSep: 94, daf: 60, sandFilter: 100, thickener: 60, filterPress: 60, dryer: 60 };
+export const SLUDGE_UNITS: Partial<Record<UnitType, number>> = { clarifier: 60, oilSep: 94, daf: 60, sandFilter: 100, thickener: 60, filterPress: 60, dryer: 60, uf: 60, ro: 60, ionExchange: 60, evaporator: 60, mbr: 60 };
 
 function UnitNodeImpl({ data, selected }: NodeProps<Node<UnitNodeData>>) {
   const def = CATALOGUE[data.kind];

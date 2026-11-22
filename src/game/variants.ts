@@ -6,7 +6,7 @@
  */
 import { Stream } from '../simulation/core/stream';
 import { IndustryId } from './industries';
-import { TrainSpec, dafFoodTrain, metalTrain, sludgeLineGraph, sulfideMetalTrain } from './referenceDesigns';
+import { TrainSpec, dafFoodTrain, metalTrain, reuseGraph, sludgeLineGraph, sulfideMetalTrain, zldGraph } from './referenceDesigns';
 import { ProcessGraph, SimResult, linearGraph } from '../simulation/treatment/graph';
 import { Requirements } from './requirements';
 import { defaultParams } from '../simulation/treatment/catalogue';
@@ -94,6 +94,31 @@ export const VARIANTS: ClientVariant[] = [
     },
     reference: (s) => sulfideMetalTrain(s),
     standard: 'B',
+  },
+  {
+    id: 'waterReuse',
+    industry: 'plating',
+    requires: ['ro', 'reclaim'],
+    label: 'Water-stressed finisher — 30 % reuse',
+    brief: 'The plant buys expensive tankered water in dry months: the contract requires at least 30 % of the wastewater back as process rinse water (TDS ≤ 500 mg/L). Only RO permeate is clean enough — and the brine still has to pass the discharge standard.',
+    overlay: (s, rng) => {
+      s.tds = (s.tds ?? 0) * rng.range(1.2, 2); // hard make-up water, salty acid cleaners
+      return s;
+    },
+    reference: (s) => reuseGraph(metalTrain(s.Q, s.CrVI > 0.05), s.Q, 50),
+    requirements: () => ({ reuseMin: 0.3 }),
+    standard: 'B',
+  },
+  {
+    id: 'zld',
+    industry: 'plating',
+    requires: ['ro', 'reclaim', 'evaporator'],
+    label: 'Electronics finisher — zero liquid discharge',
+    brief: 'No discharge permit at all (the site sits above a water intake): every litre is recovered — RO permeate and evaporator distillate go back to the process, the last concentrate leaves by tanker. Budget is generous.',
+    overlay: (s) => s,
+    reference: (s) => zldGraph(metalTrain(s.Q, s.CrVI > 0.05), s.Q),
+    requirements: () => ({ zld: true }),
+    standard: 'A',
   },
 ];
 

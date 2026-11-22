@@ -1,5 +1,6 @@
 // Reference calculations: knowledge/design/design_parameters.md, knowledge/physical/sedimentation.md,
 // knowledge/chemistry/coagulation_flocculation.md, knowledge/biological/activated_sludge.md
+import { unitSideComponents } from '../../src/simulation/treatment/graph';
 import { hrtDays, kgPerDay, mgPerL, surfaceOverflowRate_mh, mgL_to_molL, molL_to_mgL, MW, tempCorrect } from '../../src/simulation/core/units';
 import { emptyStream, cloneStream, METALS } from '../../src/simulation/core/stream';
 import { hazenRemoval, normalCdf, stokesVelocity_mh, waterViscosity } from '../../src/simulation/physical/settling';
@@ -123,7 +124,7 @@ describe('mass balance closes for every unit on random streams (property test)',
       const bal = checkMassBalance({
         in: components(inS),
         out: components(r.out),
-        sludge: r.removed ? components(r.removed, false) : zeroComponents(),
+        sludge: unitSideComponents(r),
         gas: { ...zeroComponents(), ...r.gas },
         consumed: { ...zeroComponents(), ...r.consumed },
         produced: { ...zeroComponents(), ...r.produced },

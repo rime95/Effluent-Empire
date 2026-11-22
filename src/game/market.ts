@@ -39,6 +39,6 @@ export function stepMarket(m: Market, week: number, rng: Rng): { market: Market;
 }
 
 /** Daily operating cost at current market prices, RM/d. */
-export function marketOpex(split: { chemicals: number; energy: number; sludge: number }, m: Market): number {
-  return split.chemicals * m.chemicals + split.energy * m.electricity + split.sludge * m.sludge;
+export function marketOpex(split: { chemicals: number; energy: number; sludge: number; credit?: number }, m: Market): number {
+  return split.chemicals * m.chemicals + split.energy * m.electricity + split.sludge * m.sludge - (split.credit ?? 0);
 }

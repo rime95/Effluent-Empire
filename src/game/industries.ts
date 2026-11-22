@@ -47,6 +47,8 @@ export interface IndustryTemplate {
   colloid: R;
   budgetPerM3d: R;
   names: string[];
+  /** background dissolved salts not tracked as species (Na, K, Ca, Mg, Cl, silica), mg/L — GAME MODEL typical figure */
+  tds?: number;
 }
 
 export const INDUSTRIES: Record<IndustryId, IndustryTemplate> = {
@@ -77,6 +79,7 @@ export const INDUSTRIES: Record<IndustryId, IndustryTemplate> = {
     colloid: [20, 80],
     budgetPerM3d: [3200, 4200],
     names: GENERIC_NAMES.plating,
+    tds: 900,
   },
   food: {
     id: 'food',
@@ -103,6 +106,7 @@ export const INDUSTRIES: Record<IndustryId, IndustryTemplate> = {
     budgetPerM3d: [3500, 4800],
     SO4: [0.5, 2],
     names: GENERIC_NAMES.food,
+    tds: 700,
   },
   semiconductor: {
     id: 'semiconductor',
@@ -128,6 +132,7 @@ export const INDUSTRIES: Record<IndustryId, IndustryTemplate> = {
     budgetPerM3d: [2200, 3000],
     SO4: [1, 6],
     names: GENERIC_NAMES.semiconductor,
+    tds: 400,
   },
 };
 
@@ -165,5 +170,7 @@ export function generateWastewater(t: IndustryTemplate, rng: Rng): GeneratedWast
     s.dissolved.Cr = s.CrVI * rng.range(0.05, 0.15); // some Cr(III) from drag-out reduction
   }
   s.SO4T = r(t.SO4) / 1000;
+  // background salts (Na, K, Ca, Mg, Cl, silica): a fixed industry figure, no RNG draw (keeps existing seeds) — GAME MODEL
+  s.tds = t.tds ?? 0;
   return { stream: setCbForPH(s, pH), hidden: { undeclaredZn, undeclaredCrVI } };
 }

@@ -20,7 +20,7 @@ import { designBasis } from '../../game/lab';
 import { constructionWeeks, makeNode, retrofitCharge, RETROFIT_PREMIUM, type Project } from '../../game/project';
 import type { Plant } from '../../game/operations';
 import { currentInfluent, upgradeQuote, VO_MARKUP } from '../../game/upgrade';
-import { isLiquidHaul, simulate } from '../../simulation/treatment/graph';
+import { REJECT_KINDS, REUSE_SPEC, isLiquidHaul, isReuse, simulate } from '../../simulation/treatment/graph';
 import { CATALOGUE, PRICES, UnitType } from '../../simulation/treatment/catalogue';
 import { PNode, PortId, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
 import { evaluate, measure, STANDARDS } from '../../simulation/treatment/compliance';
@@ -38,7 +38,7 @@ import { useSimulation } from './useSimulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
 
-const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'daf', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'sulfide', 'coagulation', 'activatedSludge', 'thickener', 'filterPress', 'dryer', 'splitter', 'mixer'];
+const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'daf', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'sulfide', 'aop', 'ionExchange', 'electrowinning', 'coagulation', 'activatedSludge', 'uasb', 'mbr', 'uf', 'ro', 'evaporator', 'thickener', 'filterPress', 'dryer', 'splitter', 'mixer'];
 /** kinds that may receive a sludge line */
 const SLUDGE_RECEIVERS: PNode['kind'][] = ['thickener', 'filterPress', 'dryer', 'disposal', 'mixer'];
 const GRID = 20;
@@ -180,7 +180,9 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       if (n.kind === 'disposal') {
         type = 'terminal';
         const d = sim?.disposal.find((x) => x.id === n.id);
-        data = isLiquidHaul(n)
+        data = isReuse(n)
+          ? { kind: 'disposal', reuse: true, tag: n.tag ?? 'RW', label: 'Water reclaim → process', sub: sim?.reuse ? `${fmt(sim.reuse.m3d, 0)} m³/d · ${sim.reuse.offSpec.length ? 'OFF SPEC' : `+${rm(sim.reuse.creditRMd)}/d`}` : 'connect a clean-water line' }
+          : isLiquidHaul(n)
           ? { kind: 'disposal', liquid: true, tag: n.tag ?? 'LH', label: 'Liquid waste haulage', sub: d ? `${fmt(d.m3d ?? 0, (d.m3d ?? 0) < 10 ? 2 : 0)} m³/d · ${rm(d.costRMd)}/d` : 'connect a concentrate line' }
           : { kind: 'disposal', tag: n.tag ?? 'SD', label: 'Sludge disposal', sub: d ? `${fmt(d.wetKgD, 0)} kg/d wet · ${rm(d.costRMd)}/d` : 'connect a sludge line' };
       } else if (isTerminal(n)) {
@@ -309,16 +311,23 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       if (!to || to.kind === 'influent') return false;
       if (c.sourceHandle === 'ras') return to.kind === 'activatedSludge';
       const sludge = c.sourceHandle === 'sludge';
-      if (sludge) return SLUDGE_RECEIVERS.includes(to.kind);
-      return to.kind !== 'disposal' || isLiquidHaul(to);
+      const from = draft.nodes.find((n) => n.id === c.source);
+      // brine / concentrate / backwash / eluate: a liquid line — anywhere but the reclaim system
+      if (sludge && from && REJECT_KINDS.includes(from.kind)) return !isReuse(to);
+      if (sludge) return SLUDGE_RECEIVERS.includes(to.kind) && !isReuse(to);
+      return to.kind !== 'disposal' || isLiquidHaul(to) || isReuse(to);
     },
     [draft.nodes],
   );
 
   const addUnit = useCallback(
-    (kind: UnitType | 'disposal' | 'liquidHaul', position?: { x: number; y: number }) => {
+    (kind: UnitType | 'disposal' | 'liquidHaul' | 'reclaim', position?: { x: number; y: number }) => {
       if (!p || !editable || !isUnitUnlocked(kind, tech)) return;
-      const node = kind === 'liquidHaul' ? makeNode('disposal', p.datasheet.Q, draft.nodes) : makeNode(kind, p.datasheet.Q, draft.nodes);
+      const node = kind === 'liquidHaul' || kind === 'reclaim' ? makeNode('disposal', p.datasheet.Q, draft.nodes) : makeNode(kind, p.datasheet.Q, draft.nodes);
+      if (kind === 'reclaim') {
+        node.params = { reuse: 'yes' };
+        node.tag = `RW-${String(draft.nodes.filter((x) => isReuse(x)).length + 1).padStart(2, '0')}`;
+      }
       if (kind === 'liquidHaul') {
         node.params = { liquid: 'yes' };
         node.tag = `LH-${String(draft.nodes.filter((x) => isLiquidHaul(x)).length + 1).padStart(2, '0')}`;
@@ -398,7 +407,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
-    const kind = e.dataTransfer.getData('application/ee-unit') as UnitType | 'disposal' | 'liquidHaul';
+    const kind = e.dataTransfer.getData('application/ee-unit') as UnitType | 'disposal' | 'liquidHaul' | 'reclaim';
     if (!kind) return;
     addUnit(kind, rf.screenToFlowPosition({ x: e.clientX - 60, y: e.clientY - 40 }));
   };
@@ -465,6 +474,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
             ))}
             {cat === 'sludge' && <DisposalPaletteItem editable={editable} onAdd={() => addUnit('disposal')} />}
             {cat === 'sludge' && <DisposalPaletteItem liquid editable={editable} onAdd={() => addUnit('liquidHaul')} />}
+            {cat === 'hydraulic' && <DisposalPaletteItem reuse editable={editable && isUnitUnlocked('reclaim', tech)} onAdd={() => addUnit('reclaim')} />}
           </div>
         ))}
         <div style={{ marginTop: 12 }}>
@@ -850,7 +860,24 @@ const PaletteItem = memo(function PaletteItem({ type, editable, locked, onAdd }:
   );
 });
 
-function DisposalPaletteItem({ editable, onAdd, liquid }: { editable: boolean; onAdd: () => void; liquid?: boolean }) {
+function DisposalPaletteItem({ editable, onAdd, liquid, reuse }: { editable: boolean; onAdd: () => void; liquid?: boolean; reuse?: boolean }) {
+  if (reuse)
+    return (
+      <div
+        className="palette-item"
+        draggable={editable}
+        onDragStart={(e) => {
+          e.dataTransfer.setData('application/ee-unit', 'reclaim');
+          e.dataTransfer.effectAllowed = 'move';
+        }}
+        onClick={editable ? onAdd : undefined}
+        title={editable ? `Treated water returned to the client's process (storage, UV, pumps). Credited at ${rm(PRICES.reuseCredit_m3)}/m³ when it meets the reuse spec (TDS ≤ ${REUSE_SPEC.TDS.max}, TSS ≤ ${REUSE_SPEC.TSS.max}, COD ≤ ${REUSE_SPEC.COD.max}).` : 'Research the Water reclaim system in the Technology Tree.'}
+        style={{ background: '#f4f6f8', color: 'var(--ink)', opacity: editable ? 1 : 0.5 }}
+      >
+        <DisposalSymbol />
+        {editable ? 'Water Reclaim → Process' : '🔒 Water Reclaim'}
+      </div>
+    );
   return (
     <div
       className="palette-item"
@@ -871,6 +898,27 @@ function DisposalPaletteItem({ editable, onAdd, liquid }: { editable: boolean; o
 
 function DisposalInspector({ id, tag, sim }: { id: string; tag: string; sim: SimResult | null }) {
   const d = sim?.disposal.find((x) => x.id === id);
+  if (tag.startsWith('RW'))
+    return (
+      <>
+        <div className="mono" style={{ fontSize: 11, color: 'var(--clean)', textTransform: 'uppercase' }}>
+          water reclaim
+        </div>
+        <h2 style={{ marginBottom: 4 }}>Water Reclaim System — {tag}</h2>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          Treated water goes back to the client&apos;s process instead of the river. It earns {rm(PRICES.reuseCredit_m3)}/m³ (the water the client no longer buys) — but only if it meets the reuse spec: TDS ≤ {REUSE_SPEC.TDS.max} mg/L, TSS ≤ {REUSE_SPEC.TSS.max}, COD ≤ {REUSE_SPEC.COD.max}, NH₃-N ≤ {REUSE_SPEC.NH3N.max}. That usually means RO permeate or evaporator distillate.
+        </p>
+        {!sim?.reuse && <p className="muted">Pipe permeate or distillate here.</p>}
+        {sim?.reuse && (
+          <>
+            <div className="calc"><span>Returned to process</span><span>{fmt(sim.reuse.m3d, 1)} m³/d</span></div>
+            <div className="calc"><span>On spec</span><span>{fmt(sim.reuse.onSpecM3d, 1)} m³/d</span></div>
+            <div className="calc"><span>Reuse credit</span><span>{rm(sim.reuse.creditRMd)}/d</span></div>
+            {sim.reuse.offSpec.length > 0 && <p style={{ color: 'var(--alarm)', fontSize: 12 }}>Off spec: {sim.reuse.offSpec.join(', ')}</p>}
+          </>
+        )}
+      </>
+    );
   if (d?.liquid || tag.startsWith('LH'))
     return (
       <>

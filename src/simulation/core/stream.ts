@@ -48,6 +48,12 @@ export interface Stream {
   sulfide?: MetalMap;
   /** residual dissolved sulfide H2S + HS− (S2− negligible), mol/L as S — regulated (Sulphide 0.5 mg/L); absent on older saves */
   sulfideS?: number;
+  /**
+   * background dissolved salts NOT tracked as their own species (Na⁺, K⁺, Ca²⁺, Mg²⁺, Cl⁻, silica…), mg/L — a conserved
+   * scalar for RO / evaporator / reuse. Total TDS adds the tracked ions (tdsTotal). GAME MODEL: salts added by dosing
+   * (Na from NaOH, Cl from FeCl₃/HCl) are not added. Ref: knowledge/chemistry/salinity_tds.md. Absent on older saves.
+   */
+  tds?: number;
   /** coagulant-derived solids, mg/L as metal (Al in Al(OH)3, Fe in Fe(OH)3) */
   alSolid: number;
   feSolid: number;
@@ -125,6 +131,7 @@ export function emptyStream(Q = 0): Stream {
     complexed: zeroMetals(),
     sulfide: zeroMetals(),
     sulfideS: 0,
+    tds: 0,
     alSolid: 0,
     feSolid: 0,
     alDissolved: 0,
@@ -156,6 +163,7 @@ export function cloneStream(s: Stream): Stream {
     complexed: { ...(s.complexed ?? zeroMetals()) },
     sulfide: { ...(s.sulfide ?? zeroMetals()) },
     sulfideS: s.sulfideS ?? 0,
+    tds: s.tds ?? 0,
     v50: { ...s.v50 },
     ml: s.ml ? { ...s.ml } : undefined,
     feDissolved: s.feDissolved ?? 0,
@@ -227,6 +235,15 @@ export function oilGrease(s: Stream): number {
   return s.OGfree + s.OGemulsified + (s.OGfloc ?? 0);
 }
 
+/**
+ * Total dissolved solids, mg/L: background salts + the ions the engine tracks (sulfate, dissolved and complexed metals,
+ * dissolved Al/Fe, ammonium and nitrate as ions). Ref: knowledge/chemistry/salinity_tds.md
+ */
+export function tdsTotal(s: Stream): number {
+  const metals = METALS.reduce((a, m) => a + s.dissolved[m] + (s.complexed?.[m] ?? 0), 0);
+  return (s.tds ?? 0) + (s.SO4T ?? 0) * 96060 + metals + (s.CrVI ?? 0) + s.alDissolved + (s.feDissolved ?? 0) + s.NH4N * (18 / 14) + s.NO3N * (62 / 14);
+}
+
 /** Total N excluding organic N (not modelled in Phase 1), mg/L */
 export function nitrogenTotal(s: Stream): number {
   return s.NH4N + s.NO3N + N_PER_VSS * s.biomass;
@@ -252,7 +269,7 @@ export function blend(streams: Stream[]): Stream {
     out.complexed![m] = w((s) => s.complexed?.[m] ?? 0);
     out.sulfide![m] = w((s) => s.sulfide?.[m] ?? 0);
   }
-  const scalarKeys = ['SO4T', 'alSolid', 'feSolid', 'alDissolved', 'feDissolved', 'CrVI', 'SS', 'SI', 'XS', 'XI', 'biomass', 'OGfree', 'OGemulsified', 'OGfloc', 'sulfideS', 'NH4N', 'NO3N', 'grit', 'inert', 'colloid', 'floc'] as const;
+  const scalarKeys = ['SO4T', 'alSolid', 'feSolid', 'alDissolved', 'feDissolved', 'CrVI', 'SS', 'SI', 'XS', 'XI', 'biomass', 'OGfree', 'OGemulsified', 'OGfloc', 'sulfideS', 'tds', 'NH4N', 'NO3N', 'grit', 'inert', 'colloid', 'floc'] as const;
   for (const k of scalarKeys) out[k] = w((s) => s[k] ?? 0);
   // settling velocity: mass-weighted average per pool
   for (const p of POOLS) {
