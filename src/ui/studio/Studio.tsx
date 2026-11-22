@@ -22,8 +22,8 @@ import { currentInfluent, upgradeQuote, VO_MARKUP } from '../../game/upgrade';
 import { REJECT_KINDS, REUSE_SPEC, isLiquidHaul, isReuse, simulate } from '../../simulation/treatment/graph';
 import { CATALOGUE, PRICES, UnitType } from '../../simulation/treatment/catalogue';
 import { PNode, PortId, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
-import { evaluate, limitsFor, measure, STANDARDS, type ParamId, type StandardId } from '../../simulation/treatment/compliance';
-import { Stream, mainInlet } from '../../simulation/core/stream';
+import { combinedMetalsApply, evaluate, limitsFor, measure, STANDARDS, type ParamId, type StandardId } from '../../simulation/treatment/compliance';
+import { Stream, mainInlet, tdsTotal } from '../../simulation/core/stream';
 import { DisposalSymbol, TankerSymbol, UnitSymbol } from '../components/Symbols';
 import { defaultPos } from './layout';
 import { CATEGORY_COLOR, edgeTypes, nodeTypes, type DosingTag, type UnitNodeData } from './nodes';
@@ -1091,7 +1091,7 @@ function StreamBalanceTable({ graph, sim, numbers, selected, onPick }: { graph: 
   if (!cols.length) return <p className="muted">Connect the train to see the stream table.</p>;
   const std = useStandard();
   const rows: [string, (s: Stream) => number, number, ParamId | null][] = [
-    ...STREAM_PARAMS.filter((r) => r.param !== 'Al' && r.param !== 'Fe').map((r): [string, (s: Stream) => number, number, ParamId | null] => [r.unit ? `${r.label}, ${r.unit}` : r.label, (s) => r.get(s, measure(s)), r.label === 'Flow' ? 0 : r.dp, r.param]),
+    ...STREAM_PARAMS.map((r): [string, (s: Stream) => number, number, ParamId | null] => [r.unit ? `${r.label}, ${r.unit}` : r.label, (s) => r.get(s, measure(s)), r.label === 'Flow' ? 0 : r.dp, r.param]),
     ['Solids, kg/d', (s) => (s.Q * measure(s).TSS) / 1000, 1, null],
   ];
   return (
@@ -1116,7 +1116,7 @@ function StreamBalanceTable({ graph, sim, numbers, selected, onPick }: { graph: 
               <td>{label}</td>
               {cols.map((c) => {
                 const v = f(c.s!);
-                const over = overLimit(param, v, std);
+                const over = overLimit(param, v, std, c.s!);
                 return (
                   <td key={c.e.id} className={`num ${selected === c.e.id ? 'hi' : ''}`} style={over ? OVER_STYLE : undefined} title={over ? `Above the Standard ${std} limit` : undefined}>
                     {fmtStream(v, d)}
@@ -1141,9 +1141,11 @@ function useStandard(): StandardId {
 }
 
 /** value outside the discharge limit of this standard (shown red at every stage, not only at the outlet) */
-function overLimit(param: ParamId | null, v: number, std: StandardId): boolean {
+function overLimit(param: ParamId | null, v: number, std: StandardId, s?: Stream): boolean {
   if (!param) return false;
-  const l = (limitsFor(std) as Partial<Record<ParamId, { min?: number; max?: number }>>)[param];
+  // Regulation 11(2) combined-metal limits apply only where two or more of the listed metals are present (as in evaluate)
+  const lims = { ...limitsFor(std), ...(s && combinedMetalsApply(s) ? STANDARDS.combinedMetals[std] : {}) } as Partial<Record<ParamId, { min?: number; max?: number }>>;
+  const l = lims[param];
   if (!l) return false;
   return (l.max !== undefined && v > l.max + 1e-9) || (l.min !== undefined && v < l.min - 1e-9);
 }
@@ -1154,6 +1156,7 @@ const fmtStream = (v: number, dp: number) => (v > 0 && v < Math.pow(10, -dp) ? `
 /** stream parameters shown in the pipe / outlet panels and the stream table (param = limit to compare against) */
 const STREAM_PARAMS: { label: string; param: ParamId | null; unit: string; dp: number; get: (s: Stream, m: ReturnType<typeof measure>) => number }[] = [
   { label: 'Flow', param: null, unit: 'm³/d', dp: 1, get: (s) => s.Q },
+  { label: 'Temperature', param: 'T', unit: '°C', dp: 1, get: (_, m) => m.T },
   { label: 'pH', param: 'pH', unit: '', dp: 2, get: (_, m) => m.pH },
   { label: 'COD', param: 'COD', unit: 'mg/L', dp: 1, get: (_, m) => m.COD },
   { label: 'BOD₅', param: 'BOD5', unit: 'mg/L', dp: 1, get: (_, m) => m.BOD5 },
@@ -1167,6 +1170,10 @@ const STREAM_PARAMS: { label: string; param: ParamId | null; unit: string; dp: n
   { label: 'Cr(III)', param: 'CrIII', unit: 'mg/L', dp: 2, get: (_, m) => m.CrIII },
   { label: 'Al', param: 'Al', unit: 'mg/L', dp: 1, get: (_, m) => m.Al },
   { label: 'Fe', param: 'Fe', unit: 'mg/L', dp: 1, get: (_, m) => m.Fe },
+  { label: 'Sulphide (as S)', param: 'Sulphide', unit: 'mg/L', dp: 2, get: (_, m) => m.Sulphide },
+  { label: 'Combined metals, total', param: 'MetalsTotal', unit: 'mg/L', dp: 2, get: (_, m) => m.MetalsTotal },
+  { label: 'Combined metals, soluble', param: 'MetalsSoluble', unit: 'mg/L', dp: 2, get: (_, m) => m.MetalsSoluble },
+  { label: 'TDS', param: null, unit: 'mg/L', dp: 0, get: (s) => tdsTotal(s) },
 ];
 
 function StreamRows({ s }: { s: Stream }) {
@@ -1176,7 +1183,7 @@ function StreamRows({ s }: { s: Stream }) {
     <>
       {STREAM_PARAMS.map((r) => {
         const v = r.get(s, m);
-        const over = overLimit(r.param, v, std);
+        const over = overLimit(r.param, v, std, s);
         return (
           <div className="calc" key={r.label} title={over ? `Above the Standard ${std} discharge limit` : undefined}>
             <span style={over ? OVER_STYLE : undefined}>{r.label}</span>
