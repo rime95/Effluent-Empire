@@ -24,6 +24,8 @@ export const START_CASH = 500_000;
 export const WEEKLY_OVERHEAD = 3_500;
 /** bank overdraft facility (GAME MODEL) */
 export const CREDIT_LINE = 250_000;
+/** passive reputation recovery: +1 every `everyWeeks` weeks while below `ceiling` and no operated plant failed that week */
+export const REP_RECOVERY = { everyWeeks: 2, ceiling: 30 };
 /** weeks of negative cash allowed (bank overdraft) before insolvency */
 export const OVERDRAFT_WEEKS = 6;
 
@@ -417,6 +419,11 @@ export function stepWeek(state: GameState): GameState {
     notices.push(...out.messages);
   }
   s.plants = plants;
+
+  // 2b. goodwill: a low reputation recovers slowly on its own (word of mouth, completed work remembered) while no
+  // operated plant failed a sample this week — so one bad job is not a permanent trap (GAME MODEL)
+  const failedNow = plants.some((p) => p.status === 'operating' && p.history[p.history.length - 1]?.week === week && !p.history[p.history.length - 1].pass);
+  if (week % REP_RECOVERY.everyWeeks === 0 && s.reputation < REP_RECOVERY.ceiling && !failedNow) s.reputation = Math.min(REP_RECOVERY.ceiling, s.reputation + 1);
 
   // 3. payroll and overheads
   s = book(s, `Payroll (${s.staff.length} staff)`, -payroll(s.staff), 'payroll');

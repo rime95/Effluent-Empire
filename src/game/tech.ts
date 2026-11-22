@@ -39,7 +39,8 @@ export interface TechDef {
   available: boolean;
 }
 
-export const TIER_REPUTATION = { 1: 10, 2: 25, 3: 40, 4: 60 } as const;
+/** tier 1 needs no reputation (cash only): a struggling company can still research its way out of a hard job */
+export const TIER_REPUTATION = { 1: 0, 2: 25, 3: 40, 4: 60 } as const;
 
 export const TECH: Record<TechId, TechDef> = {
   daf: {
@@ -110,7 +111,7 @@ export function canResearch(id: TechId, s: { tech: readonly TechId[]; reputation
   if (!t.available) return { ok: false, reason: 'In development — available in a coming update.' };
   const missing = t.requires.filter((r) => !s.tech.includes(r));
   if (missing.length) return { ok: false, reason: `Needs ${missing.map((m) => TECH[m].name).join(', ')} first.` };
-  if (s.reputation < t.reputation) return { ok: false, reason: `Needs reputation ${t.reputation} (you have ${Math.floor(s.reputation)}).` };
+  if (t.reputation > 0 && s.reputation < t.reputation) return { ok: false, reason: `Needs reputation ${t.reputation} (you have ${Math.floor(s.reputation)}).` };
   if (s.cash + creditLine < t.costRM) return { ok: false, reason: `Needs RM ${t.costRM.toLocaleString()} (cash + credit).` };
   return { ok: true };
 }

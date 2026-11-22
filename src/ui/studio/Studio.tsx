@@ -17,13 +17,13 @@ import {
 import { engineersBusy, useActiveProject, useGame } from '../../game/store';
 import { projectSlots } from '../../game/staff';
 import { constructionWeeks, makeNode, projectDesignBasis, retrofitCharge, RETROFIT_PREMIUM, type Project } from '../../game/project';
-import type { Plant } from '../../game/operations';
+import { OM, type Plant } from '../../game/operations';
 import { currentInfluent, upgradeQuote, VO_MARKUP } from '../../game/upgrade';
 import { REJECT_KINDS, REUSE_SPEC, isLiquidHaul, isReuse, simulate } from '../../simulation/treatment/graph';
 import { CATALOGUE, PRICES, UnitType } from '../../simulation/treatment/catalogue';
 import { PNode, PortId, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
 import { combinedMetalsApply, evaluate, limitsFor, measure, STANDARDS, type ParamId, type StandardId } from '../../simulation/treatment/compliance';
-import { Stream, mainInlet, tdsTotal } from '../../simulation/core/stream';
+import { METALS, Stream, cloneStream, mainInlet, mapInlets, tdsTotal } from '../../simulation/core/stream';
 import { DisposalSymbol, TankerSymbol, UnitSymbol } from '../components/Symbols';
 import { defaultPos } from './layout';
 import { CATEGORY_COLOR, edgeTypes, nodeTypes, type DosingTag, type UnitNodeData } from './nodes';
@@ -725,6 +725,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
         </div>
         {drawerTab === 'compliance' && !report && <p className="muted">Connect raw wastewater → units → final discharge to see the predicted effluent.</p>}
         {drawerTab === 'compliance' && report && <ComplianceTable checks={report.checks} />}
+        {drawerTab === 'compliance' && report && basis && <MarginCheck graph={draft} influent={basis.stream} std={p.enquiry.standard} />}
         {drawerTab === 'compliance' && sim?.ok && p.enquiry.requirements && <RequirementsTable checks={evaluateRequirements(sim, p.enquiry.requirements)} title="Contract requirements (predicted)" />}
         {drawerTab === 'streams' && (
           <StreamBalanceTable
@@ -1079,6 +1080,53 @@ function UnitInspector({ node, editable, sim, onParam, onInst }: { node: PNode; 
       )}
       {!ns && <p className="muted">Connect this unit into the train to see its performance.</p>}
     </>
+  );
+}
+
+/**
+ * Design margin: the plant on the design basis at the end-of-contract production level (O&M growth cap) with the feed at
+ * the top of its day-to-day variability (+8 % on every load). Weekly O&M samples see these conditions, commissioning
+ * does not — a design that only just passes today fails samples later. Run on demand (one extra simulation).
+ */
+function MarginCheck({ graph, influent, std }: { graph: ProcessGraph; influent: Stream; std: StandardId }) {
+  const [res, setRes] = useState<{ key: string; fails: { label: string; value: number; limit: number; unit: string }[]; ok: boolean } | null>(null);
+  const key = JSON.stringify(graph.edges.map((e) => [e.from, e.to])) + JSON.stringify(graph.nodes.map((n) => [n.id, n.params, n.inst ?? null]));
+  const run = () => {
+    const stressed = mapInlets(influent, (x) => {
+      const s = cloneStream(x);
+      s.Q *= OM.growthCap;
+      for (const k of ['SS', 'SI', 'XS', 'XI', 'colloid', 'OGfree', 'OGemulsified', 'NH4N'] as const) s[k] *= 1.08;
+      for (const m of METALS) s.dissolved[m] *= 1.08;
+      return s;
+    });
+    const sim = simulate(graph, stressed);
+    const rep = sim.effluent ? evaluate(sim.effluent, std, sim) : null;
+    setRes({ key, ok: !!rep?.pass, fails: rep ? rep.checks.filter((c) => !c.pass).map((c) => ({ label: c.label, value: c.value, limit: c.limit.max ?? c.limit.min ?? 0, unit: c.unit })) : [] });
+  };
+  const stale = res && res.key !== key;
+  return (
+    <div className="note info" style={{ marginTop: 10, fontSize: 12 }}>
+      <div className="row" style={{ justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+        <span>
+          <b>Design margin.</b> Weekly O&amp;M samples see production growth up to +{Math.round((OM.growthCap - 1) * 100)} % and feed swings of ±8 % — commissioning does not.
+        </span>
+        <button className="btn sm" onClick={run}>
+          Check at +{Math.round((OM.growthCap - 1) * 100)} % flow
+        </button>
+      </div>
+      {res && !stale && (
+        <div style={{ marginTop: 6 }}>
+          {res.ok ? (
+            <span style={{ color: 'var(--ok)' }}>Still compliant at end-of-contract flow with a high-load day — good margin.</span>
+          ) : (
+            <span style={{ color: 'var(--alarm)' }}>
+              Would fail in operation: {res.fails.map((f) => `${f.label} ${fmt(f.value, f.value < 10 ? 2 : 0)} ${f.unit} (limit ${f.limit})`).join('; ')}. Add capacity or a polishing step.
+            </span>
+          )}
+        </div>
+      )}
+      {stale && <div className="muted" style={{ marginTop: 6 }}>Design changed — check again.</div>}
+    </div>
   );
 }
 

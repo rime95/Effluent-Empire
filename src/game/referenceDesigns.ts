@@ -181,3 +181,29 @@ export const REFERENCE: Record<IndustryId, (s: Stream) => TrainSpec> = {
   food: (s) => foodTrain(s.Q),
   semiconductor: (s) => semiconductorTrain(s.Q),
 };
+
+/**
+ * Standard A reference designs from BASIC units only (no researched technology): the Standard B train plus polishing —
+ * an oil separator and activated carbon on the metal train, nitrification at pH 7 and carbon on the food train, an
+ * aeration stage for BOD/ammonia on the semiconductor train. A plain enquiry is offered on Standard A only where this
+ * design meets Standard A on the feed (customers.ts), so every early-game job is winnable with the basic kit.
+ * Coverage on generated feeds (2026-11-23): semiconductor ~100 %, plating ~60 %, food ~40 % (the rest is emulsified oil
+ * that needs flotation — the DAF client).
+ */
+export const REFERENCE_STD_A: Record<IndustryId, (s: Stream) => TrainSpec> = {
+  plating: (s) => [u('oilSep', s.Q, { area: Math.ceil((s.Q * 2.2) / 24) }), ...metalTrain(s.Q, s.CrVI > 0.05), u('carbon', s.Q)],
+  food: (s) => [
+    u('oilSep', s.Q, { area: Math.ceil((s.Q * 2.2) / 24) }),
+    u('eq', s.Q),
+    u('activatedSludge', s.Q, { volume: Math.ceil(s.Q * 4.5), srt: 20, control: 'srt', alkPH: 7, alkReagent: 'NaOH' }),
+    u('clarifier', s.Q, { area: Math.ceil(s.Q / 24 / 0.4) }),
+    u('sandFilter', s.Q),
+    u('carbon', s.Q),
+  ],
+  semiconductor: (s) => [
+    ...semiconductorTrain(s.Q).slice(0, 5),
+    u('activatedSludge', s.Q, { volume: Math.ceil(s.Q * 0.6), srt: 25, control: 'srt', alkPH: 7.2, alkReagent: 'NaOH' }),
+    u('clarifier', s.Q, { area: Math.ceil(s.Q / 24 / 0.5) }),
+    u('sandFilter', s.Q),
+  ],
+};

@@ -8,7 +8,7 @@ import { StandardId } from '../simulation/treatment/compliance';
 import { linearGraph, simulate } from '../simulation/treatment/graph';
 import { INDUSTRIES, IndustryId, generateWastewater } from './industries';
 import { Datasheet, declaredDatasheet } from './lab';
-import { REFERENCE } from './referenceDesigns';
+import { REFERENCE, REFERENCE_STD_A } from './referenceDesigns';
 import { Rng, createRng } from './rng';
 import { TechId } from './tech';
 import { Requirements } from './requirements';
@@ -219,6 +219,14 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
     const refDesign: TrainSpec | ProcessGraph = variant ? variant.reference(ww.stream) : REFERENCE[industry](ww.stream);
     ref = simulate(Array.isArray(refDesign) ? linearGraph(refDesign) : refDesign, ww.stream);
     requirements = variant?.requirements?.(ref);
+    // a plain job asks for Standard A only where the basic reference design reaches it on this feed — otherwise the
+    // early game could deal jobs no basic kit can pass (e.g. Std A O&G 1 mg/L on emulsified food oil). Draw kept above.
+    if (!variant && standard === 'A' && ref.effluent && !evaluate(ref.effluent, 'A', ref).pass) {
+      // try the basic-kit Standard A design (polishing + nitrification); price the job on it if it works
+      const refA = simulate(linearGraph(REFERENCE_STD_A[industry](ww.stream)), ww.stream);
+      if (refA.effluent && evaluate(refA.effluent, 'A', refA).pass) ref = refA;
+      else standard = 'B';
+    }
   }
   const markup = rng.range(1.35, 1.6);
   const repFactor = 1 + Math.min(0.15, Math.max(-0.15, reputation / 600));
@@ -261,7 +269,11 @@ export function enquiryReferenceGraph(e: Enquiry, tech: readonly TechId[]): Proc
   if (e.tier && e.tier !== 'basic') g = tierDesign(e.tier, e.industry, e.trueStream, tech, e.seed).graph;
   else {
     const v = e.variant ? VARIANTS.find((x) => x.id === e.variant!.id) : undefined;
-    const d = v ? v.reference(e.trueStream) : REFERENCE[e.industry](e.trueStream);
+    let d = v ? v.reference(e.trueStream) : REFERENCE[e.industry](e.trueStream);
+    if (!v && e.standard === 'A') {
+      const sim = simulate(linearGraph(d as TrainSpec), e.trueStream);
+      if (!(sim.effluent && evaluate(sim.effluent, 'A', sim).pass)) d = REFERENCE_STD_A[e.industry](e.trueStream);
+    }
     g = Array.isArray(d) ? linearGraph(d) : d;
   }
   // main train in a row, side units (reclaim, sludge line, brine treatment) on a second row

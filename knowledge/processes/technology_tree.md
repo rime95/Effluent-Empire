@@ -7,7 +7,7 @@ Module: `src/game/tech.ts`, screen `src/ui/screens/TechTree.tsx`. Player decisio
 - each technology opens **tougher clients** that need it.
 
 ## Rules
-- **Reputation by tier:** T1 10, T2 25, T3 40, T4 60. Prerequisites are listed per technology.
+- **Reputation by tier:** T1 0 (cash only, so a struggling company can research its way out; changed 2026-11-23), T2 25, T3 40, T4 60. Prerequisites are listed per technology.
 - **Cost** is booked as a `research` ledger line. The cash + RM 250k credit line must cover it.
 - **Availability:** a technology is "in development" (not researchable) until its engineering model, knowledge doc and tests are in the game (`available: true`).
 - **Studio locks:** locked units appear in the palette with a padlock and cannot be added, pasted or dropped.

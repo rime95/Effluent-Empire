@@ -22,7 +22,7 @@ describe('technology tree rules', () => {
     if (avail) {
       const t = TECH[avail];
       expect(canResearch(avail, { tech: [], reputation: t.reputation, cash: t.costRM }).ok).toBe(true);
-      expect(canResearch(avail, { tech: [], reputation: t.reputation - 1, cash: t.costRM }).ok).toBe(false);
+      if (t.reputation > 0) expect(canResearch(avail, { tech: [], reputation: t.reputation - 1, cash: t.costRM }).ok).toBe(false);
       expect(canResearch(avail, { tech: [], reputation: t.reputation, cash: t.costRM - 1 }).ok).toBe(false);
       expect(canResearch(avail, { tech: [avail], reputation: 99, cash: 1e9 }).ok).toBe(false);
     }
