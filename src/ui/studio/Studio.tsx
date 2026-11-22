@@ -22,7 +22,7 @@ import { currentInfluent, upgradeQuote, VO_MARKUP } from '../../game/upgrade';
 import { REJECT_KINDS, REUSE_SPEC, isLiquidHaul, isReuse, simulate } from '../../simulation/treatment/graph';
 import { CATALOGUE, PRICES, UnitType } from '../../simulation/treatment/catalogue';
 import { PNode, PortId, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
-import { evaluate, measure, STANDARDS } from '../../simulation/treatment/compliance';
+import { evaluate, limitsFor, measure, STANDARDS, type ParamId, type StandardId } from '../../simulation/treatment/compliance';
 import { Stream, mainInlet } from '../../simulation/core/stream';
 import { DisposalSymbol, TankerSymbol, UnitSymbol } from '../components/Symbols';
 import { defaultPos } from './layout';
@@ -1089,19 +1089,10 @@ function StreamBalanceTable({ graph, sim, numbers, selected, onPick }: { graph: 
     .filter((c) => c.s)
     .sort((a, b) => a.no - b.no);
   if (!cols.length) return <p className="muted">Connect the train to see the stream table.</p>;
-  const rows: [string, (s: Stream) => number, number][] = [
-    ['Flow, m³/d', (s) => s.Q, 0],
-    ['pH', (s) => measure(s).pH, 2],
-    ['COD, mg/L', (s) => measure(s).COD, 0],
-    ['BOD₅, mg/L', (s) => measure(s).BOD5, 0],
-    ['TSS, mg/L', (s) => measure(s).TSS, 1],
-    ['O&G, mg/L', (s) => measure(s).OG, 1],
-    ['NH₄-N, mg/L', (s) => measure(s).NH3N, 1],
-    ['Ni total, mg/L', (s) => measure(s).Ni, 2],
-    ['Cu total, mg/L', (s) => measure(s).Cu, 2],
-    ['Zn total, mg/L', (s) => measure(s).Zn, 2],
-    ['Cr(VI), mg/L', (s) => measure(s).CrVI, 3],
-    ['Solids, kg/d', (s) => (s.Q * measure(s).TSS) / 1000, 1],
+  const std = useStandard();
+  const rows: [string, (s: Stream) => number, number, ParamId | null][] = [
+    ...STREAM_PARAMS.filter((r) => r.param !== 'Al' && r.param !== 'Fe').map((r): [string, (s: Stream) => number, number, ParamId | null] => [r.unit ? `${r.label}, ${r.unit}` : r.label, (s) => r.get(s, measure(s)), r.label === 'Flow' ? 0 : r.dp, r.param]),
+    ['Solids, kg/d', (s) => (s.Q * measure(s).TSS) / 1000, 1, null],
   ];
   return (
     <div style={{ overflowX: 'auto' }}>
@@ -1120,14 +1111,18 @@ function StreamBalanceTable({ graph, sim, numbers, selected, onPick }: { graph: 
           </tr>
         </thead>
         <tbody>
-          {rows.map(([label, f, d]) => (
+          {rows.map(([label, f, d, param]) => (
             <tr key={label}>
               <td>{label}</td>
-              {cols.map((c) => (
-                <td key={c.e.id} className={`num ${selected === c.e.id ? 'hi' : ''}`}>
-                  {fmt(f(c.s!), d)}
-                </td>
-              ))}
+              {cols.map((c) => {
+                const v = f(c.s!);
+                const over = overLimit(param, v, std);
+                return (
+                  <td key={c.e.id} className={`num ${selected === c.e.id ? 'hi' : ''}`} style={over ? OVER_STYLE : undefined} title={over ? `Above the Standard ${std} limit` : undefined}>
+                    {fmtStream(v, d)}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -1136,32 +1131,64 @@ function StreamBalanceTable({ graph, sim, numbers, selected, onPick }: { graph: 
   );
 }
 
+/** discharge standard of the drawing on screen (project, or the operating plant shown in the Studio) */
+function useStandard(): StandardId {
+  return useGame((g) => {
+    const pl = g.studioPlantId ? g.plants.find((x) => x.id === g.studioPlantId) : undefined;
+    if (pl) return pl.standard;
+    return g.projects.find((x) => x.id === g.activeProjectId)?.enquiry.standard ?? 'B';
+  });
+}
+
+/** value outside the discharge limit of this standard (shown red at every stage, not only at the outlet) */
+function overLimit(param: ParamId | null, v: number, std: StandardId): boolean {
+  if (!param) return false;
+  const l = (limitsFor(std) as Partial<Record<ParamId, { min?: number; max?: number }>>)[param];
+  if (!l) return false;
+  return (l.max !== undefined && v > l.max + 1e-9) || (l.min !== undefined && v < l.min - 1e-9);
+}
+const OVER_STYLE = { color: 'var(--alarm)', fontWeight: 600 } as const;
+/** stream value at its display precision: traces below the last shown decimal read "< 0.001" instead of 4.2e-7 */
+const fmtStream = (v: number, dp: number) => (v > 0 && v < Math.pow(10, -dp) ? `< ${Math.pow(10, -dp).toFixed(dp)}` : fmt(v, dp));
+
+/** stream parameters shown in the pipe / outlet panels and the stream table (param = limit to compare against) */
+const STREAM_PARAMS: { label: string; param: ParamId | null; unit: string; dp: number; get: (s: Stream, m: ReturnType<typeof measure>) => number }[] = [
+  { label: 'Flow', param: null, unit: 'm³/d', dp: 1, get: (s) => s.Q },
+  { label: 'pH', param: 'pH', unit: '', dp: 2, get: (_, m) => m.pH },
+  { label: 'COD', param: 'COD', unit: 'mg/L', dp: 1, get: (_, m) => m.COD },
+  { label: 'BOD₅', param: 'BOD5', unit: 'mg/L', dp: 1, get: (_, m) => m.BOD5 },
+  { label: 'TSS', param: 'TSS', unit: 'mg/L', dp: 1, get: (_, m) => m.TSS },
+  { label: 'O&G', param: 'OG', unit: 'mg/L', dp: 1, get: (_, m) => m.OG },
+  { label: 'NH₄-N', param: 'NH3N', unit: 'mg/L', dp: 1, get: (_, m) => m.NH3N },
+  { label: 'Ni (total)', param: 'Ni', unit: 'mg/L', dp: 2, get: (_, m) => m.Ni },
+  { label: 'Cu (total)', param: 'Cu', unit: 'mg/L', dp: 2, get: (_, m) => m.Cu },
+  { label: 'Zn (total)', param: 'Zn', unit: 'mg/L', dp: 2, get: (_, m) => m.Zn },
+  { label: 'Cr(VI)', param: 'CrVI', unit: 'mg/L', dp: 3, get: (_, m) => m.CrVI },
+  { label: 'Cr(III)', param: 'CrIII', unit: 'mg/L', dp: 2, get: (_, m) => m.CrIII },
+  { label: 'Al', param: 'Al', unit: 'mg/L', dp: 1, get: (_, m) => m.Al },
+  { label: 'Fe', param: 'Fe', unit: 'mg/L', dp: 1, get: (_, m) => m.Fe },
+];
+
 function StreamRows({ s }: { s: Stream }) {
+  const std = useStandard();
   const m = measure(s);
-  const rows: [string, number, string][] = [
-    ['Flow', s.Q, 'm³/d'],
-    ['pH', m.pH, ''],
-    ['COD', m.COD, 'mg/L'],
-    ['BOD₅', m.BOD5, 'mg/L'],
-    ['TSS', m.TSS, 'mg/L'],
-    ['O&G', m.OG, 'mg/L'],
-    ['NH₄-N', m.NH3N, 'mg/L'],
-    ['Ni (total)', m.Ni, 'mg/L'],
-    ['Cu (total)', m.Cu, 'mg/L'],
-    ['Zn (total)', m.Zn, 'mg/L'],
-    ['Al', m.Al, 'mg/L'],
-    ['Fe', m.Fe, 'mg/L'],
-  ];
   return (
     <>
-      {rows.map(([l, v, u]) => (
-        <div className="calc" key={l}>
-          <span>{l}</span>
-          <span>
-            {fmt(v, l === 'pH' ? 2 : 1)} {u}
-          </span>
-        </div>
-      ))}
+      {STREAM_PARAMS.map((r) => {
+        const v = r.get(s, m);
+        const over = overLimit(r.param, v, std);
+        return (
+          <div className="calc" key={r.label} title={over ? `Above the Standard ${std} discharge limit` : undefined}>
+            <span style={over ? OVER_STYLE : undefined}>{r.label}</span>
+            <span style={over ? OVER_STYLE : undefined}>
+              {fmtStream(v, r.dp)} {r.unit}
+            </span>
+          </div>
+        );
+      })}
+      <p className="muted" style={{ fontSize: 11, margin: '6px 0 0' }}>
+        <span style={OVER_STYLE}>Red</span> = above the Standard {std} discharge limit at this point.
+      </p>
     </>
   );
 }
@@ -1172,7 +1199,7 @@ function StreamTable({ title, s }: { title: string; s: Stream }) {
       <h2>{title}</h2>
       <StreamRows s={s} />
       <p className="muted" style={{ fontSize: 11, marginTop: 8 }}>
-        Dissolved / particulate metals: Ni {fmt(s.dissolved.Ni, 2)} / {fmt(s.precipitated.Ni, 2)}, Cu {fmt(s.dissolved.Cu, 2)} / {fmt(s.precipitated.Cu, 2)}, Zn {fmt(s.dissolved.Zn, 2)} / {fmt(s.precipitated.Zn, 2)} mg/L
+        Dissolved / particulate metals: Ni {fmt(s.dissolved.Ni, 2)} / {fmt(s.precipitated.Ni, 2)}, Cu {fmt(s.dissolved.Cu, 2)} / {fmt(s.precipitated.Cu, 2)}, Zn {fmt(s.dissolved.Zn, 2)} / {fmt(s.precipitated.Zn, 2)}, Cr(III) {fmt(s.dissolved.Cr, 2)} / {fmt(s.precipitated.Cr, 2)} mg/L
       </p>
     </>
   );
