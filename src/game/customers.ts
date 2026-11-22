@@ -148,7 +148,7 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
 
   // client tier: its own RNG stream (base enquiry unchanged); a tier client is not also a tough-job variant
   let tier: ClientTier = 'basic';
-  if (opts.force?.tier) tier = opts.force.tier;
+  if (opts.force?.tier) tier = opts.force.tier; // 'basic' = skip the tier draw
   else if (opts.tech && !forcedVariant) {
     const tr = createRng(seed * 104729 + 31);
     const open = eligibleTiers(reputation, opts.tech);

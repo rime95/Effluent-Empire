@@ -111,7 +111,7 @@ export function Developer({ go }: { go: (s: Screen) => void }) {
               {TIER_LABEL[t]}
             </button>
           ))}
-          <button className="btn sm primary" style={{ marginLeft: 12 }} onClick={() => g.dev({ kind: 'spawn', force: { industry, ...(tier !== 'basic' ? { tier } : {}) } })}>
+          <button className="btn sm primary" style={{ marginLeft: 12 }} onClick={() => g.dev({ kind: 'spawn', force: { industry, tier } })}>
             Spawn
           </button>
         </div>

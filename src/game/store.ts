@@ -196,6 +196,8 @@ function initial(name = 'Effluent Engineering Sdn Bhd'): GameState {
     toast: null,
     studioPlantId: null,
     tech: [],
+    devMode: false,
+    devUsed: false,
   };
   return refill(base);
 }
@@ -276,6 +278,8 @@ export function migrate(raw: unknown): GameState | null {
       seedCounter: typeof v.seedCounter === 'number' ? v.seedCounter : d.seedCounter,
       negativeWeeks: v.negativeWeeks ?? 0,
       tech: Array.isArray(v.tech) ? v.tech.filter((t): t is TechId => t in TECH) : [],
+      devMode: v.devMode ?? false,
+      devUsed: v.devUsed ?? false,
       version: 2,
       toast: null,
     } as GameState;

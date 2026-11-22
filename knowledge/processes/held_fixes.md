@@ -41,7 +41,19 @@ Pre-existing, noticed in passing: base semiconductor/plating reference designs f
 2. LOW Tag prefix "SF" is used for both the sulfide reactor and the sand filter.
 
 ## C. Client tiers stage
-(filled in by the review of the tier/dev-mode stage)
+QA review (qa-engineer), 2026-11-22. Two items fixed at once because they could mark a real save DEV or broke the dev tool (see Done).
+1. MED Dev “Load reference design” rebuilds the tier design from current tech, not the tech at pricing — can swap ZLD/reuse vs the contract. Pick the candidate from e.requirements (or store the split on the enquiry).
+2. MED Balance: medium tier pays ×1.8 (×1.25 more with Std A) for only a standby requirement (~RM 9k/pump) — about 2.25× a basic job for little extra work. Lower the multiplier or add a second medium term (sludge cap, instrument level).
+3. MED Forced dev spawn skips tier eligibility: an MNC can spawn without RO/UF/reclaim researched (unbuildable). Fall back to medium when not eligible.
+4. LOW reuseMin formula hardcodes UF 0.92 / RO 0.75 recovery — read from defaultParams so catalogue changes don’t silently demote MNC jobs.
+5. LOW Forcing a variant and a tier together mixes them — make them mutually exclusive.
+6. LOW Dev spawn consumes a seed: shifts the market RNG, candidates and refill from then on — give spawns their own counter, or document.
+7. LOW Dev “Load reference design” allowed on a failed (built) project = free redesign — allow design status only.
+8. LOW Alias prefixes cycle at 15 names — a longer list gives duplicate aliases; add a guard test.
+9. LOW Performance: a tier enquiry runs up to 5 full simulations in refill — memoise or cap.
+10. LOW Wrap remaining free-text spots (Scada alarm text, Studio result text, TechTree) in brand() for future-proofing.
+11. LOW Test gaps: fuller determinism assertions (deadline, declared, hidden, name index), golden snapshot of pre-change enquiries, unique ids after spawn + refill, brandText idempotence / multiple names, missingStandby only on applicable units, MNC without evaporator never ZLD, neutral-wording message test, build ALL from TECH_ORDER.
 
 ## Done
-(none yet)
+- Dev mode leaked into a new game / older loaded save (Zustand merge kept devMode/devUsed) — initial() and migrate now reset both. Regression test in devMode.test.ts.
+- Dev spawn with “Local SME” still rolled a random tier — force.tier 'basic' now skips the draw. Regression test.
