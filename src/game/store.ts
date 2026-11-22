@@ -4,7 +4,7 @@
  */
 import { create } from 'zustand';
 import { ProcessGraph } from '../simulation/treatment/graph';
-import { Enquiry, PAYMENT, generateEnquiry } from './customers';
+import { Enquiry, EnquiryOptions, PAYMENT, enquiryReferenceGraph, generateEnquiry } from './customers';
 import { LAB_TESTS, LabTestId, applyTest } from './lab';
 import { Market, initialMarket, stepMarket } from './market';
 import { INCIDENT_LABEL, availableActions, clampSetpoint } from './incidents';
@@ -12,7 +12,7 @@ import { importLegacy, newSlotId, readSlot, summarize, writeSlot } from './saves
 import { OM, Plant, contractFor, omFeeQuote, operateWeek, plantPosts, recommendedMaintenance } from './operations';
 import { simulate } from '../simulation/treatment/graph';
 import { completeUpgrade, upgradeQuote } from './upgrade';
-import { TECH, TechId, canResearch } from './tech';
+import { TECH, TECH_ORDER, TechId, canResearch } from './tech';
 import { Project, ABANDON_PENALTY, commission, constructionWeeks, newProject } from './project';
 import { createRng } from './rng';
 import { Employee, founder, generateCandidates, labDiscount, labWeeks, operatorCapacity, payroll, projectSlots, salesBoost } from './staff';
@@ -71,6 +71,48 @@ export interface GameState {
   studioPlantId?: string | null;
   /** advanced technologies researched (Technology Tree); basic units need none */
   tech: TechId[];
+  /** developer mode switched on for this company (cheats; the save is marked) */
+  devMode?: boolean;
+  /** developer mode was ever used on this save */
+  devUsed?: boolean;
+}
+
+/** Developer-mode actions (testing tool: grants are booked as 'capital' with a "Developer" label). */
+export type DevAction =
+  | { kind: 'cash'; amount: number }
+  | { kind: 'reputation'; value: number }
+  | { kind: 'allTech' }
+  | { kind: 'clearTech' }
+  | { kind: 'spawn'; force: NonNullable<EnquiryOptions['force']> }
+  | { kind: 'labNow' }
+  | { kind: 'referenceDesign' };
+
+/** Pure: apply a developer action. */
+export function applyDev(s: GameState, a: DevAction): GameState {
+  switch (a.kind) {
+    case 'cash':
+      return { ...book(s, 'Developer: cash grant', a.amount, 'capital'), toast: `Developer: RM ${a.amount.toLocaleString()} added.` };
+    case 'reputation':
+      return { ...s, reputation: a.value, toast: `Developer: reputation set to ${a.value}.` };
+    case 'allTech':
+      return { ...s, tech: [...TECH_ORDER], toast: 'Developer: every technology unlocked (free).' };
+    case 'clearTech':
+      return { ...s, tech: [], toast: 'Developer: technology tree reset.' };
+    case 'spawn': {
+      const seed = s.seedCounter + 1;
+      const usedNames = new Set([...s.enquiries.map((e) => e.company), ...s.projects.filter((p) => p.status !== 'abandoned').map((p) => p.enquiry.company), ...s.plants.filter((p) => p.status === 'operating').map((p) => p.company)]);
+      const e = generateEnquiry(seed, s.week, s.reputation, { tech: s.tech, usedNames, force: a.force });
+      return { ...s, seedCounter: seed, enquiries: [{ ...e, expiresWeek: s.week + 8 }, ...s.enquiries], toast: `Developer: enquiry from ${e.company} added.` };
+    }
+    case 'labNow':
+      return { ...s, projects: s.projects.map((p) => ({ ...p, labQueue: p.labQueue.map((q) => ({ ...q, doneWeek: Math.min(q.doneWeek, s.week + 1) })) })), toast: 'Developer: lab results arrive next week.' };
+    case 'referenceDesign': {
+      const p = s.projects.find((x) => x.id === s.activeProjectId);
+      if (!p || (p.status !== 'design' && p.status !== 'failed')) return { ...s, toast: 'Developer: open a project in design first.' };
+      const g = enquiryReferenceGraph(p.enquiry, s.tech);
+      return { ...updateProject(s, p.id, (x) => ({ ...x, graph: g })), toast: 'Developer: the pricing reference design is loaded into the Studio.' };
+    }
+  }
 }
 
 interface Actions {
@@ -100,6 +142,9 @@ interface Actions {
   openPlantStudio: (plantId: string | null) => void;
   /** Technology Tree: buy an advanced technology (cash only, instant) */
   research: (id: TechId) => { ok: boolean; text: string };
+  /** developer mode on/off for this company, and its actions */
+  setDevMode: (on: boolean) => void;
+  dev: (a: DevAction) => void;
   /** start / edit / discard / submit an upgrade (variation order) of an operating plant */
   startUpgrade: (plantId: string) => void;
   setUpgradeGraph: (plantId: string, g: ProcessGraph) => void;
@@ -431,6 +476,13 @@ export const useGame = create<GameState & Actions>((set, get) => {
       });
       return { ok: true, text: `${t.name} researched.` };
     },
+    setDevMode: (on) =>
+      set((s) => ({
+        devMode: on,
+        devUsed: s.devUsed || on,
+        ...(on ? { news: [...s.news, { week: s.week, text: 'Developer mode switched on for this company (testing tools; the save is marked DEV).' }].slice(-60) } : {}),
+      })),
+    dev: (a) => set((s) => (s.devMode ? applyDev(s, a) : {})),
     startUpgrade: (plantId) =>
       set((s) => {
         // an upgrade is engineering work: it needs a free engineer until hand-over (or the draft is discarded)

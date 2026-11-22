@@ -2,6 +2,7 @@ import { useGame, WEEKLY_OVERHEAD } from '../../game/store';
 import { payroll } from '../../game/staff';
 import type { Screen } from '../App';
 import { INDUSTRY_LABEL, rm } from '../format';
+import { brand } from '../prefs';
 
 const MILESTONES = [
   { label: 'Commission your first WWTP', done: (n: number) => n >= 1 },
@@ -58,7 +59,7 @@ export function HQ({ go }: { go: (s: Screen) => void }) {
           {g.projects.map((x) => (
             <div key={x.id} className="row" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #1a3049' }}>
               <div>
-                <div style={{ color: '#fff', fontWeight: 600 }}>{x.enquiry.company}</div>
+                <div style={{ color: '#fff', fontWeight: 600 }}>{brand(x.enquiry.company)}</div>
                 <div className="muted" style={{ fontSize: 12 }}>
                   {INDUSTRY_LABEL[x.enquiry.industry]} · {x.enquiry.declared.Q} m³/d · Std {x.enquiry.standard} · contract {rm(x.enquiry.contractValue)} · due wk {x.startedWeek + x.enquiry.deadlineWeeks}
                   {x.labQueue.length > 0 && ` · lab results wk ${Math.min(...x.labQueue.map((q) => q.doneWeek))}`}
@@ -81,7 +82,7 @@ export function HQ({ go }: { go: (s: Screen) => void }) {
           {g.news.length === 0 && <p className="muted">Nothing yet. Lab results, commissioning outcomes, plant events and market news appear here.</p>}
           {[...g.news].reverse().slice(0, 8).map((n, i) => (
             <div key={i} className="note info">
-              <span className="mono muted">wk {n.week}</span> {n.text}
+              <span className="mono muted">wk {n.week}</span> {brand(n.text)}
             </div>
           ))}
         </div>
@@ -121,7 +122,7 @@ export function HQ({ go }: { go: (s: Screen) => void }) {
                     <td className="muted num" style={{ textAlign: 'left', width: 50 }}>
                       wk {l.week}
                     </td>
-                    <td>{l.label}</td>
+                    <td>{brand(l.label)}</td>
                     <td className="num" style={{ color: l.amount < 0 ? '#ff9c9c' : '#6fd39a' }}>
                       {rm(l.amount)}
                     </td>
@@ -151,7 +152,7 @@ export function HQ({ go }: { go: (s: Screen) => void }) {
               {g.history.map((h, i) => (
                 <tr key={i}>
                   <td className="num" style={{ textAlign: 'left' }}>{h.week}</td>
-                  <td>{h.company}</td>
+                  <td>{brand(h.company)}</td>
                   <td>{INDUSTRY_LABEL[h.industry]}</td>
                   <td>
                     <span className={`pill ${h.outcome === 'completed' ? 'pass' : 'fail'}`}>{h.outcome}</span>

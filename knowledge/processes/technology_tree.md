@@ -73,36 +73,7 @@ The base design fails both requirements. Both references pass on every generated
 
 **No dedicated client yet:** UF (pretreatment), IX and electrowinning (they pay by metal recovery), AOP (textile pending), UASB (POME pending), MBR.
 
-**Still pending from the plan:** client tiers (medium/MNC with real names, green scorecard, fictional-names toggle), segregated second influent (drag-out → nickel-only evaporator), and the textile, POME and glove industries.
+**Client tiers:** see [client_tiers.md](client_tiers.md). **Still pending from the plan:** green scorecard / ESG bonus, segregated second influent (drag-out → nickel-only evaporator), and the textile, POME and glove industries.
 
-## Held review findings (2026-11-22) — to fix later, per user
-Process review (wwtp-process-engineer):
-1. HIGH Off-spec reuse water leaves without a compliance check (raw water to reclaim + empty discharge passes) — treat off-spec reuse as discharged or fail commissioning.
-2. HIGH ZLD passes with an off-spec reclaim terminal — require reuse.m3d = onSpecM3d.
-3. HIGH RO feed pressure < brine π at high recovery; no hard cap — P = max(π_avg+10, π_brine+3), cap ~41 bar.
-4. HIGH Skipping UF before RO costs only +20 % energy — dirty feed raises CIP/replacement cost and degrades rejection above ~5 mg/L TSS.
-5. MED UF at any flux keeps ≥ 75 % recovery — collapse recovery above ~2× design flux.
-6. MED MBR flux > 30 LMH only warns — fouling penalty.
-7. MED UASB X_S hydrolysis on a fixed 30 d SRT regardless of size/upflow.
-8. MED UASB upflow > 1 m/h only warns — washout factor.
-9. MED Biogas credit at retail tariff, no CHP O&M; opex can go negative.
-10. MED MBR MLSS up to 18 g/L only costs energy — cap ~15 g/L or lose O2 transfer.
-11. LOW RO scaling limit independent of sulfate/hardness.
-12. LOW Evaporator feed > 270 g/L passes the 300 g/L cap via the recovery floor.
-13. LOW Evaporator keeps CO2 / volatile acids in the concentrate.
-14. LOW Reuse spec has no pH or metals limit.
-15. LOW MBR α-ratio scales all AS energy, not just process air.
-
-Chemistry review (industrial-chemist):
-1. HIGH IX eluate Na double-counted (NaOH re-loads the eqD released to the water): eluate Cb = (naohEq − eqD − hclEq)/V; eluate should be ~pH 1, not 4.9.
-2. HIGH Evaporator NH3 stripping not capped by alkalinity (concentrate reaches pH 1.2) — cap at acid-neutralising capacity or iterate on concentrate pH.
-3. MED Evaporator CT non-volatile (CO2 should boil off).
-4. MED Fenton utilisation independent of reaction time — × (1 − e^(−HRT/25 min)).
-5. MED IX tiny bed at ~800 BV/h still removes 80 % — channelling above ~40 BV/h, regeneration-frequency limit.
-6. MED RO CT rejection flat 0.6 — R_CT = 0.985·(1 − α0(pH)).
-7. LOW-MED Electrowinning Ni pH gate uses feed pH, not pH after Cu plating.
-8. LOW tdsTotal omits HCO3⁻ and counter-cations of tracked anions.
-9. LOW IX Na-to-TDS is an exception to the "dosed salts not counted" rule — document.
-10. LOW Fenton renames all coagulation chemicals "Iron catalyst" (display only).
-
-Pre-existing, noticed in passing: base semiconductor/plating reference designs fail Standard A on some feeds; sulfide and sand filter share tag prefix "SF".
+## Held review findings
+All held fixes and exploits are collected in [held_fixes.md](held_fixes.md).

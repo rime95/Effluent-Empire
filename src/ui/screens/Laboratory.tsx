@@ -6,6 +6,7 @@ import { LAB_TESTS, LabTestId, designBasis, jarTest, titrationData } from '../..
 import { Coagulant, COAGULANTS } from '../../simulation/chemistry/coagulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
+import { brand } from '../prefs';
 
 const AXIS = { stroke: '#8aa0b8', fontSize: 11, fontFamily: 'var(--mono)' };
 
@@ -55,7 +56,7 @@ export function Laboratory({ go }: { go: (s: Screen) => void }) {
     <div className="page">
       <h1>Laboratory</h1>
       <p className="sub">
-        {p.enquiry.company} — every design prediction in the Studio uses the <b>design basis</b> built from this datasheet. Unknowns are filled with generic assumptions.
+        {brand(p.enquiry.company)} — every design prediction in the Studio uses the <b>design basis</b> built from this datasheet. Unknowns are filled with generic assumptions.
       </p>
       <div className="grid g2">
         <div className="panel">

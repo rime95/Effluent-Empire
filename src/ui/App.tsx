@@ -16,8 +16,11 @@ import { Scada } from './screens/Scada';
 import { Staff } from './screens/Staff';
 import { Finance } from './screens/Finance';
 import { TechTree } from './screens/TechTree';
+import { Developer } from './screens/Developer';
+import { usePrefs } from './prefs';
+import { brand } from './prefs';
 
-export type Screen = 'hq' | 'enquiries' | 'lab' | 'studio' | 'commission' | 'plants' | 'staff' | 'finance' | 'book' | 'scada' | 'tech';
+export type Screen = 'hq' | 'enquiries' | 'lab' | 'studio' | 'commission' | 'plants' | 'staff' | 'finance' | 'book' | 'scada' | 'tech' | 'dev';
 
 const COMPANY: { id: Screen; label: string; icon: string }[] = [
   { id: 'hq', label: 'Company HQ', icon: 'hq' },
@@ -51,6 +54,7 @@ function Game({ onQuit }: { onQuit: () => void }) {
   const [paused, setPaused] = useState(false);
   const g = useGame();
   const p = useActiveProject();
+  usePrefs(); // re-render on display-preference changes (fictional names)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -80,6 +84,7 @@ function Game({ onQuit }: { onQuit: () => void }) {
         <div className="brand">
           <BrandMark />
           Effluent Empire
+          {g.devMode && <span className="pill warn" style={{ marginLeft: 8, fontSize: 9 }} title="Developer mode is on for this company">DEV</span>}
         </div>
         <div className="kpi">
           <span className="label">Company</span>
@@ -126,6 +131,12 @@ function Game({ onQuit }: { onQuit: () => void }) {
             {n.label}
           </button>
         ))}
+        {g.devMode && (
+          <button className={`nav-item ${screen === 'dev' ? 'active' : ''}`} onClick={() => setScreen('dev')}>
+            <NavIcon name="tree" />
+            Developer tools
+          </button>
+        )}
         <div className="nav-section">
           Projects ({live}/{projectSlots(g.staff)} engineers)
         </div>
@@ -140,7 +151,7 @@ function Game({ onQuit }: { onQuit: () => void }) {
             }}
             style={{ fontSize: 12 }}
           >
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.enquiry.company}</span>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{brand(x.enquiry.company)}</span>
             <span className={`pill ${STATUS_PILL[x.status]}`} style={{ fontSize: 9 }}>
               {x.status === 'building' && x.building ? `wk ${x.building.doneWeek}` : x.status}
             </span>
@@ -175,7 +186,7 @@ function Game({ onQuit }: { onQuit: () => void }) {
               style={{ fontSize: 12 }}
               title="Open the as-built PFD / P&ID; propose upgrades"
             >
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.company}</span>
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{brand(x.company)}</span>
               <span className={`pill ${x.upgrade?.phase === 'building' ? 'warn' : x.upgrade ? 'info' : 'pass'}`} style={{ fontSize: 9 }}>
                 {x.upgrade?.phase === 'building' ? `wk ${x.upgrade.doneWeek}` : x.upgrade ? 'upgrade' : 'O&M'}
               </span>
@@ -202,10 +213,11 @@ function Game({ onQuit }: { onQuit: () => void }) {
         {screen === 'book' && <Encyclopedia />}
         {screen === 'scada' && <Scada go={setScreen} />}
         {screen === 'tech' && <TechTree />}
+        {screen === 'dev' && g.devMode && <Developer go={setScreen} />}
       </main>
       {g.toast && (
         <div className="toast" onClick={() => g.dismissToast()}>
-          {g.toast}
+          {brand(g.toast)}
         </div>
       )}
       {paused && <PauseMenu onResume={() => setPaused(false)} onQuit={quit} />}
@@ -223,6 +235,7 @@ function Game({ onQuit }: { onQuit: () => void }) {
 
 function PauseMenu({ onResume, onQuit }: { onResume: () => void; onQuit: () => void }) {
   const g = useGame();
+  const prefs = usePrefs();
   const [msg, setMsg] = useState<string | null>(null);
   const report = (r: { ok: boolean; error?: string }, okText: string) => setMsg(r.ok ? okText : r.error ?? 'Save failed.');
   return (
@@ -250,6 +263,28 @@ function PauseMenu({ onResume, onQuit }: { onResume: () => void; onQuit: () => v
           <span>Download save file</span>
           <small>.json backup you can import later</small>
         </button>
+        <label className="menu-btn" style={{ cursor: 'pointer' }} title="Show a fictional alias instead of every real company name (medium and multinational clients). Saves keep the real names.">
+          <span>
+            <input type="checkbox" checked={prefs.fictionalNames} onChange={(e) => prefs.setFictionalNames(e.target.checked)} style={{ marginRight: 8 }} />
+            Use fictional names for all clients
+          </span>
+          <small>this device</small>
+        </label>
+        <label className="menu-btn" style={{ cursor: 'pointer' }} title="Testing tools: cash, reputation, unlock all technology, spawn any client type, load reference designs. Marks this save DEV.">
+          <span>
+            <input
+              type="checkbox"
+              checked={Boolean(g.devMode)}
+              onChange={(e) => {
+                if (e.target.checked && !g.devUsed && !confirm('Switch on developer mode for this company? Its tools change cash, reputation and technology, and the save is marked DEV. Tip: “Save as new slot” first to keep your real company untouched.')) return;
+                g.setDevMode(e.target.checked);
+              }}
+              style={{ marginRight: 8 }}
+            />
+            Developer mode
+          </span>
+          <small>{g.devUsed ? 'save marked DEV' : 'testing tools'}</small>
+        </label>
         <button className="menu-btn" onClick={onQuit}>
           <span>Save &amp; quit to main menu</span>
         </button>

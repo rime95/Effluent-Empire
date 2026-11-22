@@ -4,6 +4,7 @@
  * Ref: knowledge/processes/technology_tree.md ("Contract requirements").
  */
 import { SimResult } from '../simulation/treatment/graph';
+import { applicableInstruments, hasInst } from '../simulation/treatment/instrumentation';
 
 export interface Requirements {
   /** maximum sludge / waste disposal cost, RM/d (disposal-cost cap clients) */
@@ -12,6 +13,16 @@ export interface Requirements {
   reuseMin?: number;
   /** zero liquid discharge: no water to the river (≤ 0.5 % of the influent, e.g. a seal-water bleed) */
   zld?: boolean;
+  /** every pump / blower that can have one has a duty/standby machine (medium and MNC clients) */
+  standby?: boolean;
+}
+
+/** units that can carry a standby machine but do not */
+export function missingStandby(sim: SimResult): string[] {
+  return Object.values(sim.nodes)
+    .map((n) => n.node)
+    .filter((n) => applicableInstruments(n.kind, n.params).some((d) => d.key === 'standby') && !hasInst(n, 'standby'))
+    .map((n) => n.tag ?? n.id);
 }
 
 /** ZLD tolerance: discharge flow allowed as a fraction of the influent */
@@ -77,6 +88,21 @@ export function evaluateRequirements(sim: SimResult, req?: Requirements): ReqChe
       why: pass
         ? 'No liquid leaves to the river: water is reused, concentrate is hauled or dried.'
         : `${(sim.effluent?.Q ?? 0).toFixed(1)} m³/d still reaches the discharge. Recover the water (RO permeate, evaporator distillate → reclaim) and haul the last concentrate as liquid waste.`,
+    });
+  }
+  if (req.standby) {
+    const miss = missingStandby(sim);
+    const pass = miss.length === 0;
+    out.push({
+      id: 'standby',
+      label: 'Duty/standby on all pumps and blowers',
+      value: miss.length,
+      limit: 0,
+      unit: 'units without standby',
+      pass,
+      why: pass
+        ? 'Every dosing pump and blower has an installed standby with auto-changeover.'
+        : `No standby on ${miss.join(', ')} — the client's engineering standard asks for N+1 machines. Tick "Standby" in the P&ID inspector.`,
     });
   }
   return out;

@@ -3,6 +3,25 @@ import { projectSlots } from '../../game/staff';
 import { INDUSTRIES } from '../../game/industries';
 import type { Screen } from '../App';
 import { INDUSTRY_LABEL, fmt, rm } from '../format';
+import { TIER_LABEL } from '../../game/realClients';
+import type { Requirements } from '../../game/requirements';
+
+/** contract terms beyond the discharge standard, in words */
+function terms(r?: Requirements): string[] {
+  if (!r) return [];
+  const t: string[] = [];
+  if (r.sludgeCapRMd !== undefined) t.push(`sludge disposal cost ≤ RM ${r.sludgeCapRMd}/d`);
+  if (r.reuseMin !== undefined) t.push(`≥ ${Math.round(r.reuseMin * 100)} % of the wastewater back to the process on the reuse spec`);
+  if (r.zld) t.push('zero liquid discharge (water recovered, concentrate hauled)');
+  if (r.standby) t.push('duty/standby on every dosing pump and blower');
+  return t;
+}
+
+const TIER_BRIEF: Record<string, string> = {
+  medium: 'A large listed company: bigger budget, its own engineering standard (N+1 machines) and Standard A wherever it can be met.',
+  mnc: 'A multinational with a group sustainability target: a generous budget, but water reuse or zero discharge and full redundancy are contract terms.',
+};
+import { brand } from '../prefs';
 
 const IND_COLOR: Record<string, string> = { plating: 'var(--chem)', food: 'var(--bio)', semiconductor: 'var(--clean)' };
 
@@ -31,8 +50,9 @@ export function Enquiries({ go }: { go: (s: Screen) => void }) {
                 <span className="pill std">Standard {e.standard}</span>
               </div>
               <div className="company">
-                {e.company}
+                {brand(e.company)}
                 {e.variant && <span className="pill warn" style={{ marginLeft: 6, fontSize: 9 }}>TOUGH JOB</span>}
+                {e.tier && <span className={`pill ${e.tier === 'mnc' ? 'pass' : 'info'}`} style={{ marginLeft: 6, fontSize: 9 }}>{TIER_LABEL[e.tier].toUpperCase()}</span>}
               </div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {t.description}
@@ -82,7 +102,12 @@ export function Enquiries({ go }: { go: (s: Screen) => void }) {
               {e.variant && (
                 <div className="note info">
                   <b>Tough job — {e.variant.label}.</b> {e.variant.brief}
-                  {e.requirements?.sludgeCapRMd !== undefined && <div style={{ marginTop: 4 }}>Contract term: sludge disposal cost ≤ RM {e.requirements.sludgeCapRMd}/d (checked at commissioning).</div>}
+                </div>
+              )}
+              {e.tier && <div className="note info"><b>{TIER_LABEL[e.tier]}.</b> {TIER_BRIEF[e.tier]}</div>}
+              {terms(e.requirements).length > 0 && (
+                <div className="note warn">
+                  <b>Contract terms (checked at commissioning):</b> {terms(e.requirements).join('; ')}.
                 </div>
               )}
               <div className="row">

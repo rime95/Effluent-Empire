@@ -426,7 +426,7 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
       cost += fine;
       costs.fines = fine;
       reputation -= 8;
-      messages.push(`DOE inspection at ${p.company}: effluent non-compliant (${failed.join(', ')}). Compound fine RM ${fine.toLocaleString()}, −8 reputation.`);
+      messages.push(`DOE inspection at the treatment plant you operate for ${p.company}: your plant's effluent is non-compliant (${failed.join(', ')}). Compound fine RM ${fine.toLocaleString()}, −8 reputation.`);
     }
   }
 
@@ -435,7 +435,7 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   const fee = p.contract ? p.contract.monthlyFee / WEEKS_PER_MONTH : 0;
   const deduction = p.contract && !pass ? p.contract.monthlyFee * OM.deduction : 0;
   const reimbursed = p.contract ? costs.opex * (1 + OM.handling) : 0;
-  if (deduction) messages.push(`${p.company}: failed sample — performance deduction RM ${Math.round(deduction).toLocaleString()} from the service fee.`);
+  if (deduction) messages.push(`Your plant for ${p.company}: failed sample — performance deduction RM ${Math.round(deduction).toLocaleString()} from the service fee.`);
   const revenue = fee - deduction + reimbursed;
   // field-action costs were paid when taken (ledger); they are shown in this week's plant costs but not charged again
   p.history = [...p.history, { week, pass, failed, revenue, cost: cost + costs.actions, condition: p.condition, flowFactor, event, fine, fee, reimbursed, deduction, costs, supervised }].slice(-52);
@@ -445,7 +445,7 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
     p.status = 'terminated';
     p.contract = null;
     reputation -= 15;
-    messages.push(`${p.company} terminated the O&M contract after repeated non-compliance (−15 reputation).`);
+    messages.push(`O&M contract for ${p.company} terminated after your plant's repeated non-compliance (−15 reputation).`);
   } else if (p.contract && week >= p.contract.endWeek) {
     p.status = 'expired';
     p.contract = null;

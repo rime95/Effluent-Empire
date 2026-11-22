@@ -7,12 +7,13 @@ import { ComplianceTable } from '../studio/Studio';
 import { RequirementsTable } from '../components/RequirementsTable';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
+import { brand } from '../prefs';
 
 export function Commissioning({ go }: { go: (s: Screen) => void }) {
   const g = useGame();
   const p = useActiveProject();
   const [idx, setIdx] = useState<number | null>(null);
-  if (p?.status === 'building' && p.building) return <div className="page"><h1>Commissioning — {p.enquiry.company}</h1><p className="muted">Under construction. Commissioning test in week {p.building.doneWeek} (now week {g.week}). Use “Skip to next event”.</p></div>;
+  if (p?.status === 'building' && p.building) return <div className="page"><h1>Commissioning — {brand(p.enquiry.company)}</h1><p className="muted">Under construction. Commissioning test in week {p.building.doneWeek} (now week {g.week}). Use “Skip to next event”.</p></div>;
   if (!p || p.reports.length === 0) return <div className="page"><h1>Commissioning</h1><p className="muted">No plant has been commissioned on the selected project yet.</p></div>;
   const i = idx ?? p.reports.length - 1;
   const r = p.reports[i];
@@ -22,7 +23,7 @@ export function Commissioning({ go }: { go: (s: Screen) => void }) {
     <div className="page">
       <div className="row" style={{ justifyContent: 'space-between' }}>
         <div>
-          <h1>Commissioning report — {p.enquiry.company}</h1>
+          <h1>Commissioning report — {brand(p.enquiry.company)}</h1>
           <p className="sub">
             Attempt {r.attempt} · week {r.week} · tested on the real wastewater (with normal day-to-day variation) against {r.compliance.standard === 'A' ? 'Standard A' : 'Standard B'} ({r.compliance.version})
           </p>
@@ -97,14 +98,14 @@ export function Commissioning({ go }: { go: (s: Screen) => void }) {
             {p.omOffer.quote ? (
               <>
                 <p className="muted" style={{ margin: '6px 0 10px' }}>
-                  {p.enquiry.company} offers a {p.omOffer.weeks / 52}-year O&amp;M contract: a fixed service fee of <b style={{ color: '#fff' }}>{rm(p.omOffer.quote.monthlyFee)}/month</b> plus chemicals, power and sludge re-billed at cost + {Math.round(OM.handling * 100)} %. You staff the {p.omOffer.quote.operatorFTE} operator post(s) the fee pays for (1 per operator, 1.5 per senior operator), maintain the plant and carry repairs and DOE fines.
+                  {brand(p.enquiry.company)} offers a {p.omOffer.weeks / 52}-year O&amp;M contract: a fixed service fee of <b style={{ color: '#fff' }}>{rm(p.omOffer.quote.monthlyFee)}/month</b> plus chemicals, power and sludge re-billed at cost + {Math.round(OM.handling * 100)} %. You staff the {p.omOffer.quote.operatorFTE} operator post(s) the fee pays for (1 per operator, 1.5 per senior operator), maintain the plant and carry repairs and DOE fines.
                 </p>
                 <div style={{ maxWidth: 620, marginBottom: 10 }}>
                   <OMFeeTable q={p.omOffer.quote} />
                 </div>
               </>
             ) : (
-              <p className="muted" style={{ margin: '6px 0 10px' }}>{p.enquiry.company} offers an O&amp;M contract; it is priced on the current contract model when you sign.</p>
+              <p className="muted" style={{ margin: '6px 0 10px' }}>{brand(p.enquiry.company)} offers an O&amp;M contract; it is priced on the current contract model when you sign.</p>
             )}
             <div className="row">
               <button className="btn primary" onClick={() => { g.acceptOM(p.id); go('plants'); }}>Sign O&M contract ▸</button>

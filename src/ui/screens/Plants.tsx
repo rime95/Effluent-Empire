@@ -6,6 +6,7 @@ import { OMFeeTable } from '../components/OMFee';
 import type { Screen } from '../App';
 import { operatorCapacity } from '../../game/staff';
 import { INDUSTRY_LABEL, rm } from '../format';
+import { brand } from '../prefs';
 
 const AXIS = { stroke: '#8aa0b8', fontSize: 10, fontFamily: 'var(--mono)' };
 
@@ -74,7 +75,7 @@ export function Plants({ go }: { go: (s: Screen) => void }) {
                 return (
                   <tr key={p.id} onClick={() => setSel(p.id)} style={{ cursor: 'pointer', background: plant?.id === p.id ? '#13283f' : undefined }}>
                     <td>
-                      <div style={{ color: '#fff' }}>{p.company}</div>
+                      <div style={{ color: '#fff' }}>{brand(p.company)}</div>
                       <div className="muted" style={{ fontSize: 11 }}>
                         {INDUSTRY_LABEL[p.industry]} · Std {p.standard}
                       </div>
@@ -129,7 +130,7 @@ function PlantDetail({ plant, go }: { plant: Plant; go: (s: Screen) => void }) {
     <div className="grid g2">
       <div className="panel">
         <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <h2>{plant.company}</h2>
+          <h2>{brand(plant.company)}</h2>
           {plant.status === 'operating' && (
             <div className="row" style={{ gap: 6 }}>
               <button className="btn sm" onClick={() => { g.openPlantStudio(plant.id); go('studio'); }} title="As-built PFD and P&ID; propose upgrades">

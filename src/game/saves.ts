@@ -21,6 +21,8 @@ export interface SlotMeta {
   reputation: number;
   plants: number;
   savedAt: number;
+  /** developer mode was used on this save */
+  dev?: boolean;
 }
 
 function storage(): Storage | null {
@@ -55,8 +57,8 @@ export function readSlot(id: string): string | null {
   return storage()?.getItem(DATA_PREFIX + id) ?? null;
 }
 
-export function summarize(id: string, s: Pick<GameState, 'companyName' | 'week' | 'cash' | 'reputation' | 'plants'>): SlotMeta {
-  return { id, company: s.companyName, week: s.week, cash: s.cash, reputation: s.reputation, plants: s.plants.filter((p) => p.status === 'operating').length, savedAt: Date.now() };
+export function summarize(id: string, s: Pick<GameState, 'companyName' | 'week' | 'cash' | 'reputation' | 'plants' | 'devUsed'>): SlotMeta {
+  return { id, company: s.companyName, week: s.week, cash: s.cash, reputation: s.reputation, plants: s.plants.filter((p) => p.status === 'operating').length, savedAt: Date.now(), ...(s.devUsed ? { dev: true } : {}) };
 }
 
 /** Write a slot. Throws if browser storage is full or unavailable (caller shows the message). */

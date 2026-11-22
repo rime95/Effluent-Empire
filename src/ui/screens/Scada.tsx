@@ -23,6 +23,7 @@ function tagVisible(n: PNode | undefined, key: string): boolean {
 }
 import { fmt, INDUSTRY_LABEL, rm } from '../format';
 import type { Screen } from '../App';
+import { brand } from '../prefs';
 
 /* SCADA control room: dark mimic + trends + alarms. Ref: knowledge/operations/scada.md */
 const BG = '#050c14';
@@ -160,7 +161,7 @@ export function Scada({ go }: { go: (s: Screen) => void }) {
         <select value={plant.id} onChange={(e) => setSel(e.target.value)} style={{ background: PANEL, color: '#fff', border: `1px solid ${LINE}`, padding: '5px 8px', borderRadius: 6 }}>
           {operating.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.company} — {INDUSTRY_LABEL[p.industry]} {p.incident ? '⚠' : ''}
+              {brand(p.company)} — {INDUSTRY_LABEL[p.industry]} {p.incident ? '⚠' : ''}
             </option>
           ))}
         </select>

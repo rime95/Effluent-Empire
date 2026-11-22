@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { LedgerCat, useGame } from '../../game/store';
 import { rm } from '../format';
+import { brand } from '../prefs';
 
 const AXIS = { stroke: '#8aa0b8', fontSize: 10, fontFamily: 'var(--mono)' };
 const CAT_LABEL: Record<LedgerCat, string> = {
@@ -126,7 +127,7 @@ export function Finance() {
                     <td className="muted num" style={{ textAlign: 'left', width: 50 }}>
                       wk {l.week}
                     </td>
-                    <td>{l.label}</td>
+                    <td>{brand(l.label)}</td>
                     <td className="num" style={{ color: l.amount < 0 ? '#ff9c9c' : '#6fd39a' }}>
                       {rm(l.amount)}
                     </td>

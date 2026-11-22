@@ -37,6 +37,7 @@ import { RequirementsTable } from '../components/RequirementsTable';
 import { useSimulation } from './useSimulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
+import { brand } from '../prefs';
 
 const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'daf', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'sulfide', 'aop', 'ionExchange', 'electrowinning', 'coagulation', 'activatedSludge', 'uasb', 'mbr', 'uf', 'ro', 'evaporator', 'thickener', 'filterPress', 'dryer', 'splitter', 'mixer'];
 /** kinds that may receive a sludge line */
@@ -642,7 +643,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           </div>
           <div>
             <span>CLIENT</span>
-            <span>{p.enquiry.company}</span>
+            <span>{brand(p.enquiry.company)}</span>
           </div>
           <div>
             <span>DESIGN FLOW</span>
@@ -662,10 +663,10 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
         {plant && (
           <div className="note info" style={{ position: 'absolute', top: 52, left: 10, right: 10, zIndex: 5, background: '#fff', color: 'var(--ink)' }}>
             {plant.upgrade?.phase === 'draft'
-              ? `Upgrade draft — ${plant.company}. Changed and new units are priced as plant modification works (${Math.round((RETROFIT_PREMIUM - 1) * 100)} % rework premium; added instruments only for the instruments). Shown on today's influent.`
+              ? `Upgrade draft — ${brand(plant.company)}. Changed and new units are priced as plant modification works (${Math.round((RETROFIT_PREMIUM - 1) * 100)} % rework premium; added instruments only for the instruments). Shown on today's influent.`
               : plant.upgrade?.phase === 'building'
-                ? `Upgrade under construction — ${plant.company}. Hand-over in week ${plant.upgrade.doneWeek}; the plant keeps running on the old design until then.`
-                : `Operating plant — ${plant.company}. As-built drawing, read-only, on today's influent. Use “Propose upgrade” to modify it.`}
+                ? `Upgrade under construction — ${brand(plant.company)}. Hand-over in week ${plant.upgrade.doneWeek}; the plant keeps running on the old design until then.`
+                : `Operating plant — ${brand(plant.company)}. As-built drawing, read-only, on today's influent. Use “Propose upgrade” to modify it.`}
           </div>
         )}
         {p.status === 'failed' && (
@@ -1223,7 +1224,7 @@ function PlantPanel({ plant, draft, sim, busy, week, go, flush }: { plant: Plant
   return (
     <>
       <h2>Operating plant</h2>
-      <div className="calc"><span>Client</span><span>{plant.company}</span></div>
+      <div className="calc"><span>Client</span><span>{brand(plant.company)}</span></div>
       <div className="calc"><span>O&amp;M fee</span><span>{plant.contract ? `${rm(plant.contract.monthlyFee)}/month` : '—'}</span></div>
       <div className="calc"><span>Today's flow</span><span>{fmt(currentInfluent(plant).Q, 0)} m³/d (×{fmt(last?.flowFactor ?? 1, 2)})</span></div>
       <div className="calc"><span>As-built on today's influent</span><span className={`pill ${now.ok && now.effluent && evaluate(now.effluent, plant.standard, now).pass ? 'pass' : 'fail'}`}>{now.ok && now.effluent && evaluate(now.effluent, plant.standard, now).pass ? 'PASS' : 'FAIL'}</span></div>

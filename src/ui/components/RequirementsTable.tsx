@@ -20,7 +20,7 @@ export function RequirementsTable({ checks, title = 'Contract requirements' }: {
           <tr key={c.id}>
             <td>{c.label}</td>
             <td className="num">{fmt(c.value, 0)} {c.unit}</td>
-            <td className="num">≤ {fmt(c.limit, 0)} {c.unit}</td>
+            <td className="num">{c.id === 'reuseMin' ? '≥' : '≤'} {fmt(c.limit, 0)} {c.unit}</td>
             <td>
               <span className={`pill ${c.pass ? 'pass' : 'fail'}`}>{c.pass ? 'PASS' : 'FAIL'}</span>
             </td>

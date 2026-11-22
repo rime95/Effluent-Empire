@@ -122,7 +122,10 @@ export function MainMenu({ onEnter }: { onEnter: () => void }) {
               {slots.map((s) => (
                 <div key={s.id} className="slot">
                   <div className="slot-main" onClick={() => open(s.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && open(s.id)}>
-                    <div className="slot-company">{s.company}</div>
+                    <div className="slot-company">
+                      {s.company}
+                      {s.dev && <span className="pill warn" style={{ marginLeft: 6, fontSize: 9 }}>DEV</span>}
+                    </div>
                     <div className="slot-meta">
                       Week {s.week} · {rm(s.cash)} · rep {s.reputation} · {s.plants} plant{s.plants === 1 ? '' : 's'} · saved {ago(s.savedAt)}
                     </div>
