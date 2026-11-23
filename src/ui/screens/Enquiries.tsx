@@ -17,12 +17,15 @@ function terms(r?: Requirements): string[] {
   if (r.effluentFactor !== undefined) t.push(`effluent at ≤ ${Math.round(r.effluentFactor * 100)} % of every Standard A limit`);
   if (r.energyMax_kWhm3 !== undefined) t.push(`net energy ≤ ${r.energyMax_kWhm3.toFixed(2)} kWh/m³`);
   if (r.sludgeMax_kgm3 !== undefined) t.push(`sludge ≤ ${r.sludgeMax_kgm3.toFixed(3)} kg DS/m³`);
+  if (r.cakeWetMax_kgd !== undefined) t.push(`wet sludge cake ≤ ${Math.round(r.cakeWetMax_kgd)} kg/d`);
+  if (r.metalRecoveryMin_kgd !== undefined) t.push(`metal recovered ≥ ${r.metalRecoveryMin_kgd.toFixed(1)} kg/d (electrowinning)`);
   return t;
 }
 
 const TIER_BRIEF: Record<string, string> = {
   medium: 'A large listed company: bigger budget, its own engineering standard (N+1 machines) and Standard A wherever it can be met.',
   mnc: 'A multinational with a group sustainability target: a generous budget, but water reuse or zero discharge and full redundancy are contract terms.',
+  mega: 'The final boss: one plating campus with every problem at once — a strong, salty main rinse plus separate chrome, electroless-nickel and nickel-rinse drains. Zero liquid discharge, a cap on wet sludge cake (dry it), a nickel recovery target (electrowin the nickel rinse) and full redundancy. The biggest contract in the game.',
   flagship: 'A multinational showcase plant for its ESG report: the biggest budget in the game, and a green scorecard on top of water reuse or zero discharge — effluent well inside Standard A, low energy and little sludge. Beat each green target by 10 % for its share of the ESG bonus.',
 };
 import { brand } from '../prefs';
@@ -56,7 +59,7 @@ export function Enquiries({ go }: { go: (s: Screen) => void }) {
               <div className="company">
                 {brand(e.company)}
                 {e.variant && <span className="pill warn" style={{ marginLeft: 6, fontSize: 9 }}>TOUGH JOB</span>}
-                {e.tier && <span className={`pill ${e.tier === 'flagship' ? 'warn' : e.tier === 'mnc' ? 'pass' : 'info'}`} style={{ marginLeft: 6, fontSize: 9 }}>{TIER_LABEL[e.tier].toUpperCase()}</span>}
+                {e.tier && <span className={`pill ${e.tier === 'mega' ? 'fail' : e.tier === 'flagship' ? 'warn' : e.tier === 'mnc' ? 'pass' : 'info'}`} style={{ marginLeft: 6, fontSize: 9 }}>{TIER_LABEL[e.tier].toUpperCase()}</span>}
               </div>
               <div className="muted" style={{ fontSize: 12 }}>
                 {t.description}

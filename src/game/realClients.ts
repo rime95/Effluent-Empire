@@ -6,7 +6,7 @@
  */
 import type { IndustryId } from './industries';
 
-export type ClientTier = 'basic' | 'medium' | 'mnc' | 'flagship';
+export type ClientTier = 'basic' | 'medium' | 'mnc' | 'flagship' | 'mega';
 
 /** Large Malaysian companies (medium tier). */
 const MEDIUM: Record<IndustryId, string[]> = {
@@ -41,7 +41,7 @@ const MNC: Record<IndustryId, string[]> = {
 };
 
 /** flagship (ESG showcase) projects come from the same multinationals */
-export const REAL_CLIENTS: Record<Exclude<ClientTier, 'basic'>, Record<IndustryId, string[]>> = { medium: MEDIUM, mnc: MNC, flagship: MNC };
+export const REAL_CLIENTS: Record<Exclude<ClientTier, 'basic'>, Record<IndustryId, string[]>> = { medium: MEDIUM, mnc: MNC, flagship: MNC, mega: MNC };
 
 const ALIAS_PREFIX = [
   'Apex', 'Orion', 'Vertex', 'Meridian', 'Summit', 'Pinnacle', 'Horizon', 'Atlas', 'Nova', 'Titan', 'Sterling', 'Crest', 'Vanguard', 'Polaris', 'Aurora',
@@ -71,4 +71,4 @@ export function brandText(text: string, fictional: boolean): string {
   return t;
 }
 
-export const TIER_LABEL: Record<ClientTier, string> = { basic: 'Local SME', medium: 'Large local company', mnc: 'Multinational', flagship: 'Flagship ESG project' };
+export const TIER_LABEL: Record<ClientTier, string> = { basic: 'Local SME', medium: 'Large local company', mnc: 'Multinational', flagship: 'Flagship ESG project', mega: 'Integrated megaproject' };

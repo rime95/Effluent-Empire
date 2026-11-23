@@ -12,11 +12,11 @@ import { REFERENCE, REFERENCE_STD_A } from './referenceDesigns';
 import { Rng, createRng } from './rng';
 import { TechId } from './tech';
 import { Requirements } from './requirements';
-import { ClientVariant, VARIANTS, VARIANT_CHANCE, VARIANT_PREMIUM, eligibleVariants } from './variants';
+import { ClientVariant, VARIANTS, VARIANT_CHANCE, VARIANT_PREMIUM, eligibleVariants, megaGraph, megaOverlay } from './variants';
 import { ClientTier, REAL_CLIENTS } from './realClients';
 import { evaluate } from '../simulation/treatment/compliance';
 import { ProcessGraph, SimResult } from '../simulation/treatment/graph';
-import { effluentRatioToA, evaluateRequirements, netEnergy_kWhm3, sludge_kgm3 } from './requirements';
+import { cakeWet_kgd, effluentRatioToA, evaluateRequirements, metalRecovered_kgd, netEnergy_kWhm3, sludge_kgm3 } from './requirements';
 import { TrainSpec, reuseGraph, zldGraph } from './referenceDesigns';
 
 export interface Enquiry {
@@ -63,6 +63,20 @@ export const TIERS = {
    * winnable — and an ESG bonus (share of the contract value) paid at commissioning for each green term beaten by 10 %.
    */
   flagship: { reputation: 70, tech: 'reclaim' as TechId, chance: 0.15, valueMult: 5, opexMult: 4, esgBonusFrac: 0.1 },
+  /**
+   * Integrated megaproject (the "final boss", plating only): a strong main rinse plus segregated chrome, electroless-nickel
+   * and nickel-rinse drains; zero liquid discharge, a wet-cake tonnage cap that needs a dryer, a nickel recovery target that
+   * needs electrowinning, and full redundancy. Opens once every technology it needs is researched.
+   */
+  mega: {
+    reputation: 80,
+    techs: ['electrowinning', 'evaporator', 'ro', 'uf', 'reclaim', 'dryer', 'sulfide'] as TechId[],
+    chance: 0.25,
+    valueMult: 6,
+    opexMult: 5,
+    /** the targets are the reference design's own figures with this slack */
+    slack: 1.25,
+  },
 } as const;
 
 /** flagship targets = the reference design's own figure × this slack (GAME MODEL) */
@@ -73,6 +87,7 @@ export function eligibleTiers(reputation: number, tech: readonly TechId[]): Clie
   if (reputation >= TIERS.medium.reputation) t.push('medium');
   if (reputation >= TIERS.mnc.reputation && tech.includes(TIERS.mnc.tech)) t.push('mnc');
   if (reputation >= TIERS.flagship.reputation && tech.includes(TIERS.flagship.tech)) t.push('flagship');
+  if (reputation >= TIERS.mega.reputation && TIERS.mega.techs.every((x) => tech.includes(x))) t.push('mega');
   return t;
 }
 
@@ -99,6 +114,19 @@ export interface TierDesign {
  * reuseMin = split × UF recovery (0.92) × RO recovery (0.75) × 0.95 margin, rounded down to 5 %.
  */
 export function tierDesign(tier: Exclude<ClientTier, 'basic'>, industry: IndustryId, s: Stream, tech: readonly TechId[], seed: number): TierDesign {
+  if (tier === 'mega') {
+    // the stream carries the megaproject overlay (segregated cr / en / ni drains); targets from the reference design
+    const graph = withStandby(megaGraph(s));
+    const ref = simulate(graph, s);
+    const k = TIERS.mega.slack;
+    const requirements: Requirements = {
+      zld: true,
+      standby: true,
+      cakeWetMax_kgd: Math.ceil((cakeWet_kgd(ref) * k) / 5) * 5,
+      metalRecoveryMin_kgd: Math.floor((metalRecovered_kgd(ref) / k) * 10) / 10,
+    };
+    return { tier, graph, ref, requirements, standard: 'A' };
+  }
   if (tier === 'flagship') {
     // with the evaporator researched, any industry's flagship can be zero liquid discharge (nothing to beat Std A with);
     // otherwise the MNC water design. Green targets are set from what the chosen design achieves; offered as an MNC job
@@ -175,7 +203,7 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
   const pool: IndustryId[] = reputation >= 40 ? ['plating', 'food', 'semiconductor'] : ['plating', 'food'];
   const drawn = rng.pick(pool);
   const forcedVariant = opts.force?.variantId ? VARIANTS.find((v) => v.id === opts.force!.variantId) : undefined;
-  const industry: IndustryId = forcedVariant?.industry ?? opts.force?.industry ?? drawn;
+  const industry: IndustryId = forcedVariant?.industry ?? (opts.force?.tier === 'mega' ? 'plating' : undefined) ?? opts.force?.industry ?? drawn;
   const t = INDUSTRIES[industry];
   // project size grows with reputation: a new consultancy only gets the smaller jobs
   const sizeFrac = Math.min(1, 0.35 + Math.max(0, reputation) / 100);
@@ -190,10 +218,13 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
   else if (opts.tech && !forcedVariant) {
     const tr = createRng(seed * 104729 + 31);
     const open = eligibleTiers(reputation, opts.tech);
-    if (open.includes('flagship') && createRng(seed * 104729 + 61).chance(TIERS.flagship.chance)) tier = 'flagship';
+    if (open.includes('mega') && industry === 'plating' && createRng(seed * 104729 + 131).chance(TIERS.mega.chance)) tier = 'mega';
+    else if (open.includes('flagship') && createRng(seed * 104729 + 61).chance(TIERS.flagship.chance)) tier = 'flagship';
     else if (open.includes('mnc') && tr.chance(TIERS.mnc.chance)) tier = 'mnc';
     else if (open.includes('medium') && tr.chance(TIERS.medium.chance)) tier = 'medium';
   }
+
+  if (tier === 'mega') ww.stream = megaOverlay(ww.stream, createRng(seed * 7919 + 53));
 
   // tough job: an independent RNG stream, so the base enquiry for this seed is unchanged
   let variant: ClientVariant | undefined = forcedVariant;

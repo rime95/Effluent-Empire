@@ -18,10 +18,14 @@ export type TrainSpec = { kind: UnitType; params: Params }[];
  * one to a disposal point; each sludge unit's filtrate / supernatant / condensate returns to the head of the works (u0).
  */
 export function sludgeLineGraph(train: TrainSpec, fromIdx: number, sludge: TrainSpec): ProcessGraph {
-  const g = linearGraph(train);
+  return addSludgeLine(linearGraph(train), `u${fromIdx}`, sludge);
+}
+
+/** Add a sludge line to any graph: sludge port of node `fromId` → sludge units in series → disposal; returns to u0. */
+export function addSludgeLine(g: ProcessGraph, fromId: string, sludge: TrainSpec): ProcessGraph {
   sludge.forEach((s, i) => g.nodes.push({ id: `s${i}`, kind: s.kind, tag: `${CATALOGUE[s.kind].tagPrefix}-S${i + 1}`, params: s.params }));
   g.nodes.push({ id: 'sd', kind: 'disposal', tag: 'SD-01', params: {} });
-  const ids = [`u${fromIdx}`, ...sludge.map((_, i) => `s${i}`), 'sd'];
+  const ids = [fromId, ...sludge.map((_, i) => `s${i}`), 'sd'];
   for (let i = 0; i < ids.length - 1; i++) g.edges.push({ id: `sl${i}`, from: ids[i], to: ids[i + 1], fromPort: 'sludge' });
   sludge.forEach((_, i) => g.edges.push({ id: `rt${i}`, from: `s${i}`, to: 'u0' }));
   return g;
@@ -161,7 +165,11 @@ export interface SideTrain {
  * → joins the main train at `join`. Ref: knowledge/processes/segregated_streams.md
  */
 export function segregatedGraph(train: TrainSpec, sides: SideTrain[]): ProcessGraph {
-  const g = linearGraph(train);
+  return addSides(linearGraph(train), train, sides);
+}
+
+/** Add segregated inlets and their pretreatment to a graph whose main train (`train`, nodes u0…) is already laid out. */
+export function addSides(g: ProcessGraph, train: TrainSpec, sides: SideTrain[]): ProcessGraph {
   for (const sd of sides) {
     const inId = `in_${sd.id}`;
     g.nodes.push({ id: inId, kind: 'influent', tag: `RAW-${sd.tag}`, params: { source: sd.id } });

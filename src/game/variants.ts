@@ -8,7 +8,7 @@ import { Stream, emptyStream, totalQ } from '../simulation/core/stream';
 import { setCbForPH } from '../simulation/chemistry/acidBase';
 import { MW } from '../simulation/core/units';
 import { IndustryId } from './industries';
-import { TrainSpec, dafFoodTrain, foodTrain, metalTrain, reuseGraph, segregatedGraph, sludgeLineGraph, sulfideMetalTrain, zldGraph } from './referenceDesigns';
+import { addSides, addSludgeLine, TrainSpec, dafFoodTrain, foodTrain, metalTrain, reuseGraph, segregatedGraph, sludgeLineGraph, sulfideMetalTrain, zldGraph } from './referenceDesigns';
 import { ProcessGraph, SimResult, linearGraph } from '../simulation/treatment/graph';
 import { Requirements } from './requirements';
 import { defaultParams } from '../simulation/treatment/catalogue';
@@ -264,6 +264,49 @@ export const VARIANTS: ClientVariant[] = [
     standard: 'B',
   },
 ];
+
+/**
+ * Integrated megaproject ("final boss", client_tiers.md): one plating campus with every problem at once — a strong,
+ * salty main rinse plus segregated chrome, electroless-nickel and nickel-rinse drains (the same overlays as those
+ * clients, applied in turn so each takes its share of the flow). The reference design treats each stream on its own,
+ * combines them, then goes to zero liquid discharge, with a full sludge line to a dryer.
+ */
+export function megaOverlay(s: Stream, rng: Rng): Stream {
+  s.tds = (s.tds ?? 0) * rng.range(1.5, 2.5);
+  s.dissolved = { ...s.dissolved, Ni: rng.range(40, 80), Cu: rng.range(25, 50), Zn: rng.range(10, 25) };
+  const sides: NonNullable<Stream['side']> = [];
+  for (const id of ['chromeSegregated', 'enSegregated', 'niRinseRecovery']) {
+    s = VARIANTS.find((v) => v.id === id)!.overlay(s, rng);
+    sides.push(...(s.side ?? []));
+    s.side = [];
+  }
+  s.side = sides;
+  return s;
+}
+
+export function megaGraph(s: Stream): ProcessGraph {
+  const Q = totalQ(s);
+  const train = metalTrain(Q, false, s);
+  const g = zldGraph(train, Q);
+  const cr = side(s, 'cr'), en = side(s, 'en'), ni = side(s, 'ni');
+  const nahs = Math.min(500, Math.ceil((((en.complexed?.Ni ?? 0) + en.dissolved.Ni) / MW.Ni) * 56.06 * 1.3));
+  const area = Math.min(1000, Math.ceil(((1 / 0.15 - 1) * (ni.Q / 86400)) / 1e-5));
+  const iL = 2 * 96485 * 1e-5 * (ni.dissolved.Ni / MW.Ni);
+  addSides(g, train, [
+    { id: 'cr', tag: 'CR', join: 'eq', train: [ru('crReduction', cr.Q, { volume: Math.max(1, Math.ceil(cr.Q / 24 / 2)) })] },
+    { id: 'en', tag: 'EN', join: 'coagulation', train: [ru('precipitation', en.Q, { targetPH: 9 }), ru('sulfide', en.Q, { dose: nahs, volume: Math.max(0.5, Math.ceil(en.Q / 48 * 2) / 2) })] },
+    { id: 'ni', tag: 'NI', join: 'eq', train: [ru('electrowinning', ni.Q, { area, j: Math.max(5, Math.round((0.7 * iL) / 5) * 5) })] },
+  ]);
+  // sludge line sized on the dry-solids load (as the disposal-cap client): thickener ~15 kg/m²·d, press 3 cycles/d, dryer to 80 % DS
+  const metals = s.dissolved.Ni + s.dissolved.Cu + s.dissolved.Zn;
+  const dryKgD = (Q * (2.5 * metals + 150)) / 1000;
+  const clar = train.findIndex((x) => x.kind === 'clarifier');
+  return addSludgeLine(g, `u${clar}`, [
+    ru('thickener', Q, { area: Math.max(2, Math.ceil(dryKgD / 15)) }),
+    ru('filterPress', Q, { volume: Math.max(0.2, Math.ceil((dryKgD / 0.25 / 1000 / 3) * 1.6 * 20) / 20), cycles: 3, conditioning: 'polymer' }),
+    ru('dryer', Q, { targetDS: 80 }),
+  ]);
+}
 
 /** a side stream of a variant's influent */
 function side(s: Stream, id: string): Stream {

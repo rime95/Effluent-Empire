@@ -63,3 +63,12 @@ All multipliers are GAME MODEL, `verify:`. When eligible, 15 % of new enquiries 
   - The bonus is paid with the retention at a passed commissioning and booked as "ESG bonus".
   - Beating every green term adds +5 reputation.
 - **Names.** The multinational list, labelled "Flagship ESG project".
+
+## Integrated megaproject — the "final boss" tier (added 2026-11-23)
+User request: the highest tier needs almost every technology — high strength, several streams, the strictest terms.
+- **Who / when:** plating only; reputation ≥ 80 and electrowinning, evaporator, RO, UF, reclaim, dryer and sulfide all researched. 25 % of eligible plating enquiries (own RNG stream, seed·104729+131; overlay seed·7919+53). Names from the multinational list. Value ×6, OPEX allowance ×5 (flagship ×5 / ×4).
+- **Wastewater (`megaOverlay`):** main rinse Ni 40–80, Cu 25–50, Zn 10–25 mg/L, TDS ×1.5–2.5; then the chrome, electroless-nickel and nickel-rinse overlays of those clients are applied in turn (each takes its share of the remaining flow) → three segregated drains `cr`, `en`, `ni`.
+- **Reference design (`megaGraph`):** Cr(VI) reduction on the chrome drain; precipitation + NaHS on the EN drain (joins at coagulation); low-current-density electrowinning on the nickel rinse (85 % design recovery); main metal train → UF → RO → evaporator (ZLD); thickener → filter press → dryer on the clarifier sludge. Every pump/blower duty/standby.
+- **Terms (from the reference × slack 1.25, GAME MODEL):** ZLD; standby; **wet sludge cake ≤ 1.25 × reference** (`cakeWetMax_kgd`, solid disposal only — evaporator concentrate haulage is excluded, because it dominates the disposal cost and would hide the dryer); **metal recovered by electrowinning ≥ reference ÷ 1.25** (`metalRecoveryMin_kgd`).
+- **Each unit binds (tested):** without the dryer the cake is ~2.5× the cap; without electrowinning the recovery term fails. The EN sulfide step is not forced by a term under ZLD (complexed Ni would end in the hauled concentrate) — it is the cheaper route, not a requirement.
+- No ESG bonus (that stays with the flagship).

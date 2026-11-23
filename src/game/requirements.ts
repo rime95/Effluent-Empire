@@ -23,6 +23,22 @@ export interface Requirements {
   energyMax_kWhm3?: number;
   /** sludge production cap, kg dry solids per m³ treated */
   sludgeMax_kgm3?: number;
+  /** minimum metal recovered as saleable cathode by electrowinning, kg/d (megaproject clients) */
+  metalRecoveryMin_kgd?: number;
+  /** maximum wet sludge cake hauled, kg/d (solid disposal points only; megaproject clients — dry the cake) */
+  cakeWetMax_kgd?: number;
+}
+
+/** wet sludge cake leaving by truck, kg/d (liquid haulage of concentrate excluded) */
+export function cakeWet_kgd(sim: SimResult): number {
+  return sim.disposal.filter((d) => !d.liquid).reduce((a, d) => a + d.wetKgD, 0);
+}
+
+/** metal plated by every electrowinning cell of a design, kg/d */
+export function metalRecovered_kgd(sim: SimResult): number {
+  return Object.values(sim.nodes)
+    .filter((n) => n.node.kind === 'electrowinning')
+    .reduce((a, n) => a + (n.result.calcs?.cu?.value ?? 0) + (n.result.calcs?.ni?.value ?? 0), 0);
 }
 
 /** Green (ESG scorecard) terms: the ones a flagship client pays a bonus for beating. */
@@ -175,6 +191,36 @@ export function evaluateRequirements(sim: SimResult, req?: Requirements): ReqChe
       why: pass
         ? 'Sludge production within the client\'s ESG target.'
         : `${v.toFixed(3)} kg dry solids per m³ against a target of ${req.sludgeMax_kgm3.toFixed(3)} — avoid chemical overdosing (jar-test the coagulant, NaOH instead of lime), run a longer sludge age, or recover metal instead of precipitating it.`,
+    });
+  }
+  if (req.cakeWetMax_kgd !== undefined) {
+    const v = cakeWet_kgd(sim);
+    const pass = v <= req.cakeWetMax_kgd + 1e-6;
+    out.push({
+      id: 'cakeWetMax_kgd',
+      label: 'Sludge cake hauled (wet)',
+      value: v,
+      limit: req.cakeWetMax_kgd,
+      unit: 'kg/d',
+      pass,
+      why: pass
+        ? 'Cake tonnage within the scheduled-waste limit of the contract.'
+        : `${v.toFixed(0)} kg/d of wet sludge leaves by truck against the client's ${req.cakeWetMax_kgd.toFixed(0)} kg/d — thicken, press and dry the cake (dryer to ~80 % DS) to cut the water you haul.`,
+    });
+  }
+  if (req.metalRecoveryMin_kgd !== undefined) {
+    const v = metalRecovered_kgd(sim);
+    const pass = v >= req.metalRecoveryMin_kgd - 1e-9;
+    out.push({
+      id: 'metalRecoveryMin_kgd',
+      label: 'Metal recovered by electrowinning',
+      value: v,
+      limit: req.metalRecoveryMin_kgd,
+      unit: 'kg/d',
+      pass,
+      why: pass
+        ? 'Metal recovery target met: the nickel leaves as saleable cathode, not as hazardous sludge.'
+        : `Only ${v.toFixed(1)} kg/d of metal is plated out against the client's ${req.metalRecoveryMin_kgd.toFixed(1)} kg/d — electrowin the segregated nickel rinse before it is blended (large cathode area, current density near the limiting current).`,
     });
   }
   if (req.standby) {
