@@ -3,7 +3,7 @@ import { fmt } from '../format';
 
 /** Contract requirements beyond the discharge standard, evaluated like regulated parameters. */
 /** display decimals per requirement (energy and sludge intensities are small numbers) */
-const DP: Partial<Record<ReqCheck['id'], number>> = { energyMax_kWhm3: 2, sludgeMax_kgm3: 3, metalRecoveryMin_kgd: 1 };
+const DP: Partial<Record<ReqCheck['id'], number>> = { energyMax_kWhm3: 2, sludgeMax_kgm3: 3, metalRecoveryMin_kgd: 1, zld: 1 };
 
 export function RequirementsTable({ checks, title = 'Contract requirements' }: { checks: ReqCheck[]; title?: string }) {
   if (!checks.length) return null;

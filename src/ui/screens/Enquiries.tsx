@@ -97,24 +97,22 @@ export function Enquiries({ go }: { go: (s: Screen) => void }) {
               {e.declaredSide && Object.keys(e.declaredSide).length > 0 && (
                 <div style={{ fontSize: 12 }}>
                   <div className="muted" style={{ marginBottom: 4 }}>Separate raw streams (declared) — the values above are the main stream:</div>
-                  <table className="data">
-                    <tbody>
-                      {(e.trueStream.side ?? []).map((sd) => {
-                        const x = e.declaredSide![sd.id];
-                        if (!x) return null;
-                        const metal = [x.Ni !== undefined ? `Ni ${fmt(x.Ni, 0)}` : '', x.Cu !== undefined ? `Cu ${fmt(x.Cu, 0)}` : '', x.CrVI !== undefined ? `Cr(VI) ${fmt(x.CrVI, 0)}` : ''].filter(Boolean).join(' · ');
-                        return (
-                          <tr key={sd.id}>
-                            <td>{sd.label}</td>
-                            <td className="num">{fmt(x.Q, x.Q < 10 ? 1 : 0)} m³/d</td>
-                            <td className="num">pH {fmt(x.pH)}</td>
-                            <td className="num">COD {fmt(x.COD, 0)}</td>
-                            <td className="num">{metal}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                  {(e.trueStream.side ?? []).map((sd) => {
+                    const x = e.declaredSide![sd.id];
+                    if (!x) return null;
+                    const metal = [x.Ni !== undefined ? `Ni ${fmt(x.Ni, 0)}` : '', x.Cu !== undefined ? `Cu ${fmt(x.Cu, 0)}` : '', x.CrVI !== undefined ? `Cr(VI) ${fmt(x.CrVI, 0)}` : ''].filter(Boolean).join(' · ');
+                    return (
+                      <div key={sd.id} style={{ padding: '4px 0', borderTop: '1px solid var(--chrome-line)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                          <span>{sd.label}</span>
+                          <span className="mono">{fmt(x.Q, x.Q < 10 ? 1 : 0)} m³/d</span>
+                        </div>
+                        <div className="mono muted" style={{ fontSize: 11 }}>
+                          pH {fmt(x.pH)} · COD {fmt(x.COD, 0)}{metal ? ` · ${metal}` : ''} mg/L
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               <hr style={{ border: 'none', borderTop: '1px solid var(--chrome-line)', margin: 0 }} />

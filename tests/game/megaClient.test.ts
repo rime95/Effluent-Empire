@@ -17,6 +17,8 @@ describe('integrated megaproject (final boss tier)', () => {
       const e = generateEnquiry(seed, 0, 90, { tech: TECH_ORDER, force: { tier: 'mega' } });
       expect(e.tier).toBe('mega');
       expect(e.industry).toBe('plating');
+      expect(e.deadlineWeeks).toBe(24);
+      expect(e.difficult).toBe(false);
       expect(e.trueStream.side?.map((s) => s.id).sort()).toEqual(['cr', 'en', 'ni']);
       const r = e.requirements!;
       expect(r.zld && r.standby).toBe(true);

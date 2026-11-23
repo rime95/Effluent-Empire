@@ -76,6 +76,8 @@ export const TIERS = {
     opexMult: 5,
     /** the targets are the reference design's own figures with this slack */
     slack: 1.25,
+    /** design-and-build period, weeks (no "demanding client" squeeze) */
+    deadlineWeeks: 24,
   },
 } as const;
 
@@ -224,7 +226,9 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
     else if (open.includes('medium') && tr.chance(TIERS.medium.chance)) tier = 'medium';
   }
 
-  if (tier === 'mega') ww.stream = megaOverlay(ww.stream, createRng(seed * 7919 + 53));
+  // the final boss is a long, well-funded project: never a squeezed "demanding client" (deadline set below)
+  const isMega = tier === 'mega';
+  if (isMega) ww.stream = megaOverlay(ww.stream, createRng(seed * 7919 + 53));
 
   // tough job: an independent RNG stream, so the base enquiry for this seed is unchanged
   let variant: ClientVariant | undefined = forcedVariant;
@@ -262,7 +266,7 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
   const markup = rng.range(1.35, 1.6);
   const repFactor = 1 + Math.min(0.15, Math.max(-0.15, reputation / 600));
   const tierMult = tier === 'basic' ? { valueMult: 1, opexMult: 1 } : TIERS[tier];
-  const contractValue = Math.round((ref.capex * markup * (standard === 'A' ? 1.25 : 1) * repFactor * (difficult ? 0.88 : 1) * (variant ? VARIANT_PREMIUM : 1) * tierMult.valueMult) / 1000) * 1000;
+  const contractValue = Math.round((ref.capex * markup * (standard === 'A' ? 1.25 : 1) * repFactor * (difficult && !isMega ? 0.88 : 1) * (variant ? VARIANT_PREMIUM : 1) * tierMult.valueMult) / 1000) * 1000;
   const names = tier === 'basic' ? t.names : REAL_CLIENTS[tier][industry];
 
   return {
@@ -274,8 +278,8 @@ export function generateEnquiry(seed: number, week: number, reputation: number, 
     contractValue,
     // generous vs the lean reference (instruments, standby, safety margins, a bigger sludge line all cost money): × 2.5–3.5 + RM 150/d (GAME MODEL)
     opexLimitRMd: Math.round((ref.opexRMd * rng.range(2.5, 3.5) + 150) * tierMult.opexMult),
-    deadlineWeeks: difficult ? rng.int(9, 12) : rng.int(13, 18),
-    difficult,
+    deadlineWeeks: ((d) => (isMega ? TIERS.mega.deadlineWeeks : d))(difficult ? rng.int(9, 12) : rng.int(13, 18)),
+    difficult: difficult && !isMega,
     declared: declaredDatasheet(ww.stream, rng, ww.hidden.undeclaredZn, ww.hidden.undeclaredCrVI),
     trueStream: ww.stream,
     hidden: ww.hidden,
