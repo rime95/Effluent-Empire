@@ -66,6 +66,21 @@ Process review (wwtp-process-engineer). Nothing blocking.
 8. LOW The dynamic EQ pump target is total plant inflow. An EQ that sits only on a side stream (a player design) would get the wrong target. Fix: use that EQ's own steady inflow scaled by today's growth (this changes legacy dynamics for plants with filtrate returns, so it needs its own test pass).
 9. LOW The Studio stream table and commissioning report list the main inlet only; side inlets appear only through their own pipes.
 
+## E. Stronger influents and costing (2026-11-23)
+Process review (wwtp-process-engineer).
+1. HIGH Reference trains have no sludge line (thickener + filter press), so tender prices never include dewatering CAPEX (~RM 0.5–1 M+ for ~1 t DS/d). Fix: sludgeLineGraph on every REFERENCE train, thickener 20 (chemical) / 30 (bio) kg/m²·d, press volume = dry kg/d ÷ (cycles × ~300 kg DS/m³).
+2. HIGH Sludge disposal prices are well below Malaysian scheduled-waste rates: metal wet RM 0.18/kg vs ~RM 0.8–1.5/kg (SW204 incl. transport); unrouted metal dry RM 1.2/kg DS; bio sludge 2–3× low. Fix: metal wet ~1.0–1.2, metal dry ~4.5/kg DS; other wet ~0.15–0.25, other dry ~1.0/kg DS (verify against quotes).
+3. MED chemicalSystemCapex sizes on 100 %-active kg/d; supplied strengths (FeCl₃ ~40 %, NaOH 32–50 %, NaHS ~40 %) make tanks 2–2.5× larger → add supplyStrength per chemical.
+4. MED Storage costed per unit, not per chemical: one plant-wide bulk tank per chemical + ~RM 10k per dosing point.
+5. MED RM 8k minimum too low (dosing skid ~RM 15–25k; polymer make-up unit RM 30–60k).
+6. LOW Double-counting: AS alkali day tank RM 35k and the standby-instrument pump overlap chemicalSystemCapex.
+7. LOW Non-dosed consumables (GAC, LPG, CIP) also attract dosing CAPEX → dosed:false flag.
+8. LOW Fluoride not modelled (semiconductor HF: 50–500 mg/L; EQIE A 2 / B 5, verify) — later phase.
+9. LOW Chemical clarifier has no solids-loading check; scraper/underflow cost not scaled with dry kg/d.
+10. LOW Semiconductor reference feeds pH 9.5 water straight to aeration — insert neutralisation to 7.5 first.
+11. LOW DAF-train ferric dose computed on the raw stream, not jar-tested at the coagulation inlet; HRT floor 3.5 vs 3 d.
+12. LOW Ranges: plating TDS 900 low (1,000–5,000 typical, matters for RO/ZLD); food N all as NH₄ (no organic-N pool, conservative — document); semiconductor Cu 10–40 is segregated-CMP-like, combined fab effluent is 1–10 — document as the "stronger" setting.
+
 ## Done
 - 2026-11-23, user decision: random equipment breakdowns and process incidents are OFF (`OM.randomFailures = false`) — they drove reputation to −36 and made O&M unplayable. Loaded saves drop any active breakdown/incident. The machinery (BREAKDOWNS, incidents.ts, SCADA field actions) is kept for a possible opt-in setting. Note: the maintenance budget now only sets equipment condition, which no longer triggers anything.
 - B1 (2026-11-23): base reference trains could not reach Standard A, so early Std A jobs (e.g. food O&G 1 mg/L) were unwinnable with the basic kit. Plain jobs now offer Standard A only where `REFERENCE_STD_A` (basic units + polishing / nitrification) meets it on the feed — about 100 % semiconductor, 60 % plating, 40 % food feeds — and are priced on that design; the rest are Standard B. Tier-1 research needs no reputation; low reputation recovers +1 every 2 weeks up to 30 while no plant fails a sample. The Studio has a design-margin check at end-of-contract flow (+30 %) with +8 % load.
