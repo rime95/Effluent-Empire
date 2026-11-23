@@ -291,3 +291,21 @@ describe('electrowinning: rotating cylinder cathode', () => {
     expect(balanced(s, b)).toBe(true);
   });
 });
+
+describe('electrowinning: low current efficiency explains its cause', () => {
+  it('small concentrated stream at the default 10 m² × 200 A/m² → over-current, not "too dilute"', () => {
+    const s0 = emptyStream(0.18);
+    s0.dissolved = { ...s0.dissolved, Ni: 4746 };
+    s0.SO4T = (4746 / MW.Ni / 1000) * 1.1;
+    s0.CT = 1e-3;
+    const s = setCbForPH(s0, 4);
+    const r = electrowin(s, { area_m2: 10, currentDensity: 200 });
+    const codes = r.notes.map((n) => n.code);
+    expect(codes).toContain('ew.overcurrent');
+    expect(codes).not.toContain('ew.dilute');
+    // following the advice fixes it
+    const fit = electrowin(s, { area_m2: 10, currentDensity: 5 });
+    expect(fit.calcs.ce.value).toBeGreaterThan(30);
+    expect(fit.calcs.ni.value).toBeCloseTo(r.calcs.ni.value, 3);
+  });
+});

@@ -59,3 +59,19 @@ Reference (tested), same 20 m³/d rinse at 300 mg/L Ni:
 | 95 % | rotating | 44 m² | RM 212/d | RM 0.54 M | 7.0 y |
 
 Rotating cylinders win on capital and footprint up to ~90 %; at 95 % the motor power eats the saving. Concentrated liquors (g/L) are already fast on plates — RCE buys little there.
+
+## Which streams are worth it (added 2026-11-24)
+Metal load decides it: **kg/d = flow (m³/d) × concentration (g/L)**. Sold at RM 70/kg Ni, a cell auto-sized for 85 % (tested, game prices):
+
+| Stream | Ni load | Net income | CAPEX | Payback |
+|---|---|---|---|---|
+| 2 m³/d × 5 g/L (drag-out) | 10 kg/d | RM 580/d | RM 0.15 M | 0.7 y |
+| 20 m³/d × 300 mg/L (segregated rinse) | 6 kg/d | RM 336/d | RM 0.29–0.44 M | 3–3.5 y |
+| 0.18 m³/d × 4.7 g/L (small dump) | 0.85 kg/d | RM 51/d | RM 0.07 M | ~4 y |
+| 5 m³/d × 300 mg/L | 1.5 kg/d | RM 84/d | RM 0.15–0.21 M | 6–7 y |
+| 1 m³/d × 300 mg/L | 0.3 kg/d | RM 17/d | RM 0.1 M | 18 y |
+| 100 m³/d × 50 mg/L (mixed rinse) | 5 kg/d | RM 208/d | RM 1.1 M | 14 y |
+
+Rule of thumb: worth it at **≥ ~1 kg/d of metal and ≥ ~0.3 g/L**. Concentrated, low-flow liquors (drag-out, IX eluate) pay fastest; mixed rinses at tens of mg/L need huge cathodes and never pay. Savings on hydroxide sludge and precipitation chemicals come on top.
+
+**Low current efficiency warning:** `ew.overcurrent` when the cell captures ≥ 70 % of the plateable metal but runs > 3× the current needed (small concentrated stream at default settings — lower j or Auto-size); otherwise `ew.dilute` (mass-transfer limited — lower j, add area, rotating cylinder).

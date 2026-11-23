@@ -55,6 +55,9 @@ export function ewAutoSize(s: Stream, recovery: number, cathode?: string): { are
   return { area, j };
 }
 
+/** nickel can plate (pH gate) */
+const m_niPlateable = (s: Stream) => s.pH >= 3;
+
 export function electrowin(s: Stream, p: { area_m2: number; currentDensity: number; cathode?: string }): ProcessResult {
   const notes: Note[] = [];
   const cat = CATHODES[cathodeOf(p.cathode)];
@@ -88,7 +91,19 @@ export function electrowin(s: Stream, p: { area_m2: number; currentDensity: numb
   const kgTotal = plated.Cu + plated.Ni;
   const ce = I > 0 ? (((plated.Cu * 1000) / 86400 / MW.Cu + (plated.Ni * 1000) / 86400 / MW.Ni) * 2 * EW.F) / I : 0;
   const credit = (plated.Cu * METAL_VALUE_RMkg.Cu + plated.Ni * METAL_VALUE_RMkg.Ni) * cat.valueFactor;
-  if (kgTotal > 0 && ce < 0.3) notes.push({ level: 'warn', code: 'ew.dilute', text: `Current efficiency only ${(ce * 100).toFixed(0)} %: the liquor is too dilute for plate cathodes (mass-transfer limited) — feed a concentrated stream (eluate, drag-out, > 1 g/L) or lower the current density.` });
+  // current the plated metal actually needed (at the best current efficiency): if the cell is driven far above it, the
+  // problem is excess current, not a dilute liquor
+  const needA = ((((plated.Cu * 1000) / 86400 / MW.Cu + (plated.Ni * 1000) / 86400 / MW.Ni) * 2 * EW.F) / EW.ceMax);
+  if (kgTotal > 0 && ce < 0.3) {
+    // load-limited (most of the plateable metal is captured) vs mass-transfer-limited (much of it passes through)
+    const feedKg = (s.Q * (s.dissolved.Cu + (m_niPlateable(s) ? s.dissolved.Ni : 0))) / 1000;
+    if (I > 3 * needA && kgTotal >= 0.7 * feedKg) {
+      const jFit = Math.max(5, Math.ceil((needA * 1.3) / A / 5) * 5);
+      notes.push({ level: 'warn', code: 'ew.overcurrent', text: `Current efficiency only ${(ce * 100).toFixed(0)} %: the cell runs ${I.toFixed(0)} A but plating ${kgTotal.toFixed(2)} kg/d of metal needs only about ${needA.toFixed(0)} A — the rest makes hydrogen and wastes power. Lower the current density to about ${jFit} A/m² (or press Auto-size).` });
+    } else {
+      notes.push({ level: 'warn', code: 'ew.dilute', text: `Current efficiency only ${(ce * 100).toFixed(0)} %: the liquor is too dilute for this cathode (mass-transfer limited) — lower the current density, add cathode area, use a rotating cylinder cathode, or feed a more concentrated stream (eluate, drag-out).` });
+    }
+  }
   if ((s.dissolved.Cu + s.dissolved.Ni) < 100) notes.push({ level: 'info', code: 'ew.feed', text: 'Electrowinning recovers metal from concentrated liquors (IX eluate, drag-out). It is not a polishing step — the spent electrolyte goes back to treatment.' });
   if ((s.complexed?.Ni ?? 0) + (s.complexed?.Cu ?? 0) > 1) notes.push({ level: 'info', code: 'ew.complexed', text: 'Complexed metal is not modelled as plateable (it plates poorly from most complexing baths).' });
   return result(equilibrate(out), {
