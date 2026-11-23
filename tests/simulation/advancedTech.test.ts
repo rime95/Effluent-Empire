@@ -263,3 +263,31 @@ describe('electrowinning auto-size (dilute nickel rinse)', () => {
     });
   }
 });
+
+describe('electrowinning: rotating cylinder cathode', () => {
+  const rinse = () => {
+    const s = emptyStream(20);
+    s.dissolved = { ...s.dissolved, Ni: 300 };
+    s.SO4T = (300 / MW.Ni / 1000) * 1.1;
+    s.CT = 1e-3;
+    return setCbForPH(s, 4.5);
+  };
+  it('k_m ×10: same recovery on about a tenth of the plate area', () => {
+    const s = rinse();
+    const plate = ewAutoSize(s, 0.85, 'plate');
+    const rce = ewAutoSize(s, 0.85, 'rce');
+    expect(rce.area).toBeLessThan(plate.area / 9);
+    const r = electrowin(s, { area_m2: rce.area, currentDensity: rce.j, cathode: 'rce' });
+    expect(1 - r.out.dissolved.Ni / 300).toBeGreaterThan(0.84);
+    expect(limitingCurrent('Ni', 300, 'rce')).toBeCloseTo(10 * limitingCurrent('Ni', 300), 6);
+  });
+  it('powder sells at 90 % of cathode price; motors add energy; mass balance closes', () => {
+    const s = rinse();
+    const a = electrowin(s, { area_m2: 100, currentDensity: 15 });
+    const b = electrowin(s, { area_m2: 100, currentDensity: 15, cathode: 'rce' });
+    const kgA = a.calcs.ni.value, kgB = b.calcs.ni.value;
+    expect(b.calcs.credit.value / kgB).toBeCloseTo((0.9 * a.calcs.credit.value) / kgA, 6);
+    expect(b.energy_kWhd).toBeGreaterThan(600); // 6 kWh/d per m² of drives
+    expect(balanced(s, b)).toBe(true);
+  });
+});

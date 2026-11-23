@@ -1056,7 +1056,7 @@ function UnitInspector({ node, editable, sim, onParam, onInst }: { node: PNode; 
                 className="btn sm"
                 disabled={!editable}
                 onClick={() => {
-                  const z = ewAutoSize(ns.inlet!, R);
+                  const z = ewAutoSize(ns.inlet!, R, String(node.params.cathode ?? 'plate'));
                   onParam(node.id, 'area', z.area);
                   onParam(node.id, 'j', z.j);
                 }}

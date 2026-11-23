@@ -21,7 +21,7 @@ Real plants recover nickel from segregated bright-nickel rinses at a few hundred
   - **Feed:** a plating site whose bright-nickel rinse drains separately, 6–15 % of the flow, Ni 200–400 mg/L as sulfate, pH 4–5.
   - **Reference design:** EW sized for 85 % recovery at 0.7 × i_L, with the spent rinse sent to the main EQ.
   - **Alternative:** blending the rinse in and precipitating everything is allowed; it just sells nothing and makes more sludge.
-- **Still a GAME MODEL simplification:** plate cathodes only. Real dilute-nickel cells often use high-surface cathodes (carbon felt, rotating cylinder) with far higher k_m·a. Plating acidifies the rinse (2 H⁺ per Ni); the Ni pH gate uses the feed pH (held finding).
+- **Still a GAME MODEL simplification:** (plate-only until 2026-11-24, see "High-surface cathode"). Plating acidifies the rinse (2 H⁺ per Ni); the Ni pH gate uses the feed pH (held finding).
 
 ## Auto-size and readouts (added 2026-11-24)
 User feedback: the cell was hard to operate. The Studio inspector now has **Auto-size 80 / 90 / 95 %** buttons (`ewAutoSize`):
@@ -39,3 +39,23 @@ Reference (tested), 20 m³/d rinse at 300 mg/L Ni, pH 4.5:
 | 95 % | 440 m² | 15 mg/L | 5.7 kg/d | RM 337/d | RM 0.86 M | 7.0 y |
 
 Payback excludes the saved hydroxide sludge and precipitation chemicals, which improve it further. The spent rinse still goes to the main metal train; electrowinning is a recovery step, not the final polish.
+
+## High-surface cathode: rotating cylinder (added 2026-11-24)
+Parameter **Cathode type** (`cathode`: `plate` | `rce`). The rotating cylinder electrode thins the diffusion layer by spinning the cathode, raising the mass-transfer coefficient; it is the usual compact cell for dilute rinses. GAME MODEL values, all `verify:`:
+- k_m = 1×10⁻⁴ m/s (plate 1×10⁻⁵), so area for recovery R is a tenth: A = (1/(1−R) − 1)·Q/k_m; limiting current density 10× higher.
+- Drive power 6 kWh/d per m² of cathode.
+- Metal comes off as powder/flake: sold at 90 % of the cathode price.
+- CAPEX of the cell part RM 200k at 10 m² (plate RM 80k), six-tenths rule; rectifier and fixed part unchanged.
+
+Reference (tested), same 20 m³/d rinse at 300 mg/L Ni:
+
+| Target | Cathode | Area | Net income | CAPEX | Payback |
+|---|---|---|---|---|---|
+| 80 % | plate | 93 m² | RM 321/d | RM 0.36 M | 3.1 y |
+| 80 % | rotating | 9.5 m² | RM 265/d | RM 0.25 M | 2.5 y |
+| 90 % | plate | 209 m² | RM 347/d | RM 0.56 M | 4.4 y |
+| 90 % | rotating | 21 m² | RM 266/d | RM 0.37 M | 3.8 y |
+| 95 % | plate | 440 m² | RM 337/d | RM 0.86 M | 7.0 y |
+| 95 % | rotating | 44 m² | RM 212/d | RM 0.54 M | 7.0 y |
+
+Rotating cylinders win on capital and footprint up to ~90 %; at 95 % the motor power eats the saving. Concentrated liquors (g/L) are already fast on plates — RCE buys little there.

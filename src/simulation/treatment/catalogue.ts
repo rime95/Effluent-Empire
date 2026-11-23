@@ -181,11 +181,22 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     summary: 'DC current plates copper (then nickel) out of a liquor as saleable cathode metal. Concentrated liquor (IX eluate, drag-out) at high current density; a dilute segregated rinse (a few hundred mg/L) at low current density on a large cathode area. Spent electrolyte goes back to treatment.',
     params: [
       { key: 'area', label: 'Cathode area', unit: 'm²', min: 0.5, max: 1000, step: 0.5, default: () => 10, help: 'Recovery is mass-transfer limited: a well-mixed cell leaves C_in/(1 + k_m·A/Q). For 80 % recovery A ≈ 4·Q/k_m (≈ 4.6 m² per m³/d with plate cathodes).' },
-      { key: 'j', label: 'Current density', unit: 'A/m²', min: 5, max: 600, step: 5, default: () => 200, help: 'Keep it near the limiting current density i_L = 2·F·k_m·C (≈ 10 A/m² at 300 mg/L Ni, ≈ 330 A/m² at 10 g/L); above it the extra current only makes hydrogen. Plate cathodes 150–300 A/m² in g/L liquors, 5–20 A/m² for dilute rinses.' },
+      { key: 'j', label: 'Current density', unit: 'A/m²', min: 5, max: 600, step: 5, default: () => 200, help: 'Keep it near the limiting current density i_L = 2·F·k_m·C (plate: ≈ 10 A/m² at 300 mg/L Ni, ≈ 330 A/m² at 10 g/L; rotating cylinder: 10× that); above it the extra current only makes hydrogen. Plate cathodes 150–300 A/m² in g/L liquors, 5–20 A/m² for dilute rinses.' },
+      {
+        key: 'cathode',
+        label: 'Cathode type',
+        unit: '',
+        options: [
+          { value: 'plate', label: 'Plate cathodes (sheet metal, full price)' },
+          { value: 'rce', label: 'Rotating cylinder (dilute rinses: ~1/10 the area)' },
+        ],
+        default: () => 'plate',
+        help: 'Rotating cylinder: the spinning cathode gives ~10× the mass transfer, so a dilute rinse needs about a tenth of the cathode area. It costs more per m² and needs motor power, and the metal comes off as powder (sold at ~90 % of the cathode price).',
+      },
     ],
-    run: (s, p) => electrowin(s, { area_m2: n(p, 'area'), currentDensity: n(p, 'j') }),
-    // cells, cathodes and anodes scale with cathode area; the rectifier with the current (GAME MODEL, verify)
-    capex: (p) => scale(80_000, n(p, 'area'), 10) + scale(40_000, n(p, 'area') * n(p, 'j'), 2000) + 40_000,
+    run: (s, p) => electrowin(s, { area_m2: n(p, 'area'), currentDensity: n(p, 'j'), cathode: String(p.cathode ?? 'plate') }),
+    // cells, cathodes and anodes scale with cathode area (RCE ×2.5 per m²: drives, seals, scrapers); the rectifier with the current (GAME MODEL, verify)
+    capex: (p) => scale(p.cathode === 'rce' ? 200_000 : 80_000, n(p, 'area'), 10) + scale(40_000, n(p, 'area') * n(p, 'j'), 2000) + 40_000,
     footprint: (p) => n(p, 'area') / 2 + 12,
   },
   aop: {
