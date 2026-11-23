@@ -22,3 +22,20 @@ Real plants recover nickel from segregated bright-nickel rinses at a few hundred
   - **Reference design:** EW sized for 85 % recovery at 0.7 × i_L, with the spent rinse sent to the main EQ.
   - **Alternative:** blending the rinse in and precipitating everything is allowed; it just sells nothing and makes more sludge.
 - **Still a GAME MODEL simplification:** plate cathodes only. Real dilute-nickel cells often use high-surface cathodes (carbon felt, rotating cylinder) with far higher k_m·a. Plating acidifies the rinse (2 H⁺ per Ni); the Ni pH gate uses the feed pH (held finding).
+
+## Auto-size and readouts (added 2026-11-24)
+User feedback: the cell was hard to operate. The Studio inspector now has **Auto-size 80 / 90 / 95 %** buttons (`ewAutoSize`):
+- area A = (1/(1−R) − 1)·Q/k_m (well-mixed cell, rounded up to 0.5 m²);
+- current density j = metal equivalents to plate × n·F ÷ CE_max ÷ A × 1.3 margin, at least 5 A/m² (in dilute rinses this sits below the limiting current density, so little current goes to hydrogen).
+New calculated readouts: nickel recovery %, nickel left in the liquor, limiting current density of the feed. The plated metal is sold automatically: the credit "Recovered metal sales" is netted from the plant OPEX (RM 70/kg Ni, RM 35/kg Cu, `verify:`).
+
+Reference (tested), 20 m³/d rinse at 300 mg/L Ni, pH 4.5:
+
+| Target | Area | Ni out | Ni sold | Net income | CAPEX | Simple payback |
+|---|---|---|---|---|---|---|
+| 80 % | 93 m² | 60 mg/L | 4.8 kg/d | RM 321/d | RM 0.36 M | 3.1 y |
+| 85 % | 132 m² | 45 mg/L | 5.1 kg/d | RM 336/d | RM 0.44 M | 3.5 y |
+| 90 % | 209 m² | 30 mg/L | 5.4 kg/d | RM 347/d | RM 0.56 M | 4.4 y |
+| 95 % | 440 m² | 15 mg/L | 5.7 kg/d | RM 337/d | RM 0.86 M | 7.0 y |
+
+Payback excludes the saved hydroxide sludge and precipitation chemicals, which improve it further. The spent rinse still goes to the main metal train; electrowinning is a recovery step, not the final polish.

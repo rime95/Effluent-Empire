@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { ewAutoSize } from '../../simulation/chemistry/electrowinning';
 import {
   Background,
   BackgroundVariant,
@@ -1045,6 +1046,28 @@ function UnitInspector({ node, editable, sim, onParam, onInst }: { node: PNode; 
           {d.help && <span className="help">{d.help}</span>}
         </div>
       ))}
+      {node.kind === 'electrowinning' && ns?.inlet && (
+        <div className="field">
+          <label>Auto-size the cell for nickel / copper recovery</label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {[0.8, 0.9, 0.95].map((R) => (
+              <button
+                key={R}
+                className="btn sm"
+                disabled={!editable}
+                onClick={() => {
+                  const z = ewAutoSize(ns.inlet!, R);
+                  onParam(node.id, 'area', z.area);
+                  onParam(node.id, 'j', z.j);
+                }}
+              >
+                {Math.round(R * 100)} %
+              </button>
+            ))}
+          </div>
+          <span className="help">Sets cathode area and current density from the liquor reaching this cell. Higher recovery needs a much bigger cathode (95 % ≈ 5× the area of 80 %). The plated metal is sold automatically — the income shows as a credit in OPEX.</span>
+        </div>
+      )}
       <InstrumentSection node={node} editable={editable} onInst={onInst} />
       {ns && (
         <>

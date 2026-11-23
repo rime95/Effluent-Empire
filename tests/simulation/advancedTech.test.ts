@@ -10,7 +10,7 @@ import { checkMassBalance, components, zeroComponents } from '../../src/simulati
 import { CF_avg, RO, osmoticBar, reverseOsmosis, ultrafilter } from '../../src/simulation/physical/membranes';
 import { ionExchange } from '../../src/simulation/chemistry/ionExchange';
 import { EVAP, evaporate } from '../../src/simulation/physical/evaporator';
-import { EW, electrowin } from '../../src/simulation/chemistry/electrowinning';
+import { EW, electrowin, ewAutoSize, limitingCurrent } from '../../src/simulation/chemistry/electrowinning';
 import { FENTON, fenton } from '../../src/simulation/chemistry/fenton';
 import { UASB, uasb } from '../../src/simulation/biological/uasb';
 import { membraneBioreactor } from '../../src/simulation/biological/mbr';
@@ -236,4 +236,30 @@ describe('water reuse and zero-liquid-discharge clients', () => {
       expect(evaluateRequirements(sim, e.requirements).some((r) => !r.pass)).toBe(true);
     }
   });
+});
+
+describe('electrowinning auto-size (dilute nickel rinse)', () => {
+  const rinse = () => {
+    const s = emptyStream(20);
+    s.dissolved = { ...s.dissolved, Ni: 300 };
+    s.SO4T = (300 / MW.Ni / 1000) * 1.1;
+    s.CT = 1e-3;
+    return setCbForPH(s, 4.5);
+  };
+  it('i_L = 2·F·k_m·C/M ≈ 10 A/m² at 300 mg/L Ni', () => {
+    expect(limitingCurrent('Ni', 300)).toBeCloseTo((2 * 96485 * 1e-5 * 300) / MW.Ni, 6);
+    expect(limitingCurrent('Ni', 300)).toBeGreaterThan(9);
+    expect(limitingCurrent('Ni', 300)).toBeLessThan(11);
+  });
+  for (const R of [0.8, 0.9, 0.95]) {
+    it(`sized for ${R * 100} % gives that recovery (well-mixed cell, A = (1/(1−R) − 1)·Q/k_m)`, () => {
+      const s = rinse();
+      const z = ewAutoSize(s, R);
+      const r = electrowin(s, { area_m2: z.area, currentDensity: z.j });
+      const rec = 1 - r.out.dissolved.Ni / 300;
+      expect(rec).toBeGreaterThan(R - 0.01);
+      expect(rec).toBeLessThan(R + 0.03); // area is rounded up
+      expect(r.calcs.niRec.value).toBeCloseTo(rec * 100, 6);
+    });
+  }
 });

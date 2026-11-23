@@ -20,6 +20,26 @@ import { Note, ProcessResult, result } from '../treatment/types';
 export const METAL_VALUE_RMkg = { Cu: 35, Ni: 70 };
 export const EW = { F: 96485, km: 1e-5, ceMax: 0.92, volts: { Cu: 2.2, Ni: 3.5 } as const };
 
+/** limiting current density for a metal at concentration C (g/m³): i_L = n·F·k_m·C/M, A/m² */
+export function limitingCurrent(m: 'Cu' | 'Ni', C_gm3: number): number {
+  return (2 * EW.F * EW.km * C_gm3) / MW[m];
+}
+
+/**
+ * Auto-size a cell for a target recovery of the plateable metal (well-mixed cell): A = (1/(1−R) − 1)·Q/k_m, and the
+ * current density at 0.7 × the limiting current density of the feed's main metal (enough current for the mass-transfer
+ * rate at the outlet with margin, little wasted on hydrogen). Caps follow the catalogue parameter limits.
+ */
+export function ewAutoSize(s: Stream, recovery: number): { area: number; j: number } {
+  const R = Math.min(0.98, Math.max(0.1, recovery));
+  const Qs = s.Q / 86400;
+  const area = Math.min(1000, Math.max(0.5, Math.ceil((((1 / (1 - R) - 1) * Qs) / EW.km) * 2) / 2));
+  // current needed = metal plated × n·F/M ÷ CE ÷ A, with 30 % margin; never below 5 A/m²
+  const eq = (['Cu', 'Ni'] as const).reduce((a, m) => a + (Qs * s.dissolved[m] * R) / MW[m], 0); // mol/s
+  const j = Math.min(600, Math.max(5, Math.ceil(((eq * 2 * EW.F) / EW.ceMax / area) * 1.3 / 5) * 5));
+  return { area, j };
+}
+
 export function electrowin(s: Stream, p: { area_m2: number; currentDensity: number }): ProcessResult {
   const notes: Note[] = [];
   const A = Math.max(p.area_m2, 0.01);
@@ -63,9 +83,12 @@ export function electrowin(s: Stream, p: { area_m2: number; currentDensity: numb
       I: { label: 'Cell current', value: I, unit: 'A', digits: 0 },
       cu: { label: 'Copper plated', value: plated.Cu, unit: 'kg/d', digits: 2 },
       ni: { label: 'Nickel plated', value: plated.Ni, unit: 'kg/d', digits: 2 },
+      niRec: { label: 'Nickel recovery (in → out)', value: s.dissolved.Ni > 0 ? (plated.Ni * 1000) / 86400 / Math.max(Qs, 1e-12) / s.dissolved.Ni * 100 : 0, unit: '%', digits: 0 },
+      niOut: { label: 'Nickel left in the liquor', value: out.dissolved.Ni, unit: 'mg/L', digits: 0 },
+      iL: { label: 'Limiting current density (feed Ni)', value: limitingCurrent('Ni', s.dissolved.Ni), unit: 'A/m²', digits: 0 },
       ce: { label: 'Current efficiency', value: ce * 100, unit: '%', digits: 0 },
       spec: { label: 'Specific energy', value: kgTotal > 0 ? (energyW * 24) / 1000 / kgTotal : 0, unit: 'kWh/kg metal', digits: 1 },
-      credit: { label: 'Metal value', value: credit, unit: 'RM/d', digits: 0 },
+      credit: { label: 'Metal sold (netted from OPEX)', value: credit, unit: 'RM/d', digits: 0 },
     },
   });
 }
