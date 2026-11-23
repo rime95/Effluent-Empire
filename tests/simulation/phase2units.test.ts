@@ -69,7 +69,7 @@ describe('activated carbon', () => {
     expect(r.out.SI).toBeLessThan(30);
     const removedCOD = s.SI - r.out.SI + (s.SS - r.out.SS);
     // CUR: Q·ΔC / q(C0,adsorbable) — g/d ÷ (g/kg) = kg/d. 0.8·120 + 0.3·5 = 97.5 mg/L adsorbable
-    expect(r.chemicals[0].kgPerDay).toBeCloseTo((500 * removedCOD) / freundlichQ(0.8 * 120 + 0.3 * 5), 6);
+    expect(r.calcs.cur.value).toBeCloseTo((500 * removedCOD) / freundlichQ(0.8 * 120 + 0.3 * 5), 6);
     expect(r.chemicals[0].kgPerDay / 500).toBeGreaterThan(0.5); // ≈ 0.7 kg carbon per m³ — bulk COD on carbon is expensive
     expect(balanced(s, r).ok).toBe(true);
   });

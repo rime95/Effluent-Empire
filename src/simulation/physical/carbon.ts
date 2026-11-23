@@ -11,7 +11,7 @@
 import { Stream, cloneStream, emptyStream, tss } from '../core/stream';
 import { Note, ProcessResult, result } from '../treatment/types';
 
-export const GAC = { KF: 20, invN: 0.4, tau_min: 4, priceRMkg: 9, adsorbable: { SI: 0.8, SS: 0.3, OGemulsified: 0.7 } };
+export const GAC = { KF: 20, invN: 0.4, tau_min: 4, adsorbable: { SI: 0.8, SS: 0.3, OGemulsified: 0.7 } };
 
 export function freundlichQ(C_mgL: number): number {
   return GAC.KF * Math.pow(Math.max(C_mgL, 0), GAC.invN);
@@ -43,14 +43,13 @@ export function adsorb(s: Stream, p: { ebct_min: number }): ProcessResult {
   if (C0 > 300) notes.push({ level: 'warn', code: 'gac.load', text: `Organic load ${C0.toFixed(0)} mg COD/L exhausts carbon quickly — GAC is a polishing step after biology.` });
   return result(out, {
     removed,
-    chemicals: [{ name: 'Granular activated carbon (replacement)', kgPerDay: carbon_kgd, priceRMkg: GAC.priceRMkg }],
     energy_kWhd: 0.02 * s.Q,
     notes,
     calcs: {
       ebct: { label: 'Empty-bed contact time', value: p.ebct_min, unit: 'min', digits: 0 },
       eff: { label: 'Adsorbable fraction captured', value: eff * 100, unit: '%', digits: 0 },
       q: { label: 'Carbon capacity q(C₀) (Freundlich)', value: q, unit: 'mg COD/g', digits: 0 },
-      cur: { label: 'Carbon usage', value: carbon_kgd, unit: 'kg/d', digits: 1 },
+      cur: { label: 'Carbon usage (not costed)', value: carbon_kgd, unit: 'kg/d', digits: 1 },
       bed: { label: 'Bed volume', value: (s.Q / 1440) * p.ebct_min, unit: 'm³', digits: 1 },
     },
   });

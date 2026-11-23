@@ -349,7 +349,7 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     tagPrefix: 'AC',
     category: 'physical',
     summary: 'Adsorbs non-biodegradable dissolved organics (inert COD) that biology cannot remove. Polishing only: feed must be low in solids.',
-    params: [{ key: 'ebct', label: 'Empty-bed contact time', unit: 'min', min: 2, max: 60, step: 1, default: () => 15, help: 'EBCT 10–15 min is typical; carbon is consumed in proportion to the COD removed.' }],
+    params: [{ key: 'ebct', label: 'Empty-bed contact time', unit: 'min', min: 2, max: 60, step: 1, default: () => 15, help: 'EBCT 10–15 min is typical.' }],
     run: (s, p) => adsorb(s, { ebct_min: n(p, 'ebct') }),
     capex: (p, s) => scale(220_000, Math.max((s.Q / 1440) * n(p, 'ebct'), 0.5), 10),
     footprint: (p) => 20 + n(p, 'ebct') * 0.8,

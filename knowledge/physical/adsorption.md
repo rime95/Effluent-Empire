@@ -14,7 +14,7 @@ Activated sludge cannot remove **inert soluble COD (S_I)**. Plating brighteners,
 
     CUR (g carbon / L treated) = (C₀ − C_e) / q(C₀)
 
-It is reported in kg/d and charged as replacement carbon (RM 9/kg, GAME price).
+It is reported in kg/d for information only. Carbon replacement is **not charged** as OPEX (user decision 2026-11-23).
 
 **Kinetics (GAME MODEL):** the adsorbable fraction removed is 1 − exp(−EBCT/τ), with τ = 4 min.
 - EBCT 10–15 min is typical for dissolved organics. ✅ (design references)
