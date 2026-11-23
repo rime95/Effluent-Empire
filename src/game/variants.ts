@@ -208,6 +208,32 @@ export const VARIANTS: ClientVariant[] = [
     standard: 'B',
   },
   {
+    id: 'niRinseRecovery',
+    industry: 'plating',
+    requires: ['electrowinning'],
+    label: 'Nickel rinse on its own drain — recover the nickel',
+    brief: 'The bright-nickel line has a segregated rinse at a few hundred mg/L Ni. Plated out by electrowinning at low current density on a large cathode area, the nickel sells as cathode metal; the spent rinse joins the main metal train. Or blend it in and precipitate it all as sludge.',
+    overlay: (s, rng) => {
+      const q = splitQ(s.Q, rng.range(0.06, 0.15));
+      const ni = sideStream(s, q.side);
+      ni.dissolved = { ...ni.dissolved, Ni: rng.range(200, 400) };
+      ni.SO4T = (ni.dissolved.Ni / MW.Ni / 1000) * 1.1; // nickel sulfate rinse
+      ni.peakFactor = 1.3;
+      s.Q = q.main;
+      s.side = [{ id: 'ni', label: 'Nickel rinse', stream: setCbForPH(ni, rng.range(4, 5)) }];
+      return s;
+    },
+    reference: (s) => {
+      const r = side(s, 'ni');
+      const Qs = r.Q / 86400;
+      // 85 % recovery: A = (1/0.15 − 1)·Q/k_m; current density at 0.7 × the limiting current density 2·F·k_m·C
+      const area = Math.min(1000, Math.ceil(((1 / 0.15 - 1) * Qs) / 1e-5));
+      const iL = 2 * 96485 * 1e-5 * (r.dissolved.Ni / MW.Ni);
+      return segregatedGraph(metalTrain(totalQ(s), s.CrVI > 0.05, s), [{ id: 'ni', tag: 'NI', join: 'eq', train: [ru('electrowinning', r.Q, { area, j: Math.max(5, Math.round((0.7 * iL) / 5) * 5) })] }]);
+    },
+    standard: 'B',
+  },
+  {
     id: 'foodHighStrength',
     industry: 'food',
     requires: ['uasb'],

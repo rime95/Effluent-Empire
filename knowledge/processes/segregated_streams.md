@@ -25,6 +25,7 @@ All ranges are GAME MODEL, `verify:` against plant data.
 |---|---|---|---|
 | `chromeSegregated` | none, reputation ≥ 10 | chrome rinse, 5–15 % of the flow; Cr(VI) 20–80 mg/L, Cr(III) 1–5, pH 3–3.8. The main rinse has no Cr(VI). | Cr(VI) reduction at the side flow → main EQ → metal train. Standard B (the base metal train misses A on O&G for some feeds: held fix B1). |
 | `enSegregated` | sulfide | electroless-nickel line, 3–8 % of the flow; Ni 50–300 mg/L (90 % complexed by citrate/lactate), 150–400 mg/L biodegradable COD (organic acids), pH 4.5–5.5 | pH 9 → NaHS at 1.3× stoichiometric on the total Ni → joins the main train at coagulation (colloidal NiS caught with the hydroxide floc) |
+| `niRinseRecovery` | electrowinning | bright-nickel rinse, 6–15 % of the flow, Ni 200–400 mg/L as sulfate, pH 4–5 | electrowinning at low current density (0.7 × limiting) on a large cathode (85 % recovery) → spent rinse to main EQ |
 | `dragOut` | electrowinning | static drag-out, 1–3 m³/d; Ni 2–8 g/L, Cu 0.3–2 g/L, sulfate 60 mM, pH 2–3 | electrowinning (cathode ≈ 2 m² per kg/d of metal, 200 A/m², metal credit) → spent liquor to main EQ |
 | `foodHighStrength` | uasb | syrup / reject product / first CIP rinse, 5–10 % of the flow; COD 15–40 g/L (88.5 % readily biodegradable, 10 % slowly, 1.5 % inert), NH₄-N 1 % of COD, 35 °C, pH 4.5–5.5 | neutralise to pH 7 → UASB at 8 kg COD/m³·d → main EQ → food train (aeration +20 %, alkalinity held at pH 7) |
 

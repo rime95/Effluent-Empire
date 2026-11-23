@@ -178,13 +178,14 @@ export const CATALOGUE: Record<UnitType, UnitDef> = {
     name: 'Electrowinning Cell',
     tagPrefix: 'EW',
     category: 'chemical',
-    summary: 'DC current plates copper (then nickel) out of a concentrated liquor as saleable cathode metal. Feed it the IX eluate or drag-out; spent electrolyte goes back to treatment.',
+    summary: 'DC current plates copper (then nickel) out of a liquor as saleable cathode metal. Concentrated liquor (IX eluate, drag-out) at high current density; a dilute segregated rinse (a few hundred mg/L) at low current density on a large cathode area. Spent electrolyte goes back to treatment.',
     params: [
-      { key: 'area', label: 'Cathode area', unit: 'm²', min: 0.5, max: 500, step: 0.5, default: () => 10 },
-      { key: 'j', label: 'Current density', unit: 'A/m²', min: 20, max: 600, step: 10, default: () => 200, help: 'Plate cathodes 150–300 A/m² in concentrated (> 10 g/L) liquor; dilute liquor needs a lower current density.' },
+      { key: 'area', label: 'Cathode area', unit: 'm²', min: 0.5, max: 1000, step: 0.5, default: () => 10, help: 'Recovery is mass-transfer limited: a well-mixed cell leaves C_in/(1 + k_m·A/Q). For 80 % recovery A ≈ 4·Q/k_m (≈ 4.6 m² per m³/d with plate cathodes).' },
+      { key: 'j', label: 'Current density', unit: 'A/m²', min: 5, max: 600, step: 5, default: () => 200, help: 'Keep it near the limiting current density i_L = 2·F·k_m·C (≈ 10 A/m² at 300 mg/L Ni, ≈ 330 A/m² at 10 g/L); above it the extra current only makes hydrogen. Plate cathodes 150–300 A/m² in g/L liquors, 5–20 A/m² for dilute rinses.' },
     ],
     run: (s, p) => electrowin(s, { area_m2: n(p, 'area'), currentDensity: n(p, 'j') }),
-    capex: (p) => scale(120_000, n(p, 'area') * n(p, 'j'), 2000) + 40_000,
+    // cells, cathodes and anodes scale with cathode area; the rectifier with the current (GAME MODEL, verify)
+    capex: (p) => scale(80_000, n(p, 'area'), 10) + scale(40_000, n(p, 'area') * n(p, 'j'), 2000) + 40_000,
     footprint: (p) => n(p, 'area') / 2 + 12,
   },
   aop: {

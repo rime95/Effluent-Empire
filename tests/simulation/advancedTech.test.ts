@@ -131,6 +131,32 @@ describe('electrowinning', () => {
   });
 });
 
+describe('electrowinning a dilute nickel rinse (300 mg/L)', () => {
+  const rinse = () => {
+    const s = emptyStream(20);
+    s.CT = 1e-3;
+    s.dissolved.Ni = 300;
+    s.SO4T = (300 / MW.Ni / 1000) * 1.1;
+    return setCbForPH(s, 4.5);
+  };
+  it('low current density on a large cathode recovers most of the nickel and pays for its power', () => {
+    const s = rinse();
+    const iL = 2 * EW.F * EW.km * (300 / MW.Ni); // A/m², limiting current density
+    expect(iL).toBeGreaterThan(8);
+    expect(iL).toBeLessThan(12);
+    const r = electrowin(s, { area_m2: 100, currentDensity: 15 });
+    const rec = 1 - r.out.dissolved.Ni / 300;
+    expect(rec).toBeGreaterThan(0.75);
+    expect(r.calcs.ni.value * 70).toBeGreaterThan(r.energy_kWhd * 0.5 * 5); // metal value ≫ power cost
+    expect(balanced(s, r)).toBe(true);
+  });
+  it('high current density on a small cathode wastes the current on hydrogen', () => {
+    const r = electrowin(rinse(), { area_m2: 10, currentDensity: 200 });
+    expect(r.calcs.ce.value).toBeLessThan(10);
+    expect(r.notes.some((n) => n.code === 'ew.dilute')).toBe(true);
+  });
+});
+
 describe('Fenton', () => {
   it('oxidises refractory COD at pH 3 by stoichiometry × utilisation, much less at pH 7', () => {
     const s = water();

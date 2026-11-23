@@ -77,7 +77,7 @@ export const TECH: Record<TechId, TechDef> = {
   },
   electrowinning: {
     id: 'electrowinning', name: 'Electrowinning', tier: 3, category: 'recovery', costRM: 250_000, reputation: TIER_REPUTATION[3], requires: ['ionExchange'], units: ['electrowinning'],
-    blurb: 'Plates copper and nickel out of concentrated liquors as saleable metal.', clients: ['Earns metal sales from concentrated eluate / drag-out'], available: true,
+    blurb: 'Plates copper and nickel out of a liquor as saleable metal: g/L eluate or drag-out at high current density, a few-hundred-mg/L nickel rinse at low current density on a large cathode.', clients: ['Drag-out recovery (g/L Cu/Ni)', 'Segregated nickel rinse recovery (200–400 mg/L Ni)'], available: true,
   },
   aop: {
     id: 'aop', name: 'Advanced oxidation (Fenton / ozone)', tier: 3, category: 'chemical', costRM: 220_000, reputation: TIER_REPUTATION[3], requires: [], units: ['aop'],

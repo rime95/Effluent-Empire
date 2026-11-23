@@ -15,7 +15,7 @@ import { TECH_ORDER } from '../../src/game/tech';
 import { useGame } from '../../src/game/store';
 import { runDynamic } from '../../src/simulation/dynamic/plantDynamics';
 
-const SEG = ['chromeSegregated', 'enSegregated', 'dragOut', 'foodHighStrength'];
+const SEG = ['chromeSegregated', 'enSegregated', 'dragOut', 'niRinseRecovery', 'foodHighStrength'];
 
 function twoStreams() {
   const main = emptyStream(100);
@@ -150,6 +150,6 @@ describe('segregated project: lab sample points and the starter drawing', () => 
     expect(p.sideTestsDone?.cr).toContain('metals');
     expect(p.testsDone).not.toContain('metals');
     expect(p.datasheet).toEqual(mainBefore);
-    expect(p.sideDatasheets!.cr.CrVI!).toBeCloseTo(e.trueStream.side![0].stream.CrVI, -0.5);
+    expect(Math.abs(p.sideDatasheets!.cr.CrVI! / e.trueStream.side![0].stream.CrVI - 1)).toBeLessThan(0.1); // lab noise ±3 %
   });
 });
