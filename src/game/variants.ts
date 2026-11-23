@@ -84,7 +84,7 @@ export const VARIANTS: ClientVariant[] = [
       return s;
     },
     reference: (s) => {
-      const train = metalTrain(s.Q, s.CrVI > 0.05);
+      const train = metalTrain(s.Q, s.CrVI > 0.05, s);
       const clar = train.findIndex((u) => u.kind === 'clarifier');
       const q = (k: 'thickener' | 'filterPress' | 'dryer', over: Record<string, number | string>) => ({ kind: k, params: { ...defaultParams(k, s.Q), ...over } });
       // sludge line sized on the dry-solids load: thickener at ~15 kg/m²·d, press for 3 cycles/d of ~25 % DS cake, dryer to 80 % DS
@@ -124,7 +124,7 @@ export const VARIANTS: ClientVariant[] = [
       s.tds = (s.tds ?? 0) * rng.range(1.2, 2); // hard make-up water, salty acid cleaners
       return s;
     },
-    reference: (s) => reuseGraph(metalTrain(s.Q, s.CrVI > 0.05), s.Q, 50),
+    reference: (s) => reuseGraph(metalTrain(s.Q, s.CrVI > 0.05, s), s.Q, 50),
     requirements: () => ({ reuseMin: 0.3 }),
     standard: 'B',
   },
@@ -135,7 +135,7 @@ export const VARIANTS: ClientVariant[] = [
     label: 'Electronics finisher — zero liquid discharge',
     brief: 'No discharge permit at all (the site sits above a water intake): every litre is recovered — RO permeate and evaporator distillate go back to the process, the last concentrate leaves by tanker. Budget is generous.',
     overlay: (s) => s,
-    reference: (s) => zldGraph(metalTrain(s.Q, s.CrVI > 0.05), s.Q),
+    reference: (s) => zldGraph(metalTrain(s.Q, s.CrVI > 0.05, s), s.Q),
     requirements: () => ({ zld: true }),
     standard: 'A',
   },
@@ -158,7 +158,7 @@ export const VARIANTS: ClientVariant[] = [
       return s;
     },
     standard: 'B',
-    reference: (s) => segregatedGraph(metalTrain(totalQ(s), false), [{ id: 'cr', tag: 'CR', join: 'eq', train: [ru('crReduction', side(s, 'cr').Q, { volume: Math.max(1, Math.ceil(side(s, 'cr').Q / 24 / 2)) })] }]),
+    reference: (s) => segregatedGraph(metalTrain(totalQ(s), false, s), [{ id: 'cr', tag: 'CR', join: 'eq', train: [ru('crReduction', side(s, 'cr').Q, { volume: Math.max(1, Math.ceil(side(s, 'cr').Q / 24 / 2)) })] }]),
   },
   {
     id: 'enSegregated',
@@ -180,7 +180,7 @@ export const VARIANTS: ClientVariant[] = [
     reference: (s) => {
       const en = side(s, 'en');
       const nahs = Math.min(500, Math.ceil((((en.complexed?.Ni ?? 0) + en.dissolved.Ni) / MW.Ni) * 56.06 * 1.3));
-      return segregatedGraph(metalTrain(totalQ(s), s.CrVI > 0.05), [
+      return segregatedGraph(metalTrain(totalQ(s), s.CrVI > 0.05, s), [
         { id: 'en', tag: 'EN', join: 'coagulation', train: [ru('precipitation', en.Q, { targetPH: 9 }), ru('sulfide', en.Q, { dose: nahs, volume: Math.max(0.5, Math.ceil(en.Q / 48 * 2) / 2) })] },
       ]);
     },
@@ -203,7 +203,7 @@ export const VARIANTS: ClientVariant[] = [
     reference: (s) => {
       const d = side(s, 'do');
       const kg = (d.Q * (d.dissolved.Ni + d.dissolved.Cu)) / 1000;
-      return segregatedGraph(metalTrain(totalQ(s), s.CrVI > 0.05), [{ id: 'do', tag: 'DO', join: 'eq', train: [ru('electrowinning', d.Q, { area: Math.max(2, Math.ceil(kg * 2)), j: 200 })] }]);
+      return segregatedGraph(metalTrain(totalQ(s), s.CrVI > 0.05, s), [{ id: 'do', tag: 'DO', join: 'eq', train: [ru('electrowinning', d.Q, { area: Math.max(2, Math.ceil(kg * 2)), j: 200 })] }]);
     },
     standard: 'B',
   },
@@ -217,9 +217,9 @@ export const VARIANTS: ClientVariant[] = [
       const q = splitQ(s.Q, rng.range(0.05, 0.1));
       const hs = sideStream(s, q.side);
       const cod = rng.range(15000, 40000);
-      hs.SS = cod * 0.885; // sugars, reject product: almost all readily biodegradable
+      hs.SS = cod * 0.892; // sugars, reject product: almost all readily biodegradable
       hs.XS = cod * 0.1;
-      hs.SI = cod * 0.015;
+      hs.SI = cod * 0.008;
       hs.NH4N = cod * 0.01;
       hs.T = 35;
       s.Q = q.main;
@@ -230,7 +230,7 @@ export const VARIANTS: ClientVariant[] = [
       const h = side(s, 'hs');
       const load = (h.Q * (h.SS + h.XS + h.SI)) / 1000;
       // the main aeration train also takes the UASB effluent: alkalinity held at pH 7 (nitrification acidifies), +20 % volume
-      const train = foodTrain(s.Q + h.Q).map((x) => (x.kind === 'activatedSludge' ? { ...x, params: { ...x.params, volume: Math.ceil(Number(x.params.volume) * 1.2), alkPH: 7, alkReagent: 'NaOH' } } : x));
+      const train = foodTrain(s.Q + h.Q, s).map((x) => (x.kind === 'activatedSludge' ? { ...x, params: { ...x.params, volume: Math.ceil(Number(x.params.volume) * 1.5), alkPH: 7, alkReagent: 'NaOH' } } : x));
       return segregatedGraph(train, [
         { id: 'hs', tag: 'HS', join: 'eq', train: [ru('neutralisation', h.Q, { targetPH: 7 }), ru('uasb', h.Q, { volume: Math.max(10, Math.ceil(load / 8 / 10) * 10) })] },
       ]);

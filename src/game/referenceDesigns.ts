@@ -5,7 +5,7 @@
  * Ref: knowledge/chemistry/precipitation.md, knowledge/biological/activated_sludge.md (reference trains)
  */
 import { CATALOGUE, Params, UnitType, defaultParams } from '../simulation/treatment/catalogue';
-import { ProcessGraph, linearGraph } from '../simulation/treatment/graph';
+import { ProcessGraph, linearGraph, simulate } from '../simulation/treatment/graph';
 import { IndustryId } from './industries';
 import { Stream } from '../simulation/core/stream';
 import { optimumMetalDose_mmol } from '../simulation/chemistry/coagulation';
@@ -29,15 +29,35 @@ export function sludgeLineGraph(train: TrainSpec, fromIdx: number, sludge: Train
 
 const u = (kind: UnitType, Q: number, over: Params = {}) => ({ kind, params: { ...defaultParams(kind, Q), ...over } });
 
-export const metalTrain = (Q: number, crVI = false): TrainSpec => [
-  u('eq', Q),
-  ...(crVI ? [u('crReduction', Q)] : []),
-  u('precipitation', Q, { targetPH: 9.8 }),
-  u('coagulation', Q, { coagulant: 'ferric', dose: 75, pHset: 9.8 }),
-  u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.7) }),
-  u('sandFilter', Q),
-  u('neutralisation', Q, { targetPH: 7.5 }),
-];
+/**
+ * "Jar test" on the design: simulate the train, read the water arriving at its coagulation tank, and dose ferric at the
+ * optimum for that particle load × 1.1 (min 50 mg/L). Large-flow, high-solids plants therefore carry the coagulant dose —
+ * and the chemical storage and sludge — their feed really needs. Without a stream the old fixed dose is kept.
+ */
+function jarTested(train: TrainSpec, s?: Stream): TrainSpec {
+  const i = train.findIndex((x) => x.kind === 'coagulation');
+  if (!s || i < 0) return train;
+  const sim = simulate(linearGraph(train), s);
+  const inlet = sim.nodes[`u${i}`]?.inlet;
+  if (!inlet) return train;
+  const dose = Math.max(50, Math.ceil((optimumMetalDose_mmol(inlet, 'ferric') * MW.FeCl3 * 1.1) / 10) * 10);
+  return train.map((x, k) => (k === i ? { ...x, params: { ...x.params, dose } } : x));
+}
+
+/** Metal finishing: EQ → (Cr(VI) reduction) → hydroxide precipitation → ferric coagulation → clarifier → sand filter → pH. */
+export const metalTrain = (Q: number, crVI = false, s?: Stream): TrainSpec =>
+  jarTested(
+    [
+      u('eq', Q),
+      ...(crVI ? [u('crReduction', Q)] : []),
+      u('precipitation', Q, { targetPH: 9.8 }),
+      u('coagulation', Q, { coagulant: 'ferric', dose: 75, pHset: 9.8 }),
+      u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.7) }),
+      u('sandFilter', Q),
+      u('neutralisation', Q, { targetPH: 7.5 }),
+    ],
+    s,
+  );
 
 /**
  * Emulsified-oil food plant (DAF variant): EQ → emulsion breaking (ferric at the jar-test optimum × 1.1, pH-trimmed,
@@ -50,9 +70,9 @@ export const dafFoodTrain = (s: Stream): TrainSpec => {
   u('eq', Q),
   u('coagulation', Q, { coagulant: 'ferric', dose: ferric, pHset: 7, polymer: 1 }),
   // after EQ the peak factor is ~1.3: HLR (peak feed + 60 % recycle) ≈ 8 m/h
-  u('daf', Q, { area: Math.max(1, Math.ceil(((Q * 1.3 + Q * 0.6) / 24 / 8) * 2) / 2), recycle: 60, pressure: 550 }),
+  u('daf', Q, { area: Math.max(1, Math.ceil(((Q * 1.3 + Q * 0.6) / 24 / 5) * 2) / 2), recycle: 60, pressure: 550 }),
   // ferric emulsion breaking consumes alkalinity: hold the aeration tank at pH 7 so nitrification is not lost
-  u('activatedSludge', Q, { volume: Math.ceil(Q * 3.5), srt: 15, control: 'srt', alkPH: 7, alkReagent: 'NaOH' }),
+  u('activatedSludge', Q, { volume: Math.ceil(Q * Math.max(3.5, (s.SS + s.SI + s.XS + s.XI) / 1000)), srt: 15, control: 'srt', alkPH: 7, alkReagent: 'NaOH' }),
   u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.4) }),
   u('sandFilter', Q),
   ];
@@ -158,28 +178,49 @@ export function segregatedGraph(train: TrainSpec, sides: SideTrain[]): ProcessGr
   return g;
 }
 
-export const foodTrain = (Q: number): TrainSpec => [
-  u('oilSep', Q, { area: Math.ceil((Q * 2.2) / 24 / 1.0) }),
-  u('eq', Q),
-  u('activatedSludge', Q, { volume: Math.ceil(Q * 3.0), srt: 10, control: 'srt' }),
-  u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.4) }),
-  u('sandFilter', Q),
-];
+/**
+ * Food: oil separator → EQ → activated sludge → clarifier → sand filter. With the stream, the aeration tank is sized on
+ * the COD load (HRT = max(3 d, COD/1000 d) ≈ 1 kg COD/m³·d, keeping MLSS workable) with alkalinity held at pH 7 (nitrification
+ * of protein N at these loads would otherwise crash the pH).
+ */
+export const foodTrain = (Q: number, s?: Stream): TrainSpec => {
+  const cod = s ? s.SS + s.SI + s.XS + s.XI : 0;
+  const hrt = s ? Math.max(3, cod / 1000) : 3;
+  return [
+    u('oilSep', Q, { area: Math.ceil((Q * 2.2) / 24 / 1.0) }),
+    u('eq', Q),
+    u('activatedSludge', Q, { volume: Math.ceil(Q * hrt), srt: s ? 15 : 10, control: 'srt', ...(s ? { alkPH: 7, alkReagent: 'NaOH' } : {}) }),
+    u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.4) }),
+    u('sandFilter', Q),
+  ];
+};
 
-export const semiconductorTrain = (Q: number): TrainSpec => [
-  u('eq', Q),
-  u('precipitation', Q, { targetPH: 9.5 }),
-  u('coagulation', Q, { coagulant: 'ferric', dose: 120, pHset: 9.5 }),
-  u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.7) }),
-  u('sandFilter', Q),
-  u('neutralisation', Q, { targetPH: 7.5 }),
+export const semiconductorTrain = (Q: number, s?: Stream): TrainSpec =>
+  jarTested(
+    [
+      u('eq', Q),
+      u('precipitation', Q, { targetPH: 9.5 }),
+      u('coagulation', Q, { coagulant: 'ferric', dose: 120, pHset: 9.5 }),
+      u('clarifier', Q, { area: Math.ceil(Q / 24 / 0.7) }),
+      u('sandFilter', Q),
+      u('neutralisation', Q, { targetPH: 7.5 }),
+    ],
+    s,
+  );
+
+/** Semiconductor with ammonia: the physico-chemical train, then nitrification (alkalinity held at pH 7.2), clarifier, filter. */
+const semiconductorBioTrain = (s: Stream): TrainSpec => [
+  ...semiconductorTrain(s.Q, s).slice(0, 5),
+  u('activatedSludge', s.Q, { volume: Math.ceil(s.Q * 0.6), srt: 25, control: 'srt', alkPH: 7.2, alkReagent: 'NaOH' }),
+  u('clarifier', s.Q, { area: Math.ceil(s.Q / 24 / 0.5) }),
+  u('sandFilter', s.Q),
 ];
 
 /** Competent reference design for a given (true) wastewater. */
 export const REFERENCE: Record<IndustryId, (s: Stream) => TrainSpec> = {
-  plating: (s) => metalTrain(s.Q, s.CrVI > 0.05),
-  food: (s) => foodTrain(s.Q),
-  semiconductor: (s) => semiconductorTrain(s.Q),
+  plating: (s) => metalTrain(s.Q, s.CrVI > 0.05, s),
+  food: (s) => foodTrain(s.Q, s),
+  semiconductor: (s) => semiconductorBioTrain(s),
 };
 
 /**
@@ -191,19 +232,14 @@ export const REFERENCE: Record<IndustryId, (s: Stream) => TrainSpec> = {
  * that needs flotation — the DAF client).
  */
 export const REFERENCE_STD_A: Record<IndustryId, (s: Stream) => TrainSpec> = {
-  plating: (s) => [u('oilSep', s.Q, { area: Math.ceil((s.Q * 2.2) / 24) }), ...metalTrain(s.Q, s.CrVI > 0.05), u('carbon', s.Q)],
+  plating: (s) => [u('oilSep', s.Q, { area: Math.ceil((s.Q * 2.2) / 24) }), ...metalTrain(s.Q, s.CrVI > 0.05, s), u('carbon', s.Q)],
   food: (s) => [
     u('oilSep', s.Q, { area: Math.ceil((s.Q * 2.2) / 24) }),
     u('eq', s.Q),
-    u('activatedSludge', s.Q, { volume: Math.ceil(s.Q * 4.5), srt: 20, control: 'srt', alkPH: 7, alkReagent: 'NaOH' }),
+    u('activatedSludge', s.Q, { volume: Math.ceil(s.Q * Math.max(4.5, (s.SS + s.SI + s.XS + s.XI) / 1200)), srt: 20, control: 'srt', alkPH: 7, alkReagent: 'NaOH' }),
     u('clarifier', s.Q, { area: Math.ceil(s.Q / 24 / 0.4) }),
     u('sandFilter', s.Q),
     u('carbon', s.Q),
   ],
-  semiconductor: (s) => [
-    ...semiconductorTrain(s.Q).slice(0, 5),
-    u('activatedSludge', s.Q, { volume: Math.ceil(s.Q * 0.6), srt: 25, control: 'srt', alkPH: 7.2, alkReagent: 'NaOH' }),
-    u('clarifier', s.Q, { area: Math.ceil(s.Q / 24 / 0.5) }),
-    u('sandFilter', s.Q),
-  ],
+  semiconductor: (s) => semiconductorBioTrain(s),
 };

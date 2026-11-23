@@ -56,6 +56,6 @@ The catalogue (`src/simulation/treatment/catalogue.ts`) and the in-game Encyclop
 # Industry profiles (`src/game/industries.ts`) — verify ranges
 | Industry | Character | Key challenge |
 |---|---|---|
-| Metal finishing | pH 2.5–4, Ni 5–25, Cu 2–15, Zn 0–8 (sometimes undeclared), low buffer, COD 80–250 (40 % inert) | pH-dependent precipitation, solids separation, alkalinity effect of coagulant |
-| Food processing | COD 2 000–5 000 (mostly biodegradable), O&G 60–250, VFA, N at 2.2–3 % of COD | biological sizing, clarifier MLSS limits, oil, nitrification alkalinity |
-| Semiconductor | Q 300–1 500, pH 3–5, Cu 5–20, colloidal CMP slurry 100–300 mg/L, NH₄-N | colloid coagulation at scale, Cu precipitation |
+| Metal finishing | pH 2.5–4, Ni 20–80, Cu 10–50, Zn 0–25 (8–20 when undeclared), Cr(VI) 10–80 on chrome lines, low buffer, COD 100–250 (40 % inert), O&G 10–40 | pH-dependent precipitation, solids separation, alkalinity effect of coagulant |
+| Food processing | COD 2 500–6 000 (mostly biodegradable), O&G 100–300 (70–85 % free), VFA, N at 2.2–3 % of COD | biological sizing, clarifier MLSS limits, oil, nitrification alkalinity |
+| Semiconductor | Q 300–1 500, pH 3–5, Cu 10–40, Ni 0–3, colloidal CMP slurry 200–600 mg/L, NH₄-N 15–45, COD 60–200 | colloid coagulation at scale (high ferric dose), Cu precipitation, nitrification |

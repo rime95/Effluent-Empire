@@ -52,13 +52,13 @@ describe('coagulant + polymer flocculant', () => {
   });
   it('with pH held at the precipitation pH, coagulant + polymer captures ≥ 98 % of Ni(OH)₂', () => {
     const s = plating();
-    const r = clarNi(train(s.Q, [['eq'], ['precipitation', { targetPH: 9.5 }], ['coagulation', { coagulant: 'ferric', dose: 75, pHset: 9.5, polymer: 1 }], ['clarifier']]), s);
+    const r = clarNi(train(s.Q, [['eq'], ['precipitation', { targetPH: 9.5 }], ['coagulation', { coagulant: 'ferric', dose: 120, pHset: 9.5, polymer: 1 }], ['clarifier']]), s);
     expect(r.capture).toBeGreaterThanOrEqual(0.98);
     expect(r.outNi).toBeLessThan(0.5);
   });
   it('coagulant WITHOUT pH control re-dissolves Ni: error note at the coagulation unit and a compliance explanation naming it', () => {
     const s = plating();
-    const g = train(s.Q, [['eq'], ['precipitation', { targetPH: 9.5 }], ['coagulation', { coagulant: 'pac', dose: 80, pHset: 0, polymer: 1 }], ['clarifier']]);
+    const g = train(s.Q, [['eq'], ['precipitation', { targetPH: 9.5 }], ['coagulation', { coagulant: 'pac', dose: 250, pHset: 0, polymer: 1 }], ['clarifier']]);
     const sim = simulate(g, s);
     const co = Object.values(sim.nodes).find((n) => n.node.kind === 'coagulation')!;
     expect(co.result.notes.some((n) => n.code === 'coag.redissolve.Ni')).toBe(true);

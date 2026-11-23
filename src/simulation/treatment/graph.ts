@@ -12,7 +12,7 @@ import standardsJson from '../regulations/standards.json';
 import { effectiveParams, instCapex, type InstKey } from './instrumentation';
 import { BACKWASH_FRACTION, defaultSludgeFraction, removedDryKgD, splitSludge } from '../physical/sludge';
 import { equilibrate } from '../chemistry/acidBase';
-import { CATALOGUE, PRICES, Params, UnitType } from './catalogue';
+import { CATALOGUE, PRICES, Params, UnitType, chemicalSystemCapex } from './catalogue';
 import { Note, ProcessResult } from './types';
 
 export type NodeKind = UnitType | 'influent' | 'discharge' | 'disposal';
@@ -310,7 +310,8 @@ function solvePass(g: ProcessGraph, order: string[], influent: Stream, tears: Se
         consumed: sumPartial(r.consumed),
         produced: sumPartial(r.produced),
       });
-      const capex = def.capex(node.params, inlet, r) + instCapex(node);
+      // equipment + instruments + chemical storage/dosing sized on this unit's actual chemical consumption
+      const capex = def.capex(node.params, inlet, r) + instCapex(node) + chemicalSystemCapex(r.chemicals);
       const footprint = def.footprint(node.params);
       const dry = r.removed ? removedDryKgD(r.removed) : 0;
       const routed = sludgeEdges.length > 0 && !!r.removed && dry > 0;

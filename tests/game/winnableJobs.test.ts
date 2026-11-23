@@ -18,6 +18,14 @@ describe('winnable plain jobs', () => {
     }
     expect(a).toBeGreaterThan(0); // Standard A jobs still exist where the basic kit can do it
   });
+  it('every plain Standard B job is solvable with the basic kit (its reference design passes)', () => {
+    for (let seed = 1; seed <= 60; seed++) {
+      const e = generateEnquiry(seed, 1, 45, { tech: [] });
+      if (e.variant || e.tier || e.standard !== 'B') continue;
+      const sim = simulate(linearGraph(REFERENCE[e.industry](e.trueStream)), e.trueStream);
+      expect(evaluate(sim.effluent!, 'B', sim).checks.filter((c) => !c.pass).map((c) => `${e.industry} ${seed} ${c.param}`)).toEqual([]);
+    }
+  });
 });
 
 describe('tier-1 research', () => {

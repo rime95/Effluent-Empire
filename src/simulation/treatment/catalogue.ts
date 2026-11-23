@@ -423,6 +423,16 @@ export function defaultParams(type: UnitType, Q: number): Params {
 }
 
 /** Indicative unit prices for OPEX display (RM). GAME MODEL; Phase 2 makes these market-driven. */
+/**
+ * Chemical storage and dosing system per chemical a unit consumes (GAME MODEL, verify against vendor budget prices):
+ * bunded storage for ~14 days of use, duty/standby metering pumps, day tank and pipework. RM 45k at 100 kg/d (as
+ * supplied product), six-tenths rule, RM 8k minimum — so high-dose plants (large-flow coagulation, lime softening,
+ * acid cracking) carry the storage and pumping their tonnes per day need. Ref: knowledge/processes/costing.md
+ */
+export function chemicalSystemCapex(chemicals: { kgPerDay: number }[]): number {
+  return chemicals.reduce((a, c) => a + (c.kgPerDay > 0.01 ? Math.max(8_000, 45_000 * Math.pow(c.kgPerDay / 100, 0.6)) : 0), 0);
+}
+
 export const PRICES = {
   electricity_kWh: 0.5,
   sludgeDisposal_kg: { metal: 1.2, other: 0.3 },

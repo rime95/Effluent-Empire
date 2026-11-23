@@ -3,7 +3,7 @@
 import { createRng } from '../../src/game/rng';
 import { INDUSTRIES, generateWastewater } from '../../src/game/industries';
 import { defaultParams, UnitType, Params } from '../../src/simulation/treatment/catalogue';
-import { metalTrain, foodTrain, semiconductorTrain } from '../../src/game/referenceDesigns';
+import { metalTrain, foodTrain, REFERENCE } from '../../src/game/referenceDesigns';
 import { linearGraph, simulate } from '../../src/simulation/treatment/graph';
 import { evaluate } from '../../src/simulation/treatment/compliance';
 import { Stream } from '../../src/simulation/core/stream';
@@ -22,7 +22,7 @@ describe('reference trains', () => {
   for (const seed of [1, 2, 3, 4, 5]) {
     it(`plating seed ${seed}: metal train passes Standard B, every unit mass-balanced`, () => {
       const ww = generateWastewater(INDUSTRIES.plating, createRng(seed)).stream;
-      const { sim, rep } = run(ww, metalTrain(ww.Q, ww.CrVI > 0.05));
+      const { sim, rep } = run(ww, metalTrain(ww.Q, ww.CrVI > 0.05, ww));
       expect(fails(rep)).toEqual([]);
       for (const n of Object.values(sim.nodes)) expect(n.balance.ok, `${n.node.kind} ${JSON.stringify(n.balance.errors)}`).toBe(true);
       expect(sim.balance?.ok).toBe(true);
@@ -38,7 +38,7 @@ describe('reference trains', () => {
   for (const seed of [1, 2, 3]) {
     it(`semiconductor seed ${seed}: reference train passes Standard B`, () => {
       const ww = generateWastewater(INDUSTRIES.semiconductor, createRng(seed)).stream;
-      const { rep } = run(ww, semiconductorTrain(ww.Q));
+      const { rep } = run(ww, REFERENCE.semiconductor(ww));
       expect(fails(rep)).toEqual([]);
     });
   }
