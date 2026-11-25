@@ -16,6 +16,7 @@ import { LivePlant, WaterLegend } from '../scada/LivePlant';
 import { fmt, INDUSTRY_LABEL, rm } from '../format';
 import type { Screen } from '../App';
 import { brand } from '../prefs';
+import { useLayout } from '../layout';
 
 /* SCADA control room: dark mimic + trends + alarms. Ref: knowledge/operations/scada.md */
 const BG = '#050c14';
@@ -56,6 +57,8 @@ export function Scada({ go }: { go: (s: Screen) => void }) {
   const operating = g.plants.filter((p) => p.status === 'operating');
   // opened from a plant's PFD or the Plants screen → start on that plant
   const [sel, setSel] = useState<string | null>(g.studioPlantId ?? null);
+  const { scadaMax: max, setScadaMax } = useLayout();
+  const hideMax = max ? 'scada-max-hide' : undefined;
   const plant = operating.find((p) => p.id === sel) ?? operating[0] ?? null;
   const [unitSel, setUnitSel] = useState<string | null>(null);
   const [result, setResult] = useState<DynamicResult | null>(null);
@@ -156,11 +159,11 @@ export function Scada({ go }: { go: (s: Screen) => void }) {
         </select>
         </div>
       </div>
-      <p className="sub">48-hour replay of the plant as it runs this week{lastWeek ? ` (week ${lastWeek.week}, flow ×${fmt(lastWeek.flowFactor, 2)})` : ''} on its real influent with the diurnal production pattern: ASM1 biology, PI pH and DO loops, EQ level. Diagnose alarms from the trends, then act.</p>
+      <p className={`sub ${hideMax ?? ''}`}>48-hour replay of the plant as it runs this week{lastWeek ? ` (week ${lastWeek.week}, flow ×${fmt(lastWeek.flowFactor, 2)})` : ''} on its real influent with the diurnal production pattern: ASM1 biology, PI pH and DO loops, EQ level. Diagnose alarms from the trends, then act.</p>
 
       {/* incident banner */}
       {plant.incident ? (
-        <div className="panel" style={{ borderColor: 'var(--alarm)', background: '#1d0d10', marginBottom: 12 }}>
+        <div className={`panel ${hideMax ?? ''}`} style={{ borderColor: 'var(--alarm)', background: '#1d0d10', marginBottom: 12 }}>
           <div style={{ color: '#ff9c9c', fontWeight: 600, marginBottom: 4 }}>ACTIVE INCIDENT — since week {plant.incident.startWeek}</div>
           <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
             {plant.incident.symptoms.map((s) => (
@@ -170,7 +173,7 @@ export function Scada({ go }: { go: (s: Screen) => void }) {
           {plant.incident.tried.length > 0 && <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Already tried: {plant.incident.tried.map((t) => actions.find((a) => a.id === t)?.label ?? t).join('; ')}</div>}
         </div>
       ) : (
-        <div className="panel" style={{ background: PANEL, borderColor: LINE, marginBottom: 12, color: '#6fd39a' }}>
+        <div className={`panel ${hideMax ?? ''}`} style={{ background: PANEL, borderColor: LINE, marginBottom: 12, color: '#6fd39a' }}>
           No active incident. Weekly grab sample: {plant.history.length ? (plant.history[plant.history.length - 1].pass ? 'compliant' : `non-compliant (${plant.history[plant.history.length - 1].failed.join(', ')})`) : '—'}
         </div>
       )}
@@ -198,12 +201,15 @@ export function Scada({ go }: { go: (s: Screen) => void }) {
             <button className="btn sm" onClick={run} disabled={busy}>
               {busy ? 'Simulating…' : 'Re-run 48 h'}
             </button>
+            <button className={`btn sm ${max ? 'primary' : 'ghost'}`} onClick={() => setScadaMax(!max)} title={max ? 'Show the trends and alarm panels again' : 'Maximise the live plant: hide the trends and alarm panels'}>
+              {max ? '⤡ Restore' : '⛶ Maximise'}
+            </button>
           </div>
         </div>
-        <LivePlant plant={plant} at={at} selected={unit?.id} onSelect={setUnitSel} />
+        <LivePlant plant={plant} at={at} selected={unit?.id} onSelect={setUnitSel} fill={max ? 'calc(100vh - 210px)' : undefined} />
       </div>
 
-      <div className="grid" style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(280px, 1fr)' }}>
+      <div className={`grid ${hideMax ?? ''}`} style={{ gridTemplateColumns: 'minmax(0, 2fr) minmax(280px, 1fr)' }}>
         <div className="grid">
           {/* unit trends */}
           <div className="panel" style={{ background: PANEL, borderColor: LINE }}>

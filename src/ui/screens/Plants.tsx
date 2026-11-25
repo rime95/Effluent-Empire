@@ -134,7 +134,7 @@ function PlantDetail({ plant, go }: { plant: Plant; go: (s: Screen) => void }) {
           {plant.status === 'operating' && (
             <div className="row" style={{ gap: 6 }}>
               <button className="btn sm" onClick={() => { g.openPlantStudio(plant.id); go('studio'); }} title="As-built PFD and P&ID; propose upgrades">
-                View PFD / P&amp;ID{plant.upgrade ? (plant.upgrade.phase === 'building' ? ' · upgrade in progress' : ' · upgrade draft') : ''}
+                Open PFD / P&amp;ID{plant.upgrade ? (plant.upgrade.phase === 'building' ? ' · upgrade in progress' : ' · upgrade draft') : ''}
               </button>
               <button className="btn sm ghost" onClick={() => { g.openPlantStudio(plant.id); go('scada'); }}>SCADA</button>
             </div>

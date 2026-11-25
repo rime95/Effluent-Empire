@@ -17,29 +17,31 @@ import { Staff } from './screens/Staff';
 import { Finance } from './screens/Finance';
 import { TechTree } from './screens/TechTree';
 import { Developer } from './screens/Developer';
+import { ProjectStepper } from './components/ProjectStepper';
+import { useLayout } from './layout';
 import { usePrefs } from './prefs';
 import { brand } from './prefs';
 
 export type Screen = 'hq' | 'enquiries' | 'lab' | 'studio' | 'commission' | 'plants' | 'staff' | 'finance' | 'book' | 'scada' | 'tech' | 'dev';
 
-const COMPANY: { id: Screen; label: string; icon: string }[] = [
+type NavEntry = { id: Screen; label: string; icon: string };
+const BUSINESS: NavEntry[] = [
   { id: 'hq', label: 'Company HQ', icon: 'hq' },
   { id: 'enquiries', label: 'Customer Enquiries', icon: 'enquiries' },
-  { id: 'plants', label: 'Plants & O&M', icon: 'scada' },
-  { id: 'scada', label: 'SCADA Operations', icon: 'scada' },
-  { id: 'staff', label: 'Employees', icon: 'staff' },
   { id: 'finance', label: 'Finance', icon: 'finance' },
+  { id: 'staff', label: 'Employees', icon: 'staff' },
+];
+const ENGINEERING_AFTER: NavEntry[] = [
   { id: 'tech', label: 'Technology Tree', icon: 'tree' },
   { id: 'book', label: 'Encyclopedia', icon: 'book' },
 ];
-const PROJECT: { id: Screen; label: string; icon: string }[] = [
-  { id: 'lab', label: 'Laboratory', icon: 'lab' },
-  { id: 'studio', label: 'Engineering Studio', icon: 'studio' },
-  { id: 'commission', label: 'Commissioning', icon: 'commission' },
+const OPERATIONS: NavEntry[] = [
+  { id: 'plants', label: 'Plants & O&M', icon: 'plant' },
+  { id: 'scada', label: 'SCADA Operations', icon: 'scada' },
 ];
-const LOCKED = [
-  { label: 'World Map', icon: 'map' },
-];
+const PROJECT_SCREENS: Screen[] = ['lab', 'studio', 'commission'];
+/** screens built around a large drawing canvas: the sidebar folds to an icon rail on entry */
+const CANVAS_SCREENS: Screen[] = ['studio', 'scada'];
 
 const STATUS_PILL: Record<string, string> = { design: 'info', building: 'warn', failed: 'fail', completed: 'pass', abandoned: 'fail' };
 
@@ -55,14 +57,51 @@ function Game({ onQuit }: { onQuit: () => void }) {
   const g = useGame();
   const p = useActiveProject();
   usePrefs(); // re-render on display-preference changes (fictional names)
+  const lay = useLayout();
+  // canvas screens fold the sidebar on entry; your own choice applies everywhere else
+  const isCanvas = CANVAS_SCREENS.includes(screen);
+  const [canvasNav, setCanvasNav] = useState(true);
+  useEffect(() => {
+    if (isCanvas) setCanvasNav(true);
+  }, [screen]); // eslint-disable-line react-hooks/exhaustive-deps
+  const navCollapsed = isCanvas ? canvasNav : lay.navCollapsed;
+  const toggleNav = () => (isCanvas ? setCanvasNav((v) => !v) : lay.setNavCollapsed(!lay.navCollapsed));
+  const [projOpen, setProjOpen] = useState(true);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !(e.target instanceof HTMLInputElement)) setPaused((x) => !x);
+      const t = e.target as HTMLElement;
+      const typing = t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      if (e.key === 'Escape' && !typing) {
+        // Esc leaves focus mode first, then toggles the pause menu
+        if (useLayout.getState().focus) useLayout.getState().setFocus(false);
+        else setPaused((x) => !x);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b' && !typing) {
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent('ee-toggle-nav'));
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
+  useEffect(() => {
+    const h = () => toggleNav();
+    document.addEventListener('ee-toggle-nav', h);
+    return () => document.removeEventListener('ee-toggle-nav', h);
+  });
+  // focus mode only makes sense on the canvas screens
+  useEffect(() => {
+    if (!isCanvas && lay.focus) lay.setFocus(false);
+  }, [isCanvas]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** open the active project at its current step (or the first project) */
+  const openProjects = () => {
+    const target = p ?? g.projects[0];
+    if (!target) return setScreen('enquiries');
+    if (!p) g.setActiveProject(target.id);
+    g.openPlantStudio(null);
+    setScreen(target.status === 'design' ? 'studio' : 'commission');
+  };
   const quit = () => {
     closeGame();
     onQuit();
@@ -79,14 +118,19 @@ function Game({ onQuit }: { onQuit: () => void }) {
   const live = engineersBusy(g);
 
   return (
-    <div className="app">
+    <div className={`app ${navCollapsed ? 'nav-rail' : ''} ${lay.focus ? 'focus' : ''}`}>
       <header className="topbar">
         <div className="brand">
           <BrandMark />
           Effluent Empire
           {g.devMode && <span className="pill warn" style={{ marginLeft: 8, fontSize: 9 }} title="Developer mode is on for this company">DEV</span>}
         </div>
-        <div className="kpi">
+        {lay.focus && (
+          <button className="btn sm" onClick={() => lay.setFocus(false)} title="Leave focus mode (Esc)">
+            ✕ Exit focus
+          </button>
+        )}
+        <div className="kpi hide-focus">
           <span className="label">Company</span>
           <span className="value" style={{ fontFamily: 'var(--font)', fontSize: 13 }}>{g.companyName}</span>
         </div>
@@ -103,7 +147,7 @@ function Game({ onQuit }: { onQuit: () => void }) {
           <span className="label">Reputation</span>
           <span className="value">{g.reputation}</span>
         </div>
-        <div className="kpi">
+        <div className="kpi hide-focus">
           <span className="label">Plants run</span>
           <span className="value">{g.plants.filter((x) => x.status === 'operating').length}</span>
         </div>
@@ -113,7 +157,7 @@ function Game({ onQuit }: { onQuit: () => void }) {
             <span className={`value ${weeksLeft < 0 ? 'neg' : ''}`}>{weeksLeft >= 0 ? `${weeksLeft} wk left` : `${-weeksLeft} wk late`}</span>
           </div>
         )}
-        <button className="btn sm ghost" onClick={() => setPaused(true)} title="Menu (Esc): save, download save file, quit to main menu">
+        <button className="btn sm ghost hide-focus" onClick={() => setPaused(true)} title="Menu (Esc): save, download save file, quit to main menu">
           ☰ Menu
         </button>
         <button className="btn sm" onClick={() => g.advanceWeek(1)} title="Advance one week: payroll, overheads, plant operations, lab results">
@@ -123,85 +167,78 @@ function Game({ onQuit }: { onQuit: () => void }) {
           Skip to next event ▸▸
         </button>
       </header>
-      <nav className="sidebar">
-        <div className="nav-section">Company</div>
-        {COMPANY.map((n) => (
-          <button key={n.id} className={`nav-item ${screen === n.id ? 'active' : ''}`} onClick={() => setScreen(n.id)}>
-            <NavIcon name={n.icon} />
-            {n.label}
+      {!lay.focus && (
+        <nav className={`sidebar ${navCollapsed ? 'rail' : ''}`}>
+          <button className="nav-item nav-toggle" onClick={toggleNav} title={navCollapsed ? 'Expand the menu (Ctrl+B)' : 'Collapse to icons (Ctrl+B)'}>
+            <NavIcon name={navCollapsed ? 'expand' : 'collapse'} />
+            <span className="nav-label">Collapse menu</span>
           </button>
-        ))}
-        {g.devMode && (
-          <button className={`nav-item ${screen === 'dev' ? 'active' : ''}`} onClick={() => setScreen('dev')}>
-            <NavIcon name="tree" />
-            Developer tools
-          </button>
-        )}
-        <div className="nav-section">
-          Projects ({live}/{projectSlots(g.staff)} engineers)
-        </div>
-        {g.projects.length === 0 && <div className="muted" style={{ fontSize: 12, padding: '2px 10px' }}>No projects — sign an enquiry.</div>}
-        {g.projects.map((x) => (
-          <button
-            key={x.id}
-            className={`nav-item ${g.activeProjectId === x.id ? 'active' : ''}`}
-            onClick={() => {
-              g.setActiveProject(x.id);
-              if (!['lab', 'studio', 'commission'].includes(screen)) setScreen(x.status === 'design' ? 'studio' : 'commission');
-            }}
-            style={{ fontSize: 12 }}
-          >
-            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{brand(x.enquiry.company)}</span>
-            <span className={`pill ${STATUS_PILL[x.status]}`} style={{ fontSize: 9 }}>
-              {x.status === 'building' && x.building ? `wk ${x.building.doneWeek}` : x.status}
-            </span>
-          </button>
-        ))}
-        {PROJECT.map((n) => (
-          <button
-            key={n.id}
-            className={`nav-item ${screen === n.id && !(n.id === 'studio' && g.studioPlantId) ? 'active' : ''}`}
-            onClick={() => {
-              g.openPlantStudio(null);
-              setScreen(n.id);
-            }}
-            disabled={!p}
-            style={{ paddingLeft: 22 }}
-          >
-            <NavIcon name={n.icon} />
-            {n.label}
-          </button>
-        ))}
-        {g.plants.some((x) => x.status === 'operating') && <div className="nav-section">Operating plants — PFD</div>}
-        {g.plants
-          .filter((x) => x.status === 'operating')
-          .map((x) => (
-            <button
-              key={x.id}
-              className={`nav-item ${screen === 'studio' && g.studioPlantId === x.id ? 'active' : ''}`}
-              onClick={() => {
-                g.openPlantStudio(x.id);
-                setScreen('studio');
-              }}
-              style={{ fontSize: 12 }}
-              title="Open the as-built PFD / P&ID; propose upgrades"
-            >
-              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{brand(x.company)}</span>
-              <span className={`pill ${x.upgrade?.phase === 'building' ? 'warn' : x.upgrade ? 'info' : 'pass'}`} style={{ fontSize: 9 }}>
-                {x.upgrade?.phase === 'building' ? `wk ${x.upgrade.doneWeek}` : x.upgrade ? 'upgrade' : 'O&M'}
-              </span>
-            </button>
+          <div className="nav-section">Business</div>
+          {BUSINESS.map((n) => (
+            <NavButton key={n.id} n={n} active={screen === n.id} onClick={() => setScreen(n.id)} />
           ))}
-        <div className="nav-section">Later phases</div>
-        {LOCKED.map((n) => (
-          <button key={n.label} className="nav-item" disabled title="Coming in a later development phase">
-            <NavIcon name={n.icon} />
-            {n.label}
-            <span className="lock">soon</span>
+          <div className="nav-section">Engineering</div>
+          <button
+            className={`nav-item ${PROJECT_SCREENS.includes(screen) && !(screen === 'studio' && g.studioPlantId) ? 'active' : ''}`}
+            onClick={() => {
+              openProjects();
+              if (!navCollapsed) setProjOpen(true);
+            }}
+            title={`Projects — ${live} of ${projectSlots(g.staff)} engineers busy`}
+          >
+            <NavIcon name="projects" />
+            <span className="nav-label">Projects</span>
+            <span className="nav-badge">
+              {live}/{projectSlots(g.staff)}
+            </span>
+            {!navCollapsed && g.projects.length > 0 && (
+              <span
+                className="nav-caret"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setProjOpen((v) => !v);
+                }}
+                title={projOpen ? 'Hide the project list' : 'Show the project list'}
+              >
+                {projOpen ? '▾' : '▸'}
+              </span>
+            )}
           </button>
-        ))}
-      </nav>
-      <main className="main">
+          {!navCollapsed &&
+            projOpen &&
+            g.projects.map((x) => (
+              <button
+                key={x.id}
+                className={`nav-item nav-sub ${g.activeProjectId === x.id && PROJECT_SCREENS.includes(screen) && !g.studioPlantId ? 'active' : ''}`}
+                onClick={() => {
+                  g.setActiveProject(x.id);
+                  if (!PROJECT_SCREENS.includes(screen) || g.studioPlantId) setScreen(x.status === 'design' ? 'studio' : 'commission');
+                }}
+              >
+                <span className="nav-label" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{brand(x.enquiry.company)}</span>
+                <span className={`pill ${STATUS_PILL[x.status]}`} style={{ fontSize: 9 }}>
+                  {x.status === 'building' && x.building ? `wk ${x.building.doneWeek}` : x.status}
+                </span>
+              </button>
+            ))}
+          {ENGINEERING_AFTER.map((n) => (
+            <NavButton key={n.id} n={n} active={screen === n.id} onClick={() => setScreen(n.id)} />
+          ))}
+          <div className="nav-section">Operations</div>
+          {OPERATIONS.map((n) => (
+            <NavButton key={n.id} n={n} active={screen === n.id || (n.id === 'plants' && screen === 'studio' && !!g.studioPlantId)} onClick={() => setScreen(n.id)} />
+          ))}
+          {g.devMode && (
+            <>
+              <div className="nav-section">Testing</div>
+              <NavButton n={{ id: 'dev', label: 'Developer tools', icon: 'dev' }} active={screen === 'dev'} onClick={() => setScreen('dev')} />
+            </>
+          )}
+        </nav>
+      )}
+      <main className={`main ${screen === 'studio' ? 'canvas' : ''}`}>
+        {PROJECT_SCREENS.includes(screen) && !(screen === 'studio' && g.studioPlantId) && !lay.focus && <ProjectStepper screen={screen} go={setScreen} />}
+        {screen === 'studio' && g.studioPlantId && !lay.focus && <PlantBar go={setScreen} />}
         {screen === 'hq' && <HQ go={setScreen} />}
         {screen === 'enquiries' && <Enquiries go={setScreen} />}
         {screen === 'lab' && <Laboratory go={setScreen} />}
@@ -229,6 +266,39 @@ function Game({ onQuit }: { onQuit: () => void }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function NavButton({ n, active, onClick }: { n: NavEntry; active: boolean; onClick: () => void }) {
+  return (
+    <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick} title={n.label}>
+      <NavIcon name={n.icon} />
+      <span className="nav-label">{n.label}</span>
+    </button>
+  );
+}
+
+/** Header over an operating plant's as-built PFD (in place of the project stepper). */
+function PlantBar({ go }: { go: (s: Screen) => void }) {
+  const g = useGame();
+  const plant = g.plants.find((x) => x.id === g.studioPlantId);
+  if (!plant) return null;
+  return (
+    <div className="stepper">
+      <button className="btn sm ghost" onClick={() => go('plants')}>
+        ‹ Plants &amp; O&amp;M
+      </button>
+      <span className="stepper-title">As-built PFD / P&amp;ID — {brand(plant.company)}</span>
+      <span className={`pill ${plant.upgrade?.phase === 'building' ? 'warn' : plant.upgrade ? 'info' : 'pass'}`} style={{ fontSize: 10 }}>
+        {plant.upgrade?.phase === 'building' ? `upgrade · wk ${plant.upgrade.doneWeek}` : plant.upgrade ? 'upgrade draft' : 'operating'}
+      </span>
+      <div className="stepper-steps">
+        <button className="step" onClick={() => go('scada')}>
+          <NavIcon name="scada" />
+          SCADA
+        </button>
+      </div>
     </div>
   );
 }

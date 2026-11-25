@@ -39,6 +39,8 @@ import { useSimulation } from './useSimulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
 import { brand } from '../prefs';
+import { PRESETS, STUDIO_DEFAULT, useLayout, type StudioPreset } from '../layout';
+import { Splitter } from '../components/Splitter';
 
 const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'daf', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'sulfide', 'aop', 'ionExchange', 'electrowinning', 'coagulation', 'activatedSludge', 'uasb', 'mbr', 'uf', 'ro', 'evaporator', 'thickener', 'filterPress', 'dryer', 'splitter', 'mixer'];
 /** kinds that may receive a sludge line */
@@ -219,6 +221,15 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
   const streamNos = useMemo(() => numberStreams(draft, sim?.order), [draft, sim?.order]);
   const [drawerTab, setDrawerTab] = useState<'compliance' | 'streams'>('compliance');
+  const L = useLayout();
+  const st = L.studio;
+  const [summaryOpen, setSummaryOpen] = useState(false);
+  // a preset (or focus mode) changes the canvas size a lot: refit the drawing once the grid has settled
+  useEffect(() => {
+    if (st.preset === 'custom') return;
+    const t = setTimeout(() => rf.fitView({ padding: 0.25, maxZoom: 1.1, duration: 200 }), 120);
+    return () => clearTimeout(t);
+  }, [st.preset, L.focus]); // eslint-disable-line react-hooks/exhaustive-deps
   const [sheet, setSheet] = useState<'pfd' | 'pid'>('pfd');
   const rfEdges: Edge[] = useMemo(
     () =>
@@ -385,6 +396,15 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
       const t = e.target as HTMLElement;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
       const mod = e.ctrlKey || e.metaKey;
+      if (!mod && !e.altKey) {
+        const ls = useLayout.getState();
+        const cur = ls.studio;
+        if (e.key === '[') ls.setStudio({ palette: cur.palette === 'full' ? 'rail' : cur.palette === 'rail' ? 'hidden' : 'full' });
+        else if (e.key === ']') ls.setStudio({ inspector: cur.inspector === 'docked' ? 'floating' : 'docked' });
+        else if (e.key === '`') ls.setStudio({ drawerOpen: !cur.drawerOpen });
+        else if (e.key === 'f' || e.key === 'F') ls.setFocus(!ls.focus);
+        return;
+      }
       if (!mod) return;
       const k = e.key.toLowerCase();
       if (k === 'z' && !e.shiftKey) {
@@ -464,11 +484,56 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
 
   const menuNode = menu ? draft.nodes.find((n) => n.id === menu.id) : undefined;
 
+  const inspectorBody = (
+    <>
+      {single && !isNonUnit(single) ? (
+        <UnitInspector node={single} editable={editable} sim={sim} onParam={updateParams} onInst={toggleInst} />
+      ) : selectedEdgeStream ? (
+        <StreamTable title="Pipe stream" s={selectedEdgeStream} />
+      ) : single?.kind === 'disposal' ? (
+        <DisposalInspector id={single.id} tag={single.tag ?? 'SD'} sim={sim} />
+      ) : single?.kind === 'influent' ? (
+        <>
+          <StreamTable
+            title={single.params.source ? `${basis.stream.side?.find((x) => x.id === single.params.source)?.label ?? 'Side'} stream (design basis)` : 'Raw wastewater (design basis)'}
+            s={single.params.source ? (basis.stream.side?.find((x) => x.id === single.params.source)?.stream ?? basis.stream) : mainInlet(basis.stream)}
+          />
+          <InstrumentSection node={single} editable={editable} onInst={toggleInst} />
+        </>
+      ) : selNodes.size > 1 ? (
+        <>
+          <h2>{selNodes.size} units selected</h2>
+          <p className="muted" style={{ fontSize: 12 }}>
+            Drag to move them together. <kbd>Del</kbd> deletes, <kbd>Ctrl D</kbd> duplicates.
+          </p>
+          <button className="btn sm danger" disabled={!editable} onClick={() => removeNodes([...selNodes])}>
+            Delete selection
+          </button>
+        </>
+      ) : plant ? (
+        <PlantPanel plant={plant} draft={draft} sim={sim} busy={busy} week={week} go={go} flush={flush} />
+      ) : (
+        <DesignSummary sim={sim} capexToCharge={capexToCharge} weeks={weeks} cash={cash} editable={editable} onCommission={doCommission} />
+      )}
+    </>
+  );
+  // ---------- workspace layout (per-device, src/ui/layout.ts)
+  const palW = st.palette === 'full' ? st.paletteW : st.palette === 'rail' ? 58 : 0;
+  const inspW = st.inspector === 'docked' ? st.inspectorW : 0;
+  const hasSel = !!single || !!selectedEdgeStream || selNodes.size > 1;
+  const reqFails = sim?.ok && p.enquiry.requirements ? evaluateRequirements(sim, p.enquiry.requirements).filter((c) => !c.pass).length : 0;
+
   return (
-    <div className="studio">
-      <aside className="palette">
-        <h2 style={{ fontSize: 12 }}>Unit processes</h2>
-        <p className="muted" style={{ fontSize: 11, marginTop: -4 }}>Drag onto the canvas, or click to add.</p>
+    <div className="studio" style={{ gridTemplateColumns: `${palW}px minmax(0, 1fr) ${inspW}px`, gridTemplateRows: `minmax(0, 1fr) ${st.drawerOpen ? `${st.drawerH}px` : 'auto'}` }}>
+      {st.palette !== 'hidden' && (
+      <aside className={`palette ${st.palette === 'rail' ? 'rail' : ''}`}>
+        <div className="panel-head">
+          <span className="hide-rail">Unit processes</span>
+          <button className="panel-btn" onClick={() => L.setStudio({ palette: st.palette === 'rail' ? 'full' : 'rail' })} title={st.palette === 'rail' ? 'Show names ([)' : 'Shrink to icons ([)'}>
+            {st.palette === 'rail' ? '»' : '«'}
+          </button>
+        </div>
+        <p className="muted hide-rail" style={{ fontSize: 11, marginTop: 0 }}>Drag onto the canvas, or click to add.</p>
         {(['physical', 'chemical', 'biological', 'sludge', 'hydraulic'] as const).map((cat) => (
           <div key={cat}>
             <div className="nav-section" style={{ padding: '8px 2px 4px', color: CATEGORY_COLOR[cat] }}>
@@ -482,12 +547,12 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
             {cat === 'hydraulic' && <DisposalPaletteItem reuse editable={editable && isUnitUnlocked('reclaim', tech)} onAdd={() => addUnit('reclaim')} />}
           </div>
         ))}
-        <div style={{ marginTop: 12 }}>
+        <div className="hide-rail" style={{ marginTop: 12 }}>
           <button className="btn sm" style={{ width: '100%' }} onClick={autoConnect} disabled={!editable} title="Connect units left-to-right in a single line">
             Auto-connect in series
           </button>
         </div>
-        <div className="muted shortcut-help">
+        <div className="muted shortcut-help hide-rail">
           <div>
             <kbd>Drag</kbd> outlet → inlet to pipe
           </div>
@@ -503,10 +568,59 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           <div>
             <kbd>Right-click</kbd> a unit for more
           </div>
+          <div>
+            <kbd>[</kbd> <kbd>]</kbd> <kbd>`</kbd> panels · <kbd>F</kbd> focus
+          </div>
         </div>
       </aside>
+      )}
 
       <div className="canvas-wrap" onDragOver={(e) => e.preventDefault()} onDrop={onDrop} onClick={() => menu && setMenu(null)}>
+        {st.palette === 'full' && <Splitter dir="x" sign={1} size={st.paletteW} onSize={(w) => L.setStudio({ paletteW: w })} onReset={() => L.setStudio({ paletteW: STUDIO_DEFAULT.paletteW })} className="edge-left" />}
+        {st.palette === 'hidden' && (
+          <button className="edge-tab edge-tab-left" onClick={() => L.setStudio({ palette: 'full' })} title="Show the unit palette ([)">
+            › Units
+          </button>
+        )}
+        {st.inspector === 'docked' && <Splitter dir="x" sign={-1} size={st.inspectorW} onSize={(w) => L.setStudio({ inspectorW: w })} onReset={() => L.setStudio({ inspectorW: STUDIO_DEFAULT.inspectorW })} className="edge-right" />}
+        {st.drawerOpen && <Splitter dir="y" sign={-1} size={st.drawerH} onSize={(h) => L.setStudio({ drawerH: h })} onReset={() => L.setStudio({ drawerH: STUDIO_DEFAULT.drawerH })} className="edge-bottom" />}
+        <div className="view-bar">
+          <select value={st.preset} onChange={(e) => e.target.value !== 'custom' && L.applyPreset(e.target.value as StudioPreset)} title="Workspace layout">
+            {st.preset === 'custom' && <option value="custom">Custom layout</option>}
+            {(Object.keys(PRESETS) as StudioPreset[]).map((k) => (
+              <option key={k} value={k} title={PRESETS[k].hint}>
+                {PRESETS[k].label} layout
+              </option>
+            ))}
+          </select>
+          <button className={`tb ${st.palette !== 'hidden' ? 'on' : ''}`} onClick={() => L.setStudio({ palette: st.palette === 'hidden' ? 'full' : 'hidden' })} title="Unit palette ([)">
+            ▥
+          </button>
+          <button className={`tb ${st.inspector === 'docked' ? 'on' : ''}`} onClick={() => L.setStudio({ inspector: st.inspector === 'docked' ? 'floating' : 'docked' })} title="Inspector: docked / floating (])">
+            ◨
+          </button>
+          <button className={`tb ${st.drawerOpen ? 'on' : ''}`} onClick={() => L.setStudio({ drawerOpen: !st.drawerOpen })} title="Results drawer (`)">
+            ▤
+          </button>
+          <button className={`tb ${st.titleBlock ? 'on' : ''}`} onClick={() => L.setStudio({ titleBlock: !st.titleBlock })} title="Drawing title block">
+            ⌗
+          </button>
+          <button className={`tb ${L.focus ? 'on' : ''}`} onClick={() => L.setFocus(!L.focus)} title="Focus mode: hide the menu and top bar (F · Esc to leave)">
+            ⛶
+          </button>
+        </div>
+        {st.inspector === 'floating' && (
+          <FloatingCard
+            // with nothing selected the card stays a small header (the summary on demand), so it doesn't cover the drawing
+            pos={{ ...st.float, min: hasSel ? st.float.min : !summaryOpen }}
+            title={single ? (single.tag ?? single.kind) : selectedEdgeStream ? 'Pipe stream' : plant ? 'Plant' : 'Design summary'}
+            onMove={(right, top) => L.setStudio({ float: { ...st.float, right, top } })}
+            onMin={() => (hasSel ? L.setStudio({ float: { ...st.float, min: !st.float.min } }) : setSummaryOpen((v) => !v))}
+            onDock={() => L.setStudio({ inspector: 'docked' })}
+          >
+            {inspectorBody}
+          </FloatingCard>
+        )}
         <ReactFlow
           nodes={rfNodes}
           edges={rfEdges}
@@ -634,7 +748,12 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
         )}
 
         <div className="sheet-frame" />
-        <div className="title-block">
+        {!st.titleBlock && (
+          <button className="title-tag" onClick={() => L.setStudio({ titleBlock: true })} title="Show the title block">
+            EE-{p.id.slice(-4).toUpperCase()}-PFD-001 · REV {String.fromCharCode(65 + Math.min(p.attempts, 25))}
+          </button>
+        )}
+        {st.titleBlock && <div className="title-block">
           <div>
             <span>PROCESS FLOW DIAGRAM</span>
             <span>REV {String.fromCharCode(65 + Math.min(p.attempts, 25))}</span>
@@ -663,9 +782,9 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
             <span>BY</span>
             <span>{companyName}</span>
           </div>
-        </div>
+        </div>}
         {plant && (
-          <div className="note info" style={{ position: 'absolute', top: 52, left: 10, right: 10, zIndex: 5, background: '#fff', color: 'var(--ink)' }}>
+          <div className="note info" style={{ position: 'absolute', top: 52, left: 10, right: 300, zIndex: 5, background: '#fff', color: 'var(--ink)' }}>
             {plant.upgrade?.phase === 'draft'
               ? `Upgrade draft — ${brand(plant.company)}. Changed and new units are priced as plant modification works (${Math.round((RETROFIT_PREMIUM - 1) * 100)} % rework premium; added instruments only for the instruments). Shown on today's influent.`
               : plant.upgrade?.phase === 'building'
@@ -674,44 +793,34 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           </div>
         )}
         {p.status === 'failed' && (
-          <div className="note error" style={{ position: 'absolute', top: 52, left: 10, right: 10, zIndex: 5, background: '#fff', color: 'var(--ink)' }}>
+          <div className="note error" style={{ position: 'absolute', top: 52, left: 10, right: 300, zIndex: 5, background: '#fff', color: 'var(--ink)' }}>
             Retrofit mode — the last commissioning failed. Modified or new units are charged at a {Math.round((RETROFIT_PREMIUM - 1) * 100)} % rework premium.
           </div>
         )}
       </div>
 
-      <aside className="inspector">
-        {single && !isNonUnit(single) ? (
-          <UnitInspector node={single} editable={editable} sim={sim} onParam={updateParams} onInst={toggleInst} />
-        ) : selectedEdgeStream ? (
-          <StreamTable title="Pipe stream" s={selectedEdgeStream} />
-        ) : single?.kind === 'disposal' ? (
-          <DisposalInspector id={single.id} tag={single.tag ?? 'SD'} sim={sim} />
-        ) : single?.kind === 'influent' ? (
-          <>
-            <StreamTable
-              title={single.params.source ? `${basis.stream.side?.find((x) => x.id === single.params.source)?.label ?? 'Side'} stream (design basis)` : 'Raw wastewater (design basis)'}
-              s={single.params.source ? (basis.stream.side?.find((x) => x.id === single.params.source)?.stream ?? basis.stream) : mainInlet(basis.stream)}
-            />
-            <InstrumentSection node={single} editable={editable} onInst={toggleInst} />
-          </>
-        ) : selNodes.size > 1 ? (
-          <>
-            <h2>{selNodes.size} units selected</h2>
-            <p className="muted" style={{ fontSize: 12 }}>
-              Drag to move them together. <kbd>Del</kbd> deletes, <kbd>Ctrl D</kbd> duplicates.
-            </p>
-            <button className="btn sm danger" disabled={!editable} onClick={() => removeNodes([...selNodes])}>
-              Delete selection
+      {st.inspector === 'docked' && (
+        <aside className="inspector">
+          <div className="panel-head">
+            <span>Inspector</span>
+            <button className="panel-btn" onClick={() => L.setStudio({ inspector: 'floating' })} title="Float the inspector over the canvas (])">
+              ⧉ Float
             </button>
-          </>
-        ) : plant ? (
-          <PlantPanel plant={plant} draft={draft} sim={sim} busy={busy} week={week} go={go} flush={flush} />
-        ) : (
-          <DesignSummary sim={sim} capexToCharge={capexToCharge} weeks={weeks} cash={cash} editable={editable} onCommission={doCommission} />
-        )}
-      </aside>
+          </div>
+          {inspectorBody}
+        </aside>
+      )}
 
+      {!st.drawerOpen && (
+        <button className="drawer strip" onClick={() => L.setStudio({ drawerOpen: true })} title="Show the results (`)">
+          <span>▴ Results</span>
+          {report ? <span className={`pill ${report.pass ? 'pass' : 'fail'}`}>{report.pass ? 'PREDICTED PASS' : `${report.checks.filter((c) => !c.pass).length} PARAMETER(S) FAIL`}</span> : <span className="muted">incomplete</span>}
+          {reqFails > 0 && <span className="pill fail">{reqFails} REQUIREMENT(S) FAIL</span>}
+          <span className="mono">CAPEX {rm(sim?.capex ?? 0)}</span>
+          <span className="mono">OPEX {rm(sim?.opexRMd ?? 0)}/d</span>
+        </button>
+      )}
+      {st.drawerOpen && (
       <section className="drawer">
         <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
           <div className="drawer-tabs">
@@ -722,7 +831,12 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
               Stream table (mass balance)
             </button>
           </div>
-          {report && <span className={`pill ${report.pass ? 'pass' : 'fail'}`}>{report.pass ? 'PREDICTED PASS' : `${report.checks.filter((c) => !c.pass).length} PARAMETER(S) FAIL`}</span>}
+          <div className="row" style={{ gap: 8 }}>
+            {report && <span className={`pill ${report.pass ? 'pass' : 'fail'}`}>{report.pass ? 'PREDICTED PASS' : `${report.checks.filter((c) => !c.pass).length} PARAMETER(S) FAIL`}</span>}
+            <button className="panel-btn" onClick={() => L.setStudio({ drawerOpen: false })} title="Hide the results — a status strip stays (`)">
+              ▾ Hide
+            </button>
+          </div>
         </div>
         {drawerTab === 'compliance' && !report && <p className="muted">Connect raw wastewater → units → final discharge to see the predicted effluent.</p>}
         {drawerTab === 'compliance' && report && <ComplianceTable checks={report.checks} />}
@@ -741,6 +855,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           />
         )}
       </section>
+      )}
     </div>
   );
 
@@ -841,14 +956,46 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
   }
 }
 
+/** Inspector as a card floating over the canvas: drag by its header, minimise, or dock back to the side. */
+function FloatingCard({ pos, title, onMove, onMin, onDock, children }: { pos: { right: number; top: number; min: boolean }; title: string; onMove: (right: number, top: number) => void; onMin: () => void; onDock: () => void; children: React.ReactNode }) {
+  const drag = useRef<{ x: number; y: number; right: number; top: number } | null>(null);
+  return (
+    <div className={`float-card ${pos.min ? 'min' : ''}`} style={{ right: pos.right, top: pos.top }} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="float-head"
+        onPointerDown={(e) => {
+          if ((e.target as HTMLElement).closest('button')) return;
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+          drag.current = { x: e.clientX, y: e.clientY, right: pos.right, top: pos.top };
+        }}
+        onPointerMove={(e) => {
+          if (!drag.current) return;
+          onMove(Math.max(0, drag.current.right - (e.clientX - drag.current.x)), Math.max(0, drag.current.top + (e.clientY - drag.current.y)));
+        }}
+        onPointerUp={() => (drag.current = null)}
+        title="Drag to move"
+      >
+        <span>{title}</span>
+        <button className="panel-btn" onClick={onMin} title={pos.min ? 'Expand' : 'Minimise'}>
+          {pos.min ? '▸' : '–'}
+        </button>
+        <button className="panel-btn" onClick={onDock} title="Dock to the side (])">
+          ⇥ Dock
+        </button>
+      </div>
+      {!pos.min && <div className="float-body">{children}</div>}
+    </div>
+  );
+}
+
 const PaletteItem = memo(function PaletteItem({ type, editable, locked, onAdd }: { type: UnitType; editable: boolean; locked: boolean; onAdd: (t: UnitType) => void }) {
   const cat = CATALOGUE[type].category;
   if (locked)
     return (
       <div className="palette-item" title="Advanced technology — research it in the Technology Tree" style={{ background: '#e9edf1', color: '#7a8796', cursor: 'not-allowed' }}>
         <UnitSymbol type={type} accent="#9aa7b4" />
-        <span style={{ flex: 1 }}>{CATALOGUE[type].name}</span>
-        <span aria-label="locked">🔒</span>
+        <span className="pi-name" style={{ flex: 1 }}>{CATALOGUE[type].name}</span>
+        <span className="pi-name" aria-label="locked">🔒</span>
       </div>
     );
   return (
@@ -864,7 +1011,7 @@ const PaletteItem = memo(function PaletteItem({ type, editable, locked, onAdd }:
       style={{ background: '#f4f6f8', color: 'var(--ink)', opacity: editable ? 1 : 0.5 }}
     >
       <UnitSymbol type={type} accent={CATEGORY_COLOR[cat]} />
-      {CATALOGUE[type].name}
+      <span className="pi-name">{CATALOGUE[type].name}</span>
     </div>
   );
 });
@@ -884,7 +1031,7 @@ function DisposalPaletteItem({ editable, onAdd, liquid, reuse }: { editable: boo
         style={{ background: '#f4f6f8', color: 'var(--ink)', opacity: editable ? 1 : 0.5 }}
       >
         <DisposalSymbol />
-        {editable ? 'Water Reclaim → Process' : '🔒 Water Reclaim'}
+        <span className="pi-name">{editable ? 'Water Reclaim → Process' : '🔒 Water Reclaim'}</span>
       </div>
     );
   return (
@@ -900,7 +1047,7 @@ function DisposalPaletteItem({ editable, onAdd, liquid, reuse }: { editable: boo
       style={{ background: '#f4f6f8', color: 'var(--ink)', opacity: editable ? 1 : 0.5 }}
     >
       {liquid ? <TankerSymbol /> : <DisposalSymbol />}
-      {liquid ? 'Liquid Waste Haulage' : 'Sludge Disposal'}
+      <span className="pi-name">{liquid ? 'Liquid Waste Haulage' : 'Sludge Disposal'}</span>
     </div>
   );
 }

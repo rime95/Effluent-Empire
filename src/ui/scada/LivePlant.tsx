@@ -251,12 +251,12 @@ function LivePlantInner({ plant, at, selected, onSelect }: { plant: Plant; at: T
 }
 
 /** Live plant canvas (own React Flow provider; remounts per plant so the view fits the new drawing). */
-export function LivePlant(props: { plant: Plant; at: TrendPoint | null; selected?: string; onSelect: (id: string) => void }) {
+export function LivePlant(props: { plant: Plant; at: TrendPoint | null; selected?: string; onSelect: (id: string) => void; /** CSS height override (maximised view) */ fill?: string }) {
   // canvas height follows the drawing: a one-row train needs less height than a plant with a sludge line or side streams
   const ys = props.plant.graph.nodes.map((n, i) => defaultPos(n, i, props.plant.graph.nodes.length).y);
   const height = Math.round(Math.min(520, Math.max(260, 230 + (Math.max(...ys) - Math.min(...ys)) * 0.55)));
   return (
-    <div style={{ height, background: 'var(--canvas)', borderRadius: 6, overflow: 'hidden' }}>
+    <div style={{ height: props.fill ?? height, background: 'var(--canvas)', borderRadius: 6, overflow: 'hidden' }}>
       <ReactFlowProvider key={props.plant.id}>
         <LivePlantInner {...props} />
       </ReactFlowProvider>

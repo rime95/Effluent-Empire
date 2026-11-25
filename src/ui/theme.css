@@ -274,3 +274,89 @@ kbd { font-family: var(--mono); font-size: 10.5px; padding: 0 4px; border: 1px s
 @media (prefers-reduced-motion: reduce) {
   .live-pipe, .tank-mixer, .tank-bubble, .tank-blink, .tank-vapour, .live-node.alarm .live-tank { animation: none; }
 }
+
+/* ---- app shell: collapsible navigation, focus mode, project stepper (layout.ts) ---- */
+.app { transition: grid-template-columns 0.15s ease; }
+.app.nav-rail { grid-template-columns: 56px 1fr; }
+.app.focus { grid-template-columns: 1fr; grid-template-rows: 40px 1fr; }
+.app.focus .topbar { grid-column: 1; gap: 16px; padding: 0 12px; }
+.app.focus .hide-focus { display: none; }
+.app.focus .main { grid-column: 1; }
+.sidebar .nav-toggle { color: var(--chrome-muted); font-size: 12px; margin-bottom: 2px; }
+.sidebar.rail { padding: 10px 6px; align-items: stretch; overflow-x: hidden; }
+.sidebar.rail .nav-item { justify-content: center; padding: 9px 0; position: relative; }
+.sidebar.rail .nav-label, .sidebar.rail .nav-caret { display: none; }
+.sidebar.rail .nav-section { font-size: 0; padding: 8px 0 4px; border-top: 1px solid var(--chrome-line); margin: 6px 8px 0; }
+.sidebar.rail .nav-section:first-of-type { border-top: none; }
+.sidebar.rail .nav-badge { position: absolute; top: 1px; right: 2px; font-size: 9px; padding: 0 4px; }
+.sidebar.rail .nav-item svg { width: 18px; height: 18px; }
+.nav-badge { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--chrome-muted); background: var(--chrome-2); border: 1px solid var(--chrome-line); border-radius: 999px; padding: 0 6px; }
+.nav-caret { width: 18px; text-align: center; color: var(--chrome-muted); border-radius: 4px; }
+.nav-caret:hover { background: var(--chrome-3); color: #fff; }
+.nav-item.nav-sub { padding: 6px 10px 6px 36px; font-size: 12px; }
+.main { min-height: 0; display: flex; flex-direction: column; }
+.main > .page { flex: none; }
+.main.canvas { overflow: hidden; }
+.stepper { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 14px; background: var(--chrome-1); border-bottom: 1px solid var(--chrome-line); min-height: 42px; flex-wrap: wrap; }
+.stepper-project { background: var(--chrome-2); color: #fff; border: 1px solid var(--chrome-line); border-radius: 6px; padding: 4px 8px; font-size: 13px; font-weight: 600; max-width: 320px; }
+.stepper-title { font-weight: 600; color: #fff; font-size: 13px; }
+.stepper-deadline { font-family: var(--mono); font-size: 12px; color: var(--chrome-muted); }
+.stepper-deadline.neg { color: var(--alarm); }
+.stepper-steps { margin-left: auto; display: flex; gap: 4px; }
+.stepper .step { display: flex; align-items: center; gap: 6px; background: transparent; border: 1px solid var(--chrome-line); color: var(--chrome-text); border-radius: 999px; padding: 4px 12px 4px 5px; font-size: 12px; cursor: pointer; }
+.stepper .step svg { width: 14px; height: 14px; }
+.stepper .step:hover { border-color: var(--flow); }
+.stepper .step.on { background: rgba(0, 169, 200, 0.15); border-color: var(--flow); color: #fff; }
+.stepper .step-no { width: 18px; height: 18px; border-radius: 50%; background: var(--chrome-3); display: inline-grid; place-items: center; font-family: var(--mono); font-size: 10px; }
+.stepper .step.on .step-no { background: var(--flow); color: #04212a; }
+
+/* ---- engineering studio workspace: collapsible / resizable panels (layout.ts) ---- */
+.studio { flex: 1 1 auto; min-height: 0; height: auto; }
+.app.focus .studio { height: auto; }
+.drawer { max-height: none; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin: -2px 0 8px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--chrome-muted); }
+.panel-btn { background: transparent; border: 1px solid var(--chrome-line); color: var(--chrome-text); border-radius: 5px; padding: 1px 7px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+.panel-btn:hover { border-color: var(--flow); color: #fff; }
+/* icon-rail palette */
+.palette.rail { padding: 8px 6px; }
+.palette.rail .panel-head { justify-content: center; margin-bottom: 6px; }
+.palette.rail .hide-rail, .palette.rail .pi-name { display: none; }
+.palette.rail .nav-section { font-size: 0; padding: 4px 0; border-top: 2px solid currentColor; margin: 6px 4px 4px; opacity: 0.6; }
+.palette.rail .palette-item { justify-content: center; padding: 5px 2px; }
+.palette.rail .palette-item svg { width: 36px; height: 26px; }
+/* splitters on the canvas edges */
+.splitter { position: absolute; z-index: 9; background: transparent; transition: background 0.1s; }
+.splitter:hover, body.resizing-x .splitter-x, body.resizing-y .splitter-y { background: rgba(0, 169, 200, 0.45); }
+.splitter-x { top: 0; bottom: 0; width: 6px; cursor: col-resize; }
+.splitter-y { left: 0; right: 0; height: 6px; cursor: row-resize; }
+.splitter.edge-left { left: -3px; }
+.splitter.edge-right { right: -3px; }
+.splitter.edge-bottom { bottom: -3px; }
+body.resizing-x, body.resizing-x * { cursor: col-resize !important; user-select: none; }
+body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select: none; }
+.edge-tab { position: absolute; z-index: 8; background: var(--chrome-1); color: var(--chrome-text); border: 1px solid var(--chrome-line); font-size: 11px; padding: 6px 8px; cursor: pointer; }
+.edge-tab:hover { border-color: var(--flow); color: #fff; }
+.edge-tab-left { left: 0; top: 50%; transform: translateY(-50%); border-left: none; border-radius: 0 6px 6px 0; writing-mode: vertical-rl; }
+/* view bar (layout presets and panel toggles) — visible on PFD and P&ID */
+.view-bar { position: absolute; top: 48px; right: 12px; z-index: 8; display: flex; align-items: center; gap: 2px; background: var(--paper); border: 1px solid var(--ink-line); border-radius: 6px; padding: 3px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+.view-bar select { border: 1px solid var(--ink-line); background: #fff; color: var(--ink); border-radius: 4px; font-size: 12px; padding: 2px 4px; margin-right: 4px; }
+.view-bar .tb { background: transparent; border: 1px solid transparent; color: var(--ink); border-radius: 4px; padding: 2px 8px; font-size: 14px; cursor: pointer; line-height: 1.2; }
+.view-bar .tb:hover { border-color: var(--ink-line); background: #f1f4f7; }
+.view-bar .tb.on { background: rgba(0, 169, 200, 0.12); border-color: rgba(0, 169, 200, 0.4); }
+.sheet-tabs { z-index: 8; }
+/* floating inspector */
+.float-card { position: absolute; z-index: 10; width: 340px; max-height: calc(100% - 110px); display: flex; flex-direction: column; background: var(--chrome-1); border: 1px solid var(--chrome-line); border-radius: 8px; box-shadow: 0 10px 30px rgba(4, 12, 22, 0.45); color: var(--chrome-text); }
+.float-card.min { width: auto; min-width: 200px; }
+.float-head { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; cursor: move; border-bottom: 1px solid var(--chrome-line); font-size: 12px; font-weight: 600; color: #fff; user-select: none; touch-action: none; }
+.float-head span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.float-card.min .float-head { border-bottom: none; }
+.float-body { overflow-y: auto; padding: 12px 14px; }
+/* collapsed results drawer → status strip */
+.drawer.strip { grid-column: 2; grid-row: 2; display: flex; align-items: center; gap: 12px; padding: 6px 14px; border: none; border-top: 1px solid var(--chrome-line); background: var(--chrome-1); color: var(--chrome-text); font-size: 12px; cursor: pointer; text-align: left; overflow: hidden; white-space: nowrap; }
+.drawer.strip:hover { background: var(--chrome-2); }
+.drawer.strip .mono { font-family: var(--mono); color: var(--chrome-muted); }
+/* compact title tag when the title block is hidden */
+.title-tag { position: absolute; right: 12px; bottom: 12px; z-index: 5; background: var(--paper); border: 1px solid var(--ink-line); color: var(--ink-muted); font-family: var(--mono); font-size: 10px; padding: 3px 8px; border-radius: 4px; cursor: pointer; }
+.title-tag:hover { border-color: var(--ink); color: var(--ink); }
+/* SCADA maximise */
+.scada-max-hide { display: none !important; }

@@ -345,6 +345,12 @@ export function NavIcon({ name }: { name: string }) {
     map: <path d="M9 4l-6 2v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14" {...p} />,
     finance: <path d="M4 20V10M10 20V4M16 20v-7M22 20H2" {...p} />,
     staff: <path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M17 11a3 3 0 1 0 0-6M22 21a6 6 0 0 0-4-5.6" {...p} />,
+    projects: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zM8 13h8M8 16h5" {...p} />,
+    plant: <path d="M3 21V11l5 3V11l5 3V7l4 2v12zM2 21h20M17 9V4h3v17" {...p} />,
+    dev: <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z" {...p} />,
+    collapse: <path d="M15 5l-7 7 7 7M20 5v14" {...p} />,
+    expand: <path d="M9 5l7 7-7 7M4 5v14" {...p} />,
+    focus: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" {...p} />,
   };
   return <svg viewBox="0 0 24 24">{paths[name]}</svg>;
 }
