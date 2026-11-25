@@ -26,6 +26,8 @@ export const FENTON = {
   /** COD adsorbed / enmeshed on the Fe(OH)₃ floc at neutralisation, g COD per g Fe, capped at a share of the remaining S_I */
   sorbPerFe: 0.5,
   sorbMaxFrac: 0.3,
+  /** relative •OH reactivity of refractory S_I vs biodegradable S_S */
+  siSelectivity: 10,
 };
 
 export function fenton(s: Stream, p: { h2o2_mgL: number; feRatio: number; pHset: number; volume_m3: number }): ProcessResult {
@@ -39,7 +41,9 @@ export function fenton(s: Stream, p: { h2o2_mgL: number; feRatio: number; pHset:
   // attacked S_I a share is only partially oxidised (ring opening → biodegradable S_S, costing FENTON.partialO2 of its COD),
   // the rest mineralised — so a small dose before biology makes refractory COD treatable (GAME MODEL)
   const oxidant = (eta * p.h2o2_mgL) / FENTON.h2o2PerCOD;
-  const fs_ = sol > 0 ? a.SS / sol : 0;
+  // •OH reacts ~10–100× faster with aromatic refractory organics than with simple acids/sugars (rate constants ~10⁹–10¹⁰ vs
+  // ~10⁷–10⁸ M⁻¹s⁻¹): the radicals go preferentially to S_I (selectivity weight, GAME MODEL, verify)
+  const fs_ = sol > 0 ? a.SS / (a.SS + FENTON.siSelectivity * a.SI) : 0;
   const costPerAttacked = fs_ * 1 + (1 - fs_) * (FENTON.partialFrac * FENTON.partialO2 + (1 - FENTON.partialFrac));
   const attacked = Math.min(FENTON.capFrac * sol, costPerAttacked > 0 ? oxidant / costPerAttacked : 0);
   const atkSS = attacked * fs_;

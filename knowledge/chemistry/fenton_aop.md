@@ -18,3 +18,5 @@ GAME MODEL, all `verify:` with jar tests:
 - **Iron-floc removal:** at neutralisation the Fe(OH)₃ floc adsorbs and enmeshes remaining S_I. Up to 0.5 g COD per g Fe, capped at 30 % of the S_I, moves to particulate X_I and leaves with the iron sludge in the downstream clarifier.
 - **Display:** the coagulation step's pH-window and dissolved-iron warnings are no longer shown (dissolved iron at pH 3 is intended). Its chemicals keep their own names; only the ferric line reads "Iron catalyst (Fenton, as FeCl₃)".
 - **Not tested yet** (user asked to skip): a mass-balance and dose-response test is still owed.
+
+- **Selectivity (2026-11-26):** radicals are shared between S_S and S_I weighted 1 : 10 (`siSelectivity`). Rate constants of •OH with aromatics (about 10⁹–10¹⁰ M⁻¹s⁻¹) are far above those with acetate or sugars (about 10⁷–10⁸ M⁻¹s⁻¹), so pre-oxidation before biology is not wasted on biodegradable COD. `verify:`
