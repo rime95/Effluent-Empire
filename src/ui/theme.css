@@ -360,3 +360,6 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 .title-tag:hover { border-color: var(--ink); color: var(--ink); }
 /* SCADA maximise */
 .scada-max-hide { display: none !important; }
+
+/* O&M contract renewal box (Plants) */
+.renewal { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--chrome-line); border-radius: 8px; background: var(--chrome-2); }

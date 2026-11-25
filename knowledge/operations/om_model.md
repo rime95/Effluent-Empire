@@ -135,3 +135,22 @@ Lab tests and construction finish on future weeks; the company clock only moves 
 **Legacy behaviour:** builds already in progress in old saves (paid up front) still receive the 60 % at completion.
 
 **Probe (tests):** a typical default-sized train costs 60–75 % of the contract value. The loss was cash timing, not margin.
+
+## Renewal (added 2026-11-26, user request: both sides must agree)
+- **When:** in the contract's last 13 weeks (`OM.renewalNoticeWeeks`, 3 months' notice).
+- **Client side:** it offers to renew only at satisfaction ≥ 60 % (`renewMinSatisfaction`). The offer is the same terms for another 3 years, at the current fixed fee escalated one more year (+4 %). An unsatisfied client says once that it does not plan to renew; it still offers if satisfaction recovers before the end.
+- **Your side:** accept, decline, or counter once with a higher fee. The client accepts a counter up to its offer × (1 + 20 % × (satisfaction − 60)/40): +0 % at 60 %, +20 % at 100 % (`counterMaxPremium`, GAME MODEL). A rejected counter leaves the original offer open.
+- **At the end date:** an accepted renewal starts a new contract period on the agreed fee (escalation restarts from it); a satisfied client still gives +5 reputation. An offer not answered by then lapses, and the plant is handed back (expired).
+
+## Stable plants: no re-simulation (added 2026-11-26, user request: performance)
+A plant that has passed every weekly sample for 8 weeks (`OM.stableWeeks`) on its current design, with no incident or breakdown, is proven on its feed. Its last full simulation is reused (`Plant.steady`):
+- the running costs are scaled with production, and the weekly sample counts as compliant;
+- the weekly record is marked `stable`, and Plants & O&M shows "stable — reused".
+
+A full simulation runs again when:
+- the design changes (an upgrade handed over: `graphKey`);
+- production has grown another 5 % since the last full run (`stableFlowStep`, about every 33 weeks);
+- an incident or breakdown occurs;
+- a sample fails (then 8 clean weeks are needed again).
+
+GAME MODEL: the weekly influent noise is not re-sampled while stable. A plant with real margin passes it anyway; a marginal plant fails long before it becomes stable.

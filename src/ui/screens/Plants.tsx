@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { supervisedPlantIds, useGame } from '../../game/store';
 import { OM, Plant, WEEKS_PER_MONTH, plantPosts, recommendedMaintenance } from '../../game/operations';
@@ -89,7 +89,11 @@ export function Plants({ go }: { go: (s: Screen) => void }) {
                     <td>{last ? <span className={`pill ${last.pass ? 'pass' : 'fail'}`}>{last.pass ? 'PASS' : `FAIL ${last.failed.join(', ')}`}</span> : <span className="muted">—</span>}</td>
                     <td className="num">{p.contract ? rm(p.contract.monthlyFee) : '—'}</td>
                     <td className="num" style={{ color: last && last.revenue - last.cost < 0 ? '#ff9c9c' : undefined }}>{last ? rm(last.revenue - last.cost) : '—'}</td>
-                    <td className="muted">{p.contract ? `${p.contract.endWeek - g.week} wk left` : '—'}</td>
+                    <td className="muted">
+                      {p.contract ? `${p.contract.endWeek - g.week} wk left` : '—'}
+                      {p.renewal?.status === 'offered' && <span className="pill warn" style={{ marginLeft: 6, fontSize: 9 }}>RENEWAL OFFER</span>}
+                      {p.renewal?.status === 'accepted' && <span className="pill pass" style={{ marginLeft: 6, fontSize: 9 }}>RENEWED</span>}
+                    </td>
                     <td>{p.satisfaction.toFixed(0)} %</td>
                   </tr>
                 );
@@ -99,6 +103,70 @@ export function Plants({ go }: { go: (s: Screen) => void }) {
         </div>
       )}
       {plant && <PlantDetail plant={plant} go={go} />}
+    </div>
+  );
+}
+
+/** O&M contract renewal: the client offers in the last weeks; the player accepts, declines or counters once. */
+function RenewalBox({ plant }: { plant: Plant }) {
+  const g = useGame();
+  const c = plant.contract!;
+  const r = plant.renewal;
+  const opens = c.endWeek - OM.renewalNoticeWeeks;
+  // counter-offer field: offer + 10 % once an offer exists
+  const [ask, setAsk] = useState<number>(0);
+  useEffect(() => {
+    if (r) setAsk(Math.round((r.monthlyFee * 1.1) / 10) * 10);
+  }, [r?.monthlyFee]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="renewal">
+      <h2 style={{ fontSize: 12, margin: '0 0 6px' }}>Contract renewal</h2>
+      <div className="calc">
+        <span>Contract ends</span>
+        <span>
+          week {c.endWeek} ({c.endWeek - g.week} wk)
+        </span>
+      </div>
+      {!r && g.week < opens && <p className="muted" style={{ fontSize: 12, margin: '4px 0 0' }}>Renewal talks open in week {opens} ({OM.renewalNoticeWeeks} weeks before the end). The client offers to renew if its satisfaction is at least {OM.renewMinSatisfaction} % (now {Math.round(plant.satisfaction)} %).</p>}
+      {!r && g.week >= opens && (
+        <div className="note warn" style={{ marginTop: 6 }}>
+          No renewal offer — the client&apos;s satisfaction is {Math.round(plant.satisfaction)} %, it needs {OM.renewMinSatisfaction} %. Keep the plant compliant; it may still offer before week {c.endWeek}.
+        </div>
+      )}
+      {r?.status === 'offered' && (
+        <>
+          <div className="calc">
+            <span>Client&apos;s offer (3 more years)</span>
+            <span style={{ color: '#fff' }}>{rm(r.monthlyFee)}/month</span>
+          </div>
+          <div className="calc">
+            <span>Current fee</span>
+            <span>{rm(c.monthlyFee)}/month</span>
+          </div>
+          <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+            <button className="btn sm primary" onClick={() => g.respondRenewal(plant.id, 'accept')}>
+              Accept {rm(r.monthlyFee)}
+            </button>
+            <button className="btn sm danger" onClick={() => g.respondRenewal(plant.id, 'decline')}>
+              Decline
+            </button>
+          </div>
+          {!r.countered ? (
+            <div className="row" style={{ gap: 6, marginTop: 8, alignItems: 'center' }}>
+              <span className="muted" style={{ fontSize: 12 }}>Counter (once):</span>
+              <input type="number" step={100} min={r.monthlyFee + 10} value={ask} onChange={(e) => setAsk(Number(e.target.value))} style={{ width: 110 }} />
+              <button className="btn sm" onClick={() => g.respondRenewal(plant.id, 'counter', ask)}>
+                Propose
+              </button>
+            </div>
+          ) : (
+            <p className="muted" style={{ fontSize: 12, margin: '6px 0 0' }}>Your counter-offer was rejected — the client&apos;s offer stands.</p>
+          )}
+          <p className="muted" style={{ fontSize: 11, margin: "6px 0 0" }}>A more satisfied client accepts a higher counter-offer (up to +{Math.round(OM.counterMaxPremium * 100)} % at 100 % satisfaction; now {Math.round(plant.satisfaction)} %). An offer still open at the end lapses.</p>
+        </>
+      )}
+      {r?.status === 'accepted' && <div className="note info" style={{ marginTop: 6 }}>Renewal agreed: {rm(r.agreedFee ?? r.monthlyFee)}/month for {Math.round(r.weeks / 52)} more years from week {c.endWeek}.</div>}
+      {r?.status === 'declined' && <div className="note warn" style={{ marginTop: 6 }}>You declined the renewal — the contract ends in week {c.endWeek}.</div>}
     </div>
   );
 }
@@ -167,6 +235,15 @@ function PlantDetail({ plant, go }: { plant: Plant; go: (s: Screen) => void }) {
           <span>Production growth (flow)</span>
           <span>×{(plant.history[plant.history.length - 1]?.flowFactor ?? 1).toFixed(2)}</span>
         </div>
+        {plant.status === 'operating' && (
+          <div className="calc" title={`After ${OM.stableWeeks} compliant weeks with no incident, the last full simulation is reused until the design changes or production grows another ${Math.round(OM.stableFlowStep * 100)} %.`}>
+            <span>Weekly simulation</span>
+            <span style={{ color: plant.history[plant.history.length - 1]?.stable ? '#6fd39a' : undefined }}>
+              {plant.history[plant.history.length - 1]?.stable ? `stable — reused (last run week ${plant.steady?.week ?? '—'})` : 'full simulation each week'}
+            </span>
+          </div>
+        )}
+        {plant.contract && <RenewalBox plant={plant} />}
         {plant.status === 'operating' && (
           <div className="field" style={{ marginTop: 12 }}>
             <label>Maintenance budget (RM / week) — recommended {rm(rec)} (2 % of CAPEX per year)</label>

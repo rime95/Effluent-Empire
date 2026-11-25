@@ -9,7 +9,7 @@ import { LAB_TESTS, LabTestId, applyTest } from './lab';
 import { Market, initialMarket, stepMarket } from './market';
 import { INCIDENT_LABEL, availableActions, clampSetpoint } from './incidents';
 import { importLegacy, newSlotId, readSlot, summarize, writeSlot } from './saves';
-import { OM, Plant, contractFor, omFeeQuote, operateWeek, plantPosts, recommendedMaintenance } from './operations';
+import { OM, Plant, contractFor, counterCeiling, omFeeQuote, operateWeek, plantPosts, recommendedMaintenance } from './operations';
 import { simulate } from '../simulation/treatment/graph';
 import { completeUpgrade, upgradeQuote } from './upgrade';
 import { TECH, TECH_ORDER, TechId, canResearch } from './tech';
@@ -134,6 +134,8 @@ interface Actions {
   acceptOM: (projectId: string) => void;
   declineOM: (projectId: string) => void;
   setMaintenance: (plantId: string, rmPerWeek: number) => void;
+  /** answer a client's O&M renewal offer: accept it, decline it, or counter once with a higher fee (RM/month) */
+  respondRenewal: (plantId: string, action: 'accept' | 'decline' | 'counter', fee?: number) => { ok: boolean; text: string };
   /** SCADA: take an incident action (costs RM; clears the incident only if it addresses the cause) */
   resolveIncident: (plantId: string, actionId: string) => { ok: boolean; text: string };
   /** SCADA: change an operating set-point on an operated plant (persists into its as-built graph) */
@@ -676,6 +678,35 @@ export const useGame = create<GameState & Actions>((set, get) => {
         };
       }),
     setMaintenance: (plantId, rm) => set((s) => ({ plants: s.plants.map((p) => (p.id === plantId ? { ...p, maintenanceBudget: Math.max(0, Math.round(rm)) } : p)) })),
+    respondRenewal: (plantId, action, fee) => {
+      const s = get();
+      const pl = s.plants.find((p) => p.id === plantId);
+      const r = pl?.renewal;
+      if (!pl || !r || r.status !== 'offered' || !pl.contract) return { ok: false, text: 'No open renewal offer.' };
+      let next = r;
+      let text: string;
+      if (action === 'accept') {
+        next = { ...r, status: 'accepted', agreedFee: r.monthlyFee };
+        text = `Renewal agreed with ${pl.company}: RM ${r.monthlyFee.toLocaleString()}/month from week ${pl.contract.endWeek}.`;
+      } else if (action === 'decline') {
+        next = { ...r, status: 'declined' };
+        text = `You declined to renew with ${pl.company}. The contract ends in week ${pl.contract.endWeek}.`;
+      } else {
+        if (r.countered) return { ok: false, text: 'You have already countered once — accept or decline the offer.' };
+        const ask = Math.round(Number(fee) / 10) * 10;
+        if (!(ask > r.monthlyFee)) return { ok: false, text: 'A counter-offer must be above the offer of the client.' };
+        const ceiling = counterCeiling(pl, r);
+        if (ask <= ceiling) {
+          next = { ...r, status: 'accepted', countered: true, agreedFee: ask };
+          text = `${pl.company} accepted your counter-offer: RM ${ask.toLocaleString()}/month from week ${pl.contract.endWeek}.`;
+        } else {
+          next = { ...r, countered: true };
+          text = `${pl.company} rejected RM ${ask.toLocaleString()}/month — its offer of RM ${r.monthlyFee.toLocaleString()}/month stands. Accept or decline.`;
+        }
+      }
+      set({ plants: s.plants.map((p) => (p.id === plantId ? { ...p, renewal: next } : p)), toast: text });
+      return { ok: true, text };
+    },
     hire: (cid) =>
       set((s) => {
         const c = s.candidates.find((x) => x.id === cid);

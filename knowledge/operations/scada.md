@@ -61,3 +61,6 @@ The SCADA screen opens on a **live plant view**: the as-built PFD (same node pos
   - Alarm thresholds match the alarm log: DO < 0.5, EQ level > 95 %, probe more than 0.5 pH from the set-point, pump at 100 %.
   - A tag whose instrument is not installed shows "no instrument".
   - Units with no tags show outlet flow and a quality word (clean / treated / turbid / raw).
+
+## Weekly grab sample of manually controlled plants: cached replay (2026-11-26)
+User report: "Next week" was slow. A plant missing a pH or DO loop re-ran a 20 h dynamic replay every week (~1.5–1.8 s per plant). `cachedManualGrab` (operations.ts) now runs the replay once per plant design, standard and 5 % production step, on the design influent scaled to that flow, and each week picks its sampling hour from it. GAME MODEL: weekly influent noise reaches the result through the steady simulation (combined with the sample), not through the replay. About 28× faster per plant-week.

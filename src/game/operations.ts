@@ -69,6 +69,18 @@ export const OM = {
   engineerFixChance: 0.5,
   /** SCADA field actions that miss the cause cost this fraction on an engineer-supervised plant (the engineer narrows the diagnosis) */
   engineerWrongActionFactor: 0.5,
+  // ---- contract renewal (GAME MODEL, knowledge/operations/om_model.md "Renewal") ----
+  /** the renewal is negotiated in the contract's last 13 weeks (3 months' notice) */
+  renewalNoticeWeeks: 13,
+  /** the client offers to renew only at or above this satisfaction */
+  renewMinSatisfaction: 60,
+  /** a counter-offer is accepted up to this premium over the client's offer, scaled from 0 at renewMinSatisfaction to the full premium at 100 % */
+  counterMaxPremium: 0.2,
+  // ---- stable plants (performance) ----
+  /** consecutive compliant weeks, with no incident or breakdown, after which the steady result is reused */
+  stableWeeks: 8,
+  /** production growth since the last full simulation that forces a new one (fraction of flow) */
+  stableFlowStep: 0.05,
 };
 
 export interface Breakdown {
@@ -94,6 +106,8 @@ export interface WeekRecord {
   fee?: number;
   reimbursed?: number;
   deduction?: number;
+  /** the plant was proven stable: last full simulation reused (no new simulation this week) */
+  stable?: boolean;
   /** cost split, RM this week */
   costs?: { maintenance: number; repairs: number; opex: number; service: number; actions: number; fines: number };
 }
@@ -127,6 +141,29 @@ export interface OMContract {
   weeklyFee?: number;
 }
 
+/** Renewal of an O&M contract: the client's offer and the outcome (both sides must agree). */
+export interface RenewalOffer {
+  offeredWeek: number;
+  /** the client's offer, RM/month: the current fee escalated one more year */
+  monthlyFee: number;
+  weeks: number;
+  status: 'offered' | 'accepted' | 'declined';
+  /** the player has used the one counter-offer */
+  countered?: boolean;
+  /** fee both sides agreed, RM/month (accepted offers) */
+  agreedFee?: number;
+}
+
+/** Last full weekly simulation of a stable plant, reused while nothing that matters changes. */
+export interface SteadyCache {
+  week: number;
+  /** first week this design has been simulated without a break (the stable run must be on THIS design) */
+  sinceWeek: number;
+  graphKey: string;
+  flowFactor: number;
+  opexSplit: { chemicals: number; energy: number; sludge: number; credit?: number };
+}
+
 export interface Plant {
   id: string;
   company: string;
@@ -153,6 +190,39 @@ export interface Plant {
   incidentLog?: { week: number; unitId: string; kind?: IncidentKind; used?: boolean }[];
   history: WeekRecord[];
   status: 'operating' | 'handedOver' | 'terminated' | 'expired';
+  /** renewal negotiation in the contract's final weeks (absent = none yet) */
+  renewal?: RenewalOffer | null;
+  /** the client was told it will not renew (unsatisfied) — sent once per contract */
+  renewalRefusedWeek?: number;
+  /** reused weekly simulation of a stable plant (absent/null = simulate) */
+  steady?: SteadyCache | null;
+}
+
+/** The client's renewal offer: same terms for another contract period, the fixed fee escalated one more year. */
+export function renewalOffer(p: Plant, week: number): RenewalOffer | null {
+  if (!p.contract) return null;
+  return { offeredWeek: week, monthlyFee: indexedFee(p.contract.quote, (p.contract.indexation ?? 1) * (1 + OM.escalation)), weeks: OM.contractWeeks, status: 'offered' };
+}
+
+/** Highest counter-offer fee the client accepts: up to +20 % on its offer for a fully satisfied client (GAME MODEL). */
+export function counterCeiling(p: Plant, offer: RenewalOffer): number {
+  const f = Math.max(0, Math.min(1, (p.satisfaction - OM.renewMinSatisfaction) / (100 - OM.renewMinSatisfaction)));
+  return Math.round((offer.monthlyFee * (1 + OM.counterMaxPremium * f)) / 10) * 10;
+}
+
+/** Stable key of a process design (graph changes → a new full simulation). */
+export function graphKey(g: ProcessGraph): string {
+  const s = JSON.stringify({ n: g.nodes.map((x) => [x.id, x.kind, x.params, x.inst ?? null]), e: g.edges });
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return `${h.toString(36)}:${s.length}`;
+}
+
+/** compliant weeks in a row at the end of the history, with no event */
+function passStreak(h: WeekRecord[]): number {
+  let n = 0;
+  for (let i = h.length - 1; i >= 0 && h[i].pass && !h[i].event; i--) n++;
+  return n;
 }
 
 export function recommendedMaintenance(capex: number): number {
@@ -293,6 +363,32 @@ export function routineGrabSample(g: ProcessGraph, inf: Stream, std: StandardId,
   return { pass: pt.pass, failed: pt.failed };
 }
 
+/**
+ * Weekly grab sample of a manually controlled plant, from a cached 20 h dynamic replay (performance, GAME MODEL).
+ * The replay depends on the design, the standard and the production level, not on the week: it runs once per plant
+ * design and 5 % flow step (growth is 0.15 %/week, so about every 33 weeks) on the design influent scaled to that
+ * flow; each week only picks its sampling hour. Weekly influent variability still enters through the steady
+ * simulation, which the sample result is combined with. Before this the replay re-ran every week (~1.5 s per plant).
+ */
+const MANUAL_GRAB_CACHE = new Map<string, { t: number; pass: boolean; failed: string[] }[]>();
+export function cachedManualGrab(p: Plant, flowFactor: number, tH: number): { pass: boolean; failed: string[] } {
+  const step = Math.round(flowFactor / 0.05) * 0.05;
+  const key = `${p.id}|${p.standard}|${step.toFixed(2)}|${JSON.stringify(p.graph.nodes)}|${JSON.stringify(p.graph.edges)}`;
+  let pts = MANUAL_GRAB_CACHE.get(key);
+  if (!pts) {
+    const inf = cloneStream(p.trueStream);
+    const g = mapInlets(inf, (x) => ({ ...x, Q: x.Q * step }));
+    inf.Q = g.Q;
+    inf.side = g.side;
+    const r = runDynamic(p.graph, inf, p.standard, { hours: 20, disturbances: [], warmBase: p.trueStream });
+    pts = r.points.map((x) => ({ t: x.t, pass: x.pass, failed: x.failed }));
+    if (MANUAL_GRAB_CACHE.size > 64) MANUAL_GRAB_CACHE.delete(MANUAL_GRAB_CACHE.keys().next().value!);
+    MANUAL_GRAB_CACHE.set(key, pts);
+  }
+  const pt = pts.reduce((b, x) => (Math.abs(x.t - tH) < Math.abs(b.t - tH) ? x : b), pts[0]);
+  return { pass: pt.pass, failed: pt.failed };
+}
+
 export function incidentGrabSample(g: ProcessGraph, inf: Stream, std: StandardId, inc: Incident, tH: number, warmBase?: Stream): { pass: boolean; failed: string[] } {
   // warm state from the plant's design stream → cached across weeks (weekly influent noise does not force a new warm-up)
   const r = runDynamic(g, inf, std, { hours: Math.ceil(tH + 1), disturbances: incidentDisturbances(inc), warmBase });
@@ -397,24 +493,42 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   const infG = mapInlets(inf, (x) => ({ ...x, Q: x.Q * flowFactor }));
   inf.Q = infG.Q;
   inf.side = infG.side;
-  const disturbed = applyIncidentSteady(degradedGraph(p.graph, p.breakdown), inf, p.incident ?? null);
-  const sim = simulate(disturbed.graph, disturbed.influent);
-  costs.opex = sim.ok ? 7 * marketOpex(sim.opexSplit, market) : 0;
+  // A plant that has passed every weekly sample for OM.stableWeeks with no incident or breakdown is proven on this
+  // feed: its last full simulation is reused (running costs scaled with flow, sample compliant) until the design
+  // changes, production grows another 5 %, or something goes wrong (GAME MODEL, performance — om_model.md).
+  const key = graphKey(p.graph);
+  const st = p.steady;
+  const stable = !!st && st.graphKey === key && !p.incident && !p.breakdown && Math.abs(flowFactor - st.flowFactor) < OM.stableFlowStep && passStreak(p.history) >= OM.stableWeeks && week - st.sinceWeek >= OM.stableWeeks;
+  let pass: boolean;
+  let failed: string[];
+  let simOk = true;
+  if (stable && st) {
+    const k = flowFactor / st.flowFactor;
+    const split = { chemicals: st.opexSplit.chemicals * k, energy: st.opexSplit.energy * k, sludge: st.opexSplit.sludge * k, credit: (st.opexSplit.credit ?? 0) * k };
+    costs.opex = 7 * marketOpex(split, market);
+    pass = true;
+    failed = [];
+  } else {
+    const disturbed = applyIncidentSteady(degradedGraph(p.graph, p.breakdown), inf, p.incident ?? null);
+    const sim = simulate(disturbed.graph, disturbed.influent);
+    simOk = sim.ok;
+    costs.opex = sim.ok ? 7 * marketOpex(sim.opexSplit, market) : 0;
+    // 4. grab sample and compliance
+    const report = sim.effluent ? evaluate(sim.effluent, p.standard, sim) : null;
+    pass = !!report?.pass;
+    failed = report ? report.checks.filter((c) => !c.pass).map((c) => c.param) : ['no effluent'];
+    p.steady = sim.ok && !p.incident && !p.breakdown ? { week, sinceWeek: st && st.graphKey === key ? st.sinceWeek : week, graphKey: key, flowFactor, opexSplit: { ...sim.opexSplit } } : null;
+  }
   cost += costs.opex;
-
-  // 4. grab sample and compliance
-  const report = sim.effluent ? evaluate(sim.effluent, p.standard, sim) : null;
-  let pass = !!report?.pass;
-  let failed = report ? report.checks.filter((c) => !c.pass).map((c) => c.param) : ['no effluent'];
-  if (!p.incident && !p.breakdown && sim.ok && runsManually(p.graph)) {
+  if (!stable && !p.incident && !p.breakdown && simOk && runsManually(p.graph)) {
     // loops without instruments run on a fixed manual setting: the grab sample catches the plant at a random hour,
     // with the daily production swing, from the dynamic replay (knowledge/operations/instrumentation.md)
     // shorter replay (≤ 20 h) keeps weekly simulation light; warm state is cached on the design stream
-    const g = routineGrabSample(p.graph, inf, p.standard, rng.range(6, 19), p.trueStream);
+    const g = cachedManualGrab(p, flowFactor, rng.range(6, 19));
     pass = g.pass && pass;
     failed = [...new Set([...failed, ...g.failed])];
   }
-  if (p.incident && sim.ok) {
+  if (p.incident && simOk) {
     // During an incident the grab sample is taken from the dynamic plant (ASM1, PI loops) at a random hour of the
     // disturbed day: the steady models cannot represent oxygen-supply or settling failures (knowledge/operations/scada.md).
     // the dynamic sample REPLACES the steady one (it already contains the breakdown and the incident)
@@ -445,7 +559,8 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
   if (deduction) messages.push(`Your plant for ${p.company}: failed sample — performance deduction RM ${Math.round(deduction).toLocaleString()} from the service fee.`);
   const revenue = fee - deduction + reimbursed;
   // field-action costs were paid when taken (ledger); they are shown in this week's plant costs but not charged again
-  p.history = [...p.history, { week, pass, failed, revenue, cost: cost + costs.actions, condition: p.condition, flowFactor, event, fine, fee, reimbursed, deduction, costs, supervised }].slice(-52);
+  if (!pass) p.steady = null; // a failed sample ends the stable run: simulate again from next week
+  p.history = [...p.history, { week, pass, failed, revenue, cost: cost + costs.actions, condition: p.condition, flowFactor, event, fine, fee, reimbursed, deduction, costs, supervised, ...(stable ? { stable: true } : {}) }].slice(-52);
 
   // 5. contract lifecycle
   if (p.contract && p.satisfaction < OM.terminateBelow) {
@@ -454,12 +569,33 @@ export function operateWeek(plant: Plant, week: number, market: Market, covered:
     reputation -= 15;
     messages.push(`O&M contract for ${p.company} terminated after your plant's repeated non-compliance (−15 reputation).`);
   } else if (p.contract && week >= p.contract.endWeek) {
-    p.status = 'expired';
-    p.contract = null;
-    if (p.satisfaction >= 70) {
-      reputation += 5;
-      messages.push(`O&M contract with ${p.company} completed with a satisfied client (+5 reputation).`);
-    } else messages.push(`O&M contract with ${p.company} ended.`);
+    const r = p.renewal;
+    if (r?.status === 'accepted' && r.agreedFee) {
+      // renewed: a new contract period on the agreed fee (escalation restarts from it)
+      const quote = { ...p.contract.quote, monthlyFee: r.agreedFee };
+      p.contract = contractFor(quote, p.contract.endWeek, r.weeks);
+      p.renewal = null;
+      p.renewalRefusedWeek = undefined;
+      if (p.satisfaction >= 70) reputation += 5;
+      messages.push(`O&M contract with ${p.company} renewed for ${Math.round(r.weeks / 52)} years at RM ${r.agreedFee.toLocaleString()}/month${p.satisfaction >= 70 ? ' (+5 reputation)' : ''}.`);
+    } else {
+      p.status = 'expired';
+      p.contract = null;
+      p.renewal = null;
+      if (p.satisfaction >= 70) {
+        reputation += 5;
+        messages.push(`O&M contract with ${p.company} completed with a satisfied client (+5 reputation)${r?.status === 'declined' ? ' — not renewed' : ''}.`);
+      } else messages.push(`O&M contract with ${p.company} ended.`);
+    }
+  } else if (p.contract && week >= p.contract.endWeek - OM.renewalNoticeWeeks && !p.renewal) {
+    // renewal window: a satisfied client offers to renew; an unsatisfied one says so (it may still offer if things improve)
+    if (p.satisfaction >= OM.renewMinSatisfaction) {
+      p.renewal = renewalOffer(p, week);
+      messages.push(`${p.company} offers to renew the O&M contract for 3 more years at RM ${p.renewal!.monthlyFee.toLocaleString()}/month (expires week ${p.contract.endWeek}). Answer in Plants & O&M.`);
+    } else if (p.renewalRefusedWeek === undefined) {
+      p.renewalRefusedWeek = week;
+      messages.push(`${p.company} does not plan to renew the O&M contract (satisfaction ${Math.round(p.satisfaction)} %, needs ${OM.renewMinSatisfaction} %). Keep the plant compliant — it may still offer before week ${p.contract.endWeek}.`);
+    }
   }
   return { plant: p, cash: revenue - cost, reputation, messages };
 }
