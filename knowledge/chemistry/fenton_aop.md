@@ -11,3 +11,10 @@ Module: `src/simulation/chemistry/fenton.ts`. Technology Tree T3.
 - **Iron:** modelled as ferric, dosed through the coagulation chemistry (FeCl₃-equivalent). Real Fenton doses FeSO₄; the counter-ion difference is ignored.
 - **Not modelled:** the BOD/COD ratio increase from partial oxidation, colour, and residual H₂O₂ interference in the COD test (a note only).
 - **No client yet:** the textile-dyeing industry that needs it is pending.
+
+## Partial oxidation and floc removal (added 2026-11-26, user: full mineralisation made Fenton too expensive)
+GAME MODEL, all `verify:` with jar tests:
+- **Partial oxidation:** of the refractory COD (S_I) the radicals attack, 60 % (`partialFrac`) is only ring-opened into biodegradable S_S. That costs 0.25 g O₂ per g (`partialO2`); the rest is mineralised. A modest dose before activated sludge therefore turns refractory COD into food for the biology. This is the usual "pre-oxidise, then biology" design, at about 0.5–1 g H₂O₂ per g COD instead of about 3.5.
+- **Iron-floc removal:** at neutralisation the Fe(OH)₃ floc adsorbs and enmeshes remaining S_I. Up to 0.5 g COD per g Fe, capped at 30 % of the S_I, moves to particulate X_I and leaves with the iron sludge in the downstream clarifier.
+- **Display:** the coagulation step's pH-window and dissolved-iron warnings are no longer shown (dissolved iron at pH 3 is intended). Its chemicals keep their own names; only the ferric line reads "Iron catalyst (Fenton, as FeCl₃)".
+- **Not tested yet** (user asked to skip): a mass-balance and dose-response test is still owed.
