@@ -29,6 +29,7 @@ const TIER_BRIEF: Record<string, string> = {
   flagship: 'A multinational showcase plant for its ESG report: the biggest budget in the game, and a green scorecard on top of water reuse or zero discharge — effluent well inside Standard A, low energy and little sludge. Beat each green target by 10 % for its share of the ESG bonus.',
 };
 import { brand } from '../prefs';
+import { industryArt } from '../art';
 
 const IND_COLOR: Record<string, string> = { plating: 'var(--chem)', food: 'var(--bio)', semiconductor: 'var(--clean)' };
 
@@ -49,12 +50,12 @@ export function Enquiries({ go }: { go: (s: Screen) => void }) {
           const t = INDUSTRIES[e.industry];
           const d = e.declared;
           return (
-            <div key={e.id} className="card">
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <span className="ind" style={{ color: IND_COLOR[e.industry] }}>
+            <div key={e.id} className={`card ${e.tier ? `tier-${e.tier}` : ''}`}>
+              <div className="card-art" style={{ backgroundImage: `url(${industryArt(e.industry)})` }}>
+                <span className="card-art-tag" style={{ color: IND_COLOR[e.industry] }}>
                   {INDUSTRY_LABEL[e.industry]}
                 </span>
-                <span className="pill std">Standard {e.standard}</span>
+                <span className="pill std card-art-std">Standard {e.standard}</span>
               </div>
               <div className="company">
                 {brand(e.company)}

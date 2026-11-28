@@ -3,6 +3,7 @@ import { payroll } from '../../game/staff';
 import type { Screen } from '../App';
 import { INDUSTRY_LABEL, rm } from '../format';
 import { brand } from '../prefs';
+import { OFFICE_STAGES, artUrl, officeStage } from '../art';
 
 const MILESTONES = [
   { label: 'Commission your first WWTP', done: (n: number) => n >= 1 },
@@ -15,12 +16,20 @@ export function HQ({ go }: { go: (s: Screen) => void }) {
   const completed = g.history.filter((h) => h.outcome === 'completed');
   const revenue = completed.reduce((a, h) => a + h.revenue, 0);
   const profit = g.history.reduce((a, h) => a + h.revenue - h.cost, 0);
+  const stage = officeStage(g.reputation, g.plants.filter((p) => p.status === 'operating').length, g.staff.length);
+  const office = OFFICE_STAGES[stage];
 
 
   return (
     <div className="page">
-      <h1>Company HQ</h1>
-      <p className="sub">One laptop, one engineer and RM 500,000 of capital. Win industrial wastewater projects, design plants that really work, and grow.</p>
+      <div className="hq-office">
+        <img src={artUrl(`offices/${office.file}.webp`)} alt="" onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')} />
+        <div>
+          <h1>Company HQ</h1>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{office.label}{stage < OFFICE_STAGES.length - 1 ? ` — the company moves up as reputation and the plants you run grow` : ''}</div>
+          <p className="sub" style={{ marginBottom: 0 }}>One laptop, one engineer and RM 500,000 of capital. Win industrial wastewater projects, design plants that really work, and grow.</p>
+        </div>
+      </div>
 
       <div className="grid g4" style={{ marginBottom: 14 }}>
         <div className="panel stat">

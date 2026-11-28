@@ -3,3 +3,7 @@ dist
 *.local
 *.tsbuildinfo
 .claude/settings.local.json
+
+# full-size generated art (see art/README.md); game-sized copies are in public/art
+art/source/
+art/style-samples/

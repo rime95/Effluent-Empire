@@ -5,6 +5,21 @@ import { minimumSolubilityPH } from '../../simulation/chemistry/solubility';
 import { METALS } from '../../simulation/core/stream';
 import { INDUSTRIES } from '../../game/industries';
 import { UnitSymbol } from '../components/Symbols';
+import { unitArt } from '../art';
+
+/** isometric sprite of the unit (art.ts), or its PFD symbol if there is none */
+function UnitPicture({ type, accent }: { type: UnitType; accent: string }) {
+  const [failed, setFailed] = useState(false);
+  const src = unitArt(type);
+  if (src && !failed) return <img className="unit-art" src={src} alt="" loading="lazy" onError={() => setFailed(true)} />;
+  return (
+    <div style={{ background: '#fff', borderRadius: 4, padding: 4 }}>
+      <div style={{ width: 92, height: 52 }}>
+        <UnitSymbol type={type} accent={accent} />
+      </div>
+    </div>
+  );
+}
 import { CATEGORY_COLOR } from '../studio/nodes';
 import { fmt } from '../format';
 
@@ -59,11 +74,7 @@ export function Encyclopedia() {
             return (
               <div key={t} className="panel">
                 <div className="row">
-                  <div style={{ background: '#fff', borderRadius: 4, padding: 4 }}>
-                    <div style={{ width: 92, height: 52 }}>
-                      <UnitSymbol type={t} accent={CATEGORY_COLOR[d.category]} />
-                    </div>
-                  </div>
+                  <UnitPicture type={t} accent={CATEGORY_COLOR[d.category]} />
                   <div>
                     <div className="mono" style={{ fontSize: 11, color: CATEGORY_COLOR[d.category], textTransform: 'uppercase' }}>
                       {d.category} · {d.tagPrefix}

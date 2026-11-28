@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { deleteSlot, downloadSave, listSlots, readSlot, SlotMeta, MAX_SLOTS } from '../../game/saves';
 import { importSaveFile, openSlot, startNewGame } from '../../game/store';
 import { rm } from '../format';
+import { MENU_ART, artUrl } from '../art';
 
 type Panel = 'home' | 'new' | 'load';
 
@@ -32,6 +33,8 @@ export function MainMenu({ onEnter }: { onEnter: () => void }) {
   return (
     <div className="menu-root">
       <MenuBackdrop />
+      {/* key art over the schematic backdrop (the schematic shows if the image is missing) */}
+      <div className="menu-art" style={{ backgroundImage: `url(${artUrl(MENU_ART)})` }} aria-hidden />
       <div className="menu-col">
         <div className="menu-brand">
           <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden>

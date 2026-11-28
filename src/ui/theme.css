@@ -138,7 +138,7 @@ table.data td.num { text-align: right; }
 .lab-chart { background: var(--chrome-0); border: 1px solid var(--chrome-line); border-radius: 6px; padding: 8px; }
 
 /* ---- main menu & pause menu ---- */
-.menu-root { position: relative; min-height: 100vh; display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 560px); gap: 48px; align-items: center; justify-content: center; padding: 48px 40px; background: var(--chrome-0); overflow: hidden; }
+.menu-root { position: relative; min-height: 100vh; display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 480px); gap: 40px; align-items: center; justify-content: start; padding: 48px 40px 48px max(40px, 5vw); background: var(--chrome-0); overflow: hidden; }
 .menu-backdrop { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
 .menu-flow { stroke-dasharray: 10 14; animation: menu-flow 2.4s linear infinite; }
 .menu-flow.slow { animation-duration: 6s; }
@@ -363,3 +363,24 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 
 /* O&M contract renewal box (Plants) */
 .renewal { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--chrome-line); border-radius: 8px; background: var(--chrome-2); }
+
+/* ---- game art (src/ui/art.ts) ---- */
+.menu-art { position: absolute; inset: 0; z-index: 0; background-size: cover; background-position: right center; background-repeat: no-repeat; }
+.menu-art::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(8, 19, 31, 0.94) 0%, rgba(8, 19, 31, 0.8) 32%, rgba(8, 19, 31, 0.25) 62%, rgba(8, 19, 31, 0.05) 100%), linear-gradient(0deg, rgba(8, 19, 31, 0.55) 0%, transparent 30%); }
+.card-art { margin: -14px -16px 2px; height: 104px; border-radius: 8px 8px 0 0; background-size: cover; background-position: center; position: relative; overflow: hidden; }
+.card-art::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgba(8, 19, 31, 0) 40%, rgba(8, 19, 31, 0.85) 100%); }
+.card-art .card-art-tag { position: absolute; left: 12px; bottom: 8px; z-index: 1; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+.card-art .card-art-std { position: absolute; right: 10px; bottom: 8px; z-index: 1; }
+.avatar { width: 40px; height: 40px; border-radius: 50%; flex: none; object-fit: cover; background: var(--chrome-2); border: 1px solid var(--chrome-line); display: inline-grid; place-items: center; font-size: 13px; font-weight: 700; color: var(--chrome-muted); overflow: hidden; }
+.avatar.lg { width: 52px; height: 52px; }
+.avatar svg { width: 60%; height: 60%; }
+.who { display: flex; align-items: center; gap: 10px; }
+.hq-office { display: flex; align-items: center; gap: 14px; }
+.hq-office img { width: 150px; height: 150px; object-fit: contain; filter: drop-shadow(0 8px 14px rgba(0, 0, 0, 0.45)); }
+.unit-art { width: 96px; height: 96px; object-fit: contain; flex: none; filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4)); }
+/* client tier frames on enquiry cards */
+.card.tier-medium { border-color: #2f6fa8; }
+.card.tier-mnc { border-color: #1f9e8f; box-shadow: 0 0 0 1px rgba(31, 158, 143, 0.25); }
+.card.tier-flagship { border-color: #d9a21b; box-shadow: 0 0 0 1px rgba(217, 162, 27, 0.35), 0 6px 18px rgba(217, 162, 27, 0.12); }
+.card.tier-mega { border: 2px solid #e0533f; box-shadow: 0 0 0 1px rgba(217, 162, 27, 0.6), 0 0 22px rgba(224, 83, 63, 0.25); }
+.card.tier-mega .card-art { margin: -15px -17px 2px; }

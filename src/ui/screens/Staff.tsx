@@ -1,4 +1,5 @@
 import { plantPosts } from '../../game/operations';
+import { Avatar } from '../components/Avatar';
 import { engineersBusy, freeEngineers, supervisedPlantIds, useGame } from '../../game/store';
 import { LEVEL_LABEL, ROLES, Role, count, labDiscount, operatorCapacity, payroll, projectSlots, salesBoost, weeklySalary } from '../../game/staff';
 import { rm } from '../format';
@@ -57,7 +58,12 @@ export function Staff() {
             <tbody>
               {g.staff.map((e) => (
                 <tr key={e.id}>
-                  <td>{e.name}</td>
+                  <td>
+                    <span className="who">
+                      <Avatar e={e} />
+                      {e.name}
+                    </span>
+                  </td>
                   <td>
                     <span style={{ color: ROLE_COLOR[e.role] }}>{ROLES[e.role].label}</span> <span className="muted">· {LEVEL_LABEL[e.level]}</span>
                   </td>
@@ -79,13 +85,16 @@ export function Staff() {
           {g.candidates.length === 0 && <p className="muted">No candidates this month.</p>}
           {g.candidates.map((c) => (
             <div key={c.id} className="row" style={{ justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #1a3049' }}>
-              <div style={{ maxWidth: '70%' }}>
+              <div className="who" style={{ maxWidth: '70%', alignItems: 'flex-start' }}>
+                <Avatar e={c} large />
+                <div>
                 <div style={{ color: '#fff' }}>
                   {c.name} <span className="muted">· {LEVEL_LABEL[c.level]}</span>
                 </div>
                 <div style={{ fontSize: 12, color: ROLE_COLOR[c.role] }}>{ROLES[c.role].label}</div>
                 <div className="muted" style={{ fontSize: 11 }}>
                   {ROLES[c.role].effect}
+                </div>
                 </div>
               </div>
               <button className="btn sm primary" onClick={() => g.hire(c.id)} title={`${rm(weeklySalary(c))}/week`}>
