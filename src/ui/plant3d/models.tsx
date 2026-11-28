@@ -3,7 +3,8 @@
  * Unit models for the 3D site, built from primitives at the real size from dims.ts (C1 palette: concrete grey, steel,
  * yellow handrails, white GRP tanks, coloured water). Local frame: flow along +x, y up, ground at y = 0.
  */
-import { Component, Suspense, useMemo, type ReactNode } from 'react';
+import { Component, Suspense, createContext, useContext, useMemo, useRef, type ReactNode } from 'react';
+import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useGLTF } from '@react-three/drei';
 import type { Dims } from './dims';
@@ -29,6 +30,47 @@ export const MAT = {
   concreteWall: mat('#b9bbb6', { side: THREE.DoubleSide }),
   grpWall: mat('#d9d0bf', { side: THREE.DoubleSide }),
 };
+
+/** animation switch for the moving parts (off under reduced motion or by the player) */
+export const AnimContext = createContext(false);
+
+/** rotates its children about y at `speed` rad/s while animation is on */
+function Spin({ speed, children, position }: { speed: number; children: ReactNode; position?: [number, number, number] }) {
+  const on = useContext(AnimContext);
+  const ref = useRef<THREE.Group>(null);
+  useFrame((_, dt) => {
+    if (on && ref.current) ref.current.rotation.y += speed * dt;
+  });
+  return (
+    <group ref={ref} position={position}>
+      {children}
+    </group>
+  );
+}
+
+/** diffused-air plumes: light patches on the basin surface that swell and fade, each in its own phase */
+function AirField({ spots, r, y }: { spots: [number, number][]; r: number; y: number }) {
+  const on = useContext(AnimContext);
+  const refs = useRef<(THREE.Mesh | null)[]>([]);
+  useFrame(({ clock }) => {
+    if (!on) return;
+    const t = clock.getElapsedTime();
+    refs.current.forEach((m, i) => {
+      if (!m) return;
+      const s = 0.75 + 0.35 * Math.sin(t * 2.2 + i * 1.7);
+      m.scale.set(s, s, 1);
+    });
+  });
+  return (
+    <group>
+      {spots.map(([x, z], i) => (
+        <mesh key={i} ref={(m) => (refs.current[i] = m)} position={[x, y, z]} rotation={[-Math.PI / 2, 0, 0]} material={MAT.membrane}>
+          <circleGeometry args={[r, 10]} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
 
 const waterCache = new Map<string, THREE.MeshStandardMaterial>();
 export function waterMat(color: string): THREE.MeshStandardMaterial {
@@ -87,16 +129,14 @@ function RectBasin({ d, water }: { d: Dims; water: string }) {
         <planeGeometry args={[w - 2 * t, dd - 2 * t]} />
       </mesh>
       {d.aerated &&
-        // diffused air: a field of light patches where the air plumes roll the surface
-        Array.from({ length: Math.min(40, Math.max(4, Math.round((w * dd) / 12))) }, (_, i) => {
-          const cols = Math.max(2, Math.round(Math.sqrt(((w * dd) / 12) * (w / dd))));
-          const cx = (i % cols) / cols, cz = Math.floor(i / cols) / Math.ceil(40 / cols);
-          return (
-            <mesh key={i} position={[-w / 2 + t + (w - 2 * t) * (cx + 0.5 / cols), h - 0.43, -dd / 2 + t + (dd - 2 * t) * Math.min(0.9, cz + 0.15)]} rotation={[-Math.PI / 2, 0, 0]} material={MAT.membrane}>
-              <circleGeometry args={[Math.min(0.6, w / cols / 4), 10]} />
-            </mesh>
-          );
-        })}
+        (() => {
+          // diffused air: a grid of plumes rolling the surface (no fountains — fine-bubble diffusers)
+          const cols = Math.max(2, Math.min(10, Math.round(w / 3)));
+          const rows = Math.max(1, Math.min(5, Math.round(dd / 3)));
+          const spots: [number, number][] = [];
+          for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) spots.push([-w / 2 + t + (w - 2 * t) * ((i + 0.5) / cols), -dd / 2 + t + (dd - 2 * t) * ((j + 0.5) / rows)]);
+          return <AirField spots={spots} r={Math.min(0.9, (w - 2 * t) / cols / 3)} y={h - 0.43} />;
+        })()}
       <RectRail w={w} d={dd} y={h} />
     </group>
   );
@@ -118,12 +158,13 @@ function RoundTank({ d, water }: { d: Dims; water: string }) {
         <ringGeometry args={[r - 0.7, r - 0.15, 48]} />
       </mesh>
       {d.bridge && (
-        <group>
+        // rotating scraper bridge (one turn in about 40 s on screen; real bridges are slower)
+        <Spin speed={0.16}>
           <Cyl r={0.45} h={0.9} pos={[0, h + 0.45, 0]} m={MAT.darkSteel} />
           <Box size={[r, 0.25, 0.9]} pos={[r / 2, h + 0.2, 0]} m={MAT.steel} />
           <Box size={[r, 0.05, 0.05]} pos={[r / 2, h + 1.1, -0.45]} m={MAT.rail} />
           <Box size={[r, 0.05, 0.05]} pos={[r / 2, h + 1.1, 0.45]} m={MAT.rail} />
-        </group>
+        </Spin>
       )}
       <mesh position={[0, h + 1.05, 0]} rotation={[-Math.PI / 2, 0, 0]} material={MAT.rail}>
         <torusGeometry args={[r, 0.03, 4, 64]} />
@@ -148,6 +189,11 @@ function Reactor({ d, water }: { d: Dims; water: string }) {
       {/* mixer bridge + motor */}
       <Box size={[2 * r + 0.2, 0.18, 0.3]} pos={[cx, h + 0.1, 0]} m={MAT.darkSteel} />
       <Box size={[0.45, 0.6, 0.45]} pos={[cx, h + 0.5, 0]} m={MAT.blue} />
+      {/* impeller just under the surface */}
+      <Spin speed={3} position={[cx, h - 0.32, 0]}>
+        <Box size={[r * 1.1, 0.05, 0.16]} pos={[0, 0, 0]} m={MAT.darkSteel} />
+        <Box size={[0.16, 0.05, r * 1.1]} pos={[0, 0, 0]} m={MAT.darkSteel} />
+      </Spin>
       {/* dosing package */}
       <Cyl r={0.32} h={1.3} pos={[d.w / 2 - 0.45, 0.65, -d.d / 4]} m={MAT.white} />
       <Cyl r={0.28} h={1.1} pos={[d.w / 2 - 0.45, 0.55, d.d / 4]} m={MAT.orange} />

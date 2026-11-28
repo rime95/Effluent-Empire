@@ -5,7 +5,7 @@
  * Editing: drag to move (1 m grid), R to rotate, drop units from the palette, click a port then a unit to lay a pipe
  * (same rules as the PFD, editing.ts), Del to delete. Every edit goes through the Studio's undo history.
  */
-import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber';
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { Html, Line, MapControls } from '@react-three/drei';
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MutableRefObject } from 'react';
 import * as THREE from 'three';
@@ -16,8 +16,8 @@ import { waterQualityIndex } from '../../simulation/treatment/waterQuality';
 import { waterColor } from '../scada/tanks';
 import { canConnect, isTerminal, type AddKind } from '../studio/editing';
 import { Port3, halfExtents, rotatePort } from './dims';
-import { Placed, pinLayout, siteLayout, snapM } from './siteLayout';
-import { UnitModel } from './models';
+import { Placed, overlaps, pinLayout, siteLayout, snapM } from './siteLayout';
+import { AnimContext, MAT, UnitModel } from './models';
 
 const SLUDGE_COLOR = '#6b4a2a';
 const REJECT_COLOR = '#d08a1e';
@@ -89,6 +89,73 @@ function CameraRig({ center, extent, az, top, fitKey }: { center: THREE.Vector3;
   return null;
 }
 
+/**
+ * Water moving along a pipe: light dashes travelling from source to target, faster for bigger flows
+ * (speed ∝ log of the flow — visual only). Drawn over the pipe; still when animation is off.
+ */
+function FlowMarks({ pts, q, on }: { pts: THREE.Vector3[]; q: number; on: boolean }) {
+  const ref = useRef<{ material: { dashOffset: number } } | null>(null);
+  const speed = 1.5 + 1.6 * Math.log10(1 + Math.max(0, q) / 5);
+  useFrame((_, dt) => {
+    if (on && ref.current) ref.current.material.dashOffset -= speed * dt;
+  });
+  const lifted = useMemo(() => pts.map((p) => new THREE.Vector3(p.x, p.y + 0.06, p.z)), [pts]);
+  return <Line ref={ref as never} points={lifted} color="#f4fbff" lineWidth={2} dashed dashSize={0.7} gapSize={1.6} transparent opacity={0.85} />;
+}
+
+const FENCE = new THREE.MeshStandardMaterial({ color: '#7d8a94', transparent: true, opacity: 0.35, side: THREE.DoubleSide });
+const noRay = () => null;
+
+/** fence, access road and palms around the slab (dressing only, not clickable) */
+function SiteDressing({ box }: { box: { x0: number; x1: number; z0: number; z1: number } }) {
+  const { x0, x1, z0, z1 } = box;
+  const posts: [number, number][] = [];
+  const nx = Math.max(1, Math.round((x1 - x0) / 6)), nz = Math.max(1, Math.round((z1 - z0) / 6));
+  for (let i = 0; i <= nx; i++) posts.push([x0 + ((x1 - x0) * i) / nx, z0], [x0 + ((x1 - x0) * i) / nx, z1]);
+  for (let i = 1; i < nz; i++) posts.push([x0, z0 + ((z1 - z0) * i) / nz], [x1, z0 + ((z1 - z0) * i) / nz]);
+  const palms: [number, number][] = [
+    [x0 - 4, z0 - 4], [x1 + 4, z0 - 6], [x0 - 5, (z0 + z1) / 2], [x1 + 5, (z0 + z1) / 2 + 3], [x0 + (x1 - x0) * 0.3, z1 + 5], [x0 + (x1 - x0) * 0.7, z1 + 6], [x1 + 4, z1 + 4],
+  ];
+  const panels: [number, number, number, number][] = [
+    [(x0 + x1) / 2, z0, x1 - x0, 0],
+    [(x0 + x1) / 2, z1, x1 - x0, 0],
+    [x0, (z0 + z1) / 2, z1 - z0, Math.PI / 2],
+    [x1, (z0 + z1) / 2, z1 - z0, Math.PI / 2],
+  ];
+  return (
+    <group>
+      {panels.map(([x, z, len, rot], i) => (
+        <mesh key={i} position={[x, 0.9, z]} rotation={[0, rot, 0]} material={FENCE} raycast={noRay}>
+          <planeGeometry args={[len, 1.8]} />
+        </mesh>
+      ))}
+      {posts.map(([x, z], i) => (
+        <mesh key={'p' + i} position={[x, 0.95, z]} material={MAT.darkSteel} raycast={noRay}>
+          <boxGeometry args={[0.08, 1.9, 0.08]} />
+        </mesh>
+      ))}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[(x0 + x1) / 2, 0.01, z0 - 6]} raycast={noRay}>
+        <planeGeometry args={[x1 - x0 + 40, 7]} />
+        <meshStandardMaterial color="#5b6066" roughness={1} />
+      </mesh>
+      {palms.map(([x, z], i) => (
+        <group key={'t' + i} position={[x, 0, z]}>
+          <mesh position={[0, 3, 0]} raycast={noRay}>
+            <cylinderGeometry args={[0.18, 0.25, 6, 8]} />
+            <meshStandardMaterial color="#8a6a45" />
+          </mesh>
+          {[0, 1, 2, 3, 4].map((k) => (
+            <mesh key={k} position={[Math.cos((k * 2 * Math.PI) / 5) * 1.2, 6, Math.sin((k * 2 * Math.PI) / 5) * 1.2]} rotation={[0, (-k * 2 * Math.PI) / 5, 0.9]} raycast={noRay}>
+              <coneGeometry args={[0.45, 3, 4]} />
+              <meshStandardMaterial color="#3f8a3a" />
+            </mesh>
+          ))}
+        </group>
+      ))}
+    </group>
+  );
+}
+
 /** exposes a screen → ground-plane projection for HTML drops (palette) */
 function GroundPicker({ api }: { api: MutableRefObject<((clientX: number, clientY: number) => THREE.Vector3 | null) | null> }) {
   const { camera, gl } = useThree();
@@ -149,9 +216,16 @@ export default function Site3D(props: Site3DProps) {
       const s = sim?.edges[e.id];
       const color = sludge ? SLUDGE_COLOR : reject ? REJECT_COLOR : s ? (s.Q > 1e-6 ? waterColor(waterQualityIndex(s, standard)) : IDLE_PIPE) : IDLE_PIPE;
       const run = (sludge ? 0.25 : 0.55) + (i % 4) * 0.12;
-      return { id: e.id, pts: route(pa, pb, run), color };
+      return { id: e.id, pts: route(pa, pb, run), color, q: s?.Q ?? 0 };
     })
-    .filter((x): x is { id: string; pts: THREE.Vector3[]; color: string } => !!x);
+    .filter((x): x is { id: string; pts: THREE.Vector3[]; color: string; q: number } => !!x);
+
+  // units the player has pushed onto each other (shown red; the auto layout never overlaps)
+  const clash = useMemo(() => {
+    const ids = new Set<string>();
+    for (let i = 0; i < placed.length; i++) for (let j = i + 1; j < placed.length; j++) if (overlaps(placed[i], placed[j])) ids.add(placed[i].node.id).add(placed[j].node.id);
+    return ids;
+  }, [placed]);
 
   // site extent → camera fit, slab
   const box = useMemo(() => {
@@ -174,6 +248,14 @@ export default function Site3D(props: Site3DProps) {
   const [labels, setLabels] = useState(true);
   const [fitKey, setFitKey] = useState(0);
   const [zoom, setZoom] = useState(10);
+  // moving water and equipment; off by default when the system asks for reduced motion
+  const [anim, setAnim] = useState(() => {
+    try {
+      return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      return true;
+    }
+  });
   const showTags = labels && zoom >= 7;
 
   // ---- edits
@@ -274,7 +356,7 @@ export default function Site3D(props: Site3DProps) {
     <div className="site3d" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
       <Canvas
         orthographic
-        frameloop="demand"
+        frameloop={anim ? 'always' : 'demand'}
         dpr={[1, 1.5]}
         camera={{ zoom: 10, position: [100, 100, 100], near: 0.1, far: 2000 }}
         onPointerMissed={(e) => {
@@ -284,7 +366,9 @@ export default function Site3D(props: Site3DProps) {
         }}
         gl={{ antialias: true }}
       >
+        <AnimContext.Provider value={anim}>
         <color attach="background" args={['#dfe7ee']} />
+        <SiteDressing box={box} />
         <hemisphereLight args={['#eef4fa', '#7d8f62', 0.9]} />
         <directionalLight position={[40, 80, 30]} intensity={1.6} />
         <ambientLight intensity={0.25} />
@@ -324,10 +408,10 @@ export default function Site3D(props: Site3DProps) {
               >
                 <UnitModel d={pl.dims} water={water.get(id) ?? waterColor(0.5)} kind={pl.node.kind} />
               </group>
-              {(sel || target) && (
+              {(sel || target || clash.has(id)) && (
                 <mesh rotation={[-Math.PI / 2, 0, 0]} position={[pl.x + o.dx, 0.03, pl.z + o.dz]}>
                   <planeGeometry args={[2 * e.hx + 1.2, 2 * e.hz + 1.2]} />
-                  <meshBasicMaterial color={target ?? '#00a9c8'} transparent opacity={target ? 0.4 : 0.28} />
+                  <meshBasicMaterial color={target ?? (clash.has(id) ? '#e0533f' : '#00a9c8')} transparent opacity={target || clash.has(id) ? 0.4 : 0.28} />
                 </mesh>
               )}
               {(sel || showTags) && (
@@ -374,6 +458,10 @@ export default function Site3D(props: Site3DProps) {
             }}
           />
         ))}
+        {pipes.filter((p) => p.q > 1e-6).map((p) => (
+          <FlowMarks key={'f' + p.id} pts={p.pts} q={p.q} on={anim} />
+        ))}
+        </AnimContext.Provider>
         <MapControls
           makeDefault
           enableRotate={false}
@@ -406,6 +494,9 @@ export default function Site3D(props: Site3DProps) {
         <button className={`tb ${labels ? 'on' : ''}`} onClick={() => setLabels((x) => !x)} title="Unit tags">
           Tags
         </button>
+        <button className={`tb ${anim ? 'on' : ''}`} onClick={() => setAnim((x) => !x)} title="Flowing water and moving equipment">
+          {anim ? '❚❚ Flow' : '▶ Flow'}
+        </button>
         {editable && selNodes.size > 0 && (
           <>
             <span className="tb-sep" />
@@ -428,6 +519,7 @@ export default function Site3D(props: Site3DProps) {
             </button>
           </>
         )}
+        {clash.size > 0 && <span className="tb-status" style={{ color: 'var(--alarm)' }}>⚠ {clash.size} units overlap</span>}
         <span className="tb-status">{editable ? 'drag units · click a port, then a unit, to pipe · wheel zoom · right-drag pan' : 'view only · wheel zoom · right-drag pan'}</span>
       </div>
       {(() => {

@@ -114,6 +114,7 @@ describe('solids recirculation runaway', () => {
     const ok = sim.ok && !sim.errors.some((x) => x.code === 'graph.recycle');
     if (!ok) expect(sim.errors.some((x) => x.code === 'graph.recycle')).toBe(true);
     if (!ok) expect(sim.ok).toBe(false);
-    expect(Date.now() - t0).toBeLessThan(8000);
+    // generous budget: the point is "stops, does not hang"; 8 s tripped when the full suite runs in parallel
+    expect(Date.now() - t0).toBeLessThan(20000);
   });
 });

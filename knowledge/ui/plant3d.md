@@ -41,3 +41,28 @@ Units the player has not placed keep the PFD's rows and order.
 
 ## Pipes
 Right-angle routes: out of the nozzle by 1.2 m, down to a run at 0.55 m (sludge at 0.25 m, with small lane offsets), across along x then z, and up into the target inlet. Lines are drawn in screen-space width.
+
+## Editing (phase 2)
+- **Move:** drag a unit on the ground (1 m grid); **R** rotates it 90°.
+- **Add:** drop a unit from the palette onto the site.
+- **Pipe:** click a port sphere on the selected unit, then the unit it feeds. `canConnect` refuses with a reason (for example "Raw wastewater is a source").
+- **Delete / duplicate:** the Del key, or the selection bar.
+- **Undo:** every edit goes through the Studio's undo history (Ctrl+Z).
+- **Pinning:** the first move, rotate, drop or delete pins the whole current layout (`pinLayout`), so nothing else jumps. Units added later without a position go in a strip beyond the pinned ones.
+- **Overlaps:** units pushed onto each other are shown in red with a warning. This is cosmetic only; it is not a design check.
+
+## Life (phase 3; visual only, no effect on the simulation)
+- **Animation:** toggled with **Flow**; off by default under `prefers-reduced-motion`. The canvas renders continuously only while it is on.
+  - **Flow marks** move along every pipe that carries flow; speed = 1.5 + 1.6·log10(1 + Q/5) m/s on screen (a display scale, not velocity).
+  - **Clarifier and thickener bridges** turn (one turn in about 40 s on screen, much faster than a real bridge).
+  - **Stirred-reactor impellers** spin.
+  - **Aeration plumes** swell and fade, a fine-bubble rolling surface rather than fountains.
+- **Site dressing:** chain-link fence around the slab, access road, palms.
+
+## 3D models from Meshy (decision 2026-11-28)
+The plan allowed 5 Meshy models (about 150 credits) for the fixed-size skids. The RO pilot (30 credits) was **not adopted**:
+- the source sprite's dark background was baked into the mesh as an artefact;
+- the file was 4 MB;
+- it was not clearly better than the code-built skid.
+
+The remaining 4 were not bought. GLB support is kept (`GLB_MODELS` in `models.tsx`, with a fallback to the code-built model), and the pilot GLB is in `art/source/models/`.
