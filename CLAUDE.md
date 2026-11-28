@@ -4,7 +4,6 @@ An industrial wastewater treatment consultancy tycoon game with a real engineeri
 Stack: TypeScript + React 18 + Vite, Zustand, @xyflow/react, Vitest.
 
 ## Visual rule
-All visuals are **2D for now** (SVG, CSS, HTML canvas). Do not add 3D libraries (three.js etc.). The future company "world" view is a 2D site map.
 Theme: deep navy chrome, light-grey CAD canvas, cyan flow, blue clean water, brown sludge, green biological, orange chemical, red alarms. Restrained motion.
 
 ## Commands
