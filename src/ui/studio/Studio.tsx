@@ -17,10 +17,10 @@ import {
 } from '@xyflow/react';
 import { engineersBusy, useActiveProject, useGame } from '../../game/store';
 import { projectSlots } from '../../game/staff';
-import { constructionWeeks, makeNode, projectDesignBasis, retrofitCharge, RETROFIT_PREMIUM, type Project } from '../../game/project';
+import { constructionWeeks, projectDesignBasis, retrofitCharge, RETROFIT_PREMIUM, type Project } from '../../game/project';
 import { OM, type Plant } from '../../game/operations';
 import { currentInfluent, upgradeQuote, VO_MARKUP } from '../../game/upgrade';
-import { REJECT_KINDS, REUSE_SPEC, isLiquidHaul, isReuse, simulate } from '../../simulation/treatment/graph';
+import { REUSE_SPEC, isLiquidHaul, isReuse, simulate } from '../../simulation/treatment/graph';
 import { CATALOGUE, PRICES, UnitType } from '../../simulation/treatment/catalogue';
 import { PNode, PortId, ProcessGraph, SimResult } from '../../simulation/treatment/graph';
 import { combinedMetalsApply, evaluate, limitsFor, measure, STANDARDS, type ParamId, type StandardId } from '../../simulation/treatment/compliance';
@@ -39,16 +39,12 @@ import { useSimulation } from './useSimulation';
 import type { Screen } from '../App';
 import { fmt, rm } from '../format';
 import { brand } from '../prefs';
+import { canConnect, connect, createNode, isNonUnit, isTerminal, nextPfdPosition, pasteNodes, removeNodes as removeGraphNodes, type AddKind } from './editing';
 import { PRESETS, STUDIO_DEFAULT, useLayout, type StudioPreset } from '../layout';
 import { Splitter } from '../components/Splitter';
 
 const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'daf', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'sulfide', 'aop', 'ionExchange', 'electrowinning', 'coagulation', 'activatedSludge', 'uasb', 'mbr', 'uf', 'ro', 'evaporator', 'thickener', 'filterPress', 'dryer', 'splitter', 'mixer'];
-/** kinds that may receive a sludge line */
-const SLUDGE_RECEIVERS: PNode['kind'][] = ['thickener', 'filterPress', 'dryer', 'disposal', 'mixer'];
 const GRID = 20;
-/** fixed end points (one inlet, one discharge) — cannot be deleted */
-const isTerminal = (n: PNode) => n.kind === 'influent' || n.kind === 'discharge';
-const isNonUnit = (n: PNode) => isTerminal(n) || n.kind === 'disposal';
 /** Short reagent names for the dosing-package labels on the PFD. */
 function shortChem(name: string): string {
   if (/NaOH/.test(name)) return 'NaOH';
@@ -75,8 +71,6 @@ function numberStreams(g: ProcessGraph, order: string[] | undefined): Map<string
   for (const e of g.edges) if (!map.has(e.id)) map.set(e.id, k++);
   return map;
 }
-
-const newEdgeId = () => `p-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
 
 export function Studio(props: { go: (s: Screen) => void }) {
   return (
@@ -251,7 +245,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
   const removeNodes = useCallback(
     (ids: string[]) => {
       if (!editable || !ids.length) return;
-      setDraft((g) => ({ nodes: g.nodes.filter((n) => !ids.includes(n.id) || isTerminal(n)), edges: g.edges.filter((e) => !ids.includes(e.from) && !ids.includes(e.to)) }));
+      setDraft((g) => removeGraphNodes(g, ids));
       setSelNodes(new Set());
     },
     [editable, setDraft],
@@ -315,44 +309,25 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
     (c: Connection) => {
       if (!editable || !c.source || !c.target || c.source === c.target) return;
       const port = (c.sourceHandle ?? 'out') as PortId;
-      setDraft((g) => (g.edges.some((e) => e.from === c.source && e.to === c.target && (e.fromPort ?? 'out') === port) ? g : { ...g, edges: [...g.edges, { id: newEdgeId(), from: c.source!, to: c.target!, ...(port !== 'out' ? { fromPort: port } : {}) }] }));
+      setDraft((g) => connect(g, c.source!, port, c.target!));
     },
     [editable, setDraft],
   );
 
   const isValidConnection = useCallback(
     (c: Connection | Edge) => {
-      if (!c.source || !c.target || c.source === c.target) return false;
-      const to = draft.nodes.find((n) => n.id === c.target);
-      if (!to || to.kind === 'influent') return false;
-      if (c.sourceHandle === 'ras') return to.kind === 'activatedSludge';
-      const sludge = c.sourceHandle === 'sludge';
-      const from = draft.nodes.find((n) => n.id === c.source);
-      // brine / concentrate / backwash / eluate: a liquid line — anywhere but the reclaim system
-      if (sludge && from && REJECT_KINDS.includes(from.kind)) return !isReuse(to);
-      if (sludge) return SLUDGE_RECEIVERS.includes(to.kind) && !isReuse(to);
-      return to.kind !== 'disposal' || isLiquidHaul(to) || isReuse(to);
+      if (!c.source || !c.target) return false;
+      return canConnect(draft, c.source, (c.sourceHandle ?? 'out') as PortId, c.target).ok;
     },
-    [draft.nodes],
+    [draft],
   );
 
   const addUnit = useCallback(
-    (kind: UnitType | 'disposal' | 'liquidHaul' | 'reclaim', position?: { x: number; y: number }) => {
+    (kind: AddKind, position?: { x: number; y: number }, site?: PNode['site']) => {
       if (!p || !editable || !isUnitUnlocked(kind, tech)) return;
-      const node = kind === 'liquidHaul' || kind === 'reclaim' ? makeNode('disposal', p.datasheet.Q, draft.nodes) : makeNode(kind, p.datasheet.Q, draft.nodes);
-      if (kind === 'reclaim') {
-        node.params = { reuse: 'yes' };
-        node.tag = `RW-${String(draft.nodes.filter((x) => isReuse(x)).length + 1).padStart(2, '0')}`;
-      }
-      if (kind === 'liquidHaul') {
-        node.params = { liquid: 'yes' };
-        node.tag = `LH-${String(draft.nodes.filter((x) => isLiquidHaul(x)).length + 1).padStart(2, '0')}`;
-      }
-      const isSludgeKind = (k: string) => k === 'disposal' || k === 'liquidHaul' || CATALOGUE[k as UnitType]?.category === 'sludge';
-      // process units go along the main line, sludge units along a second row; each row spaced so nozzles never overlap
-      const units = draft.nodes.filter((n) => !isNonUnit(n) && !isSludgeKind(n.kind)).length;
-      const sludgeUnits = draft.nodes.filter((n) => isSludgeKind(n.kind)).length;
-      const pos = position ?? (isSludgeKind(kind) ? { x: 360 + sludgeUnits * 190, y: 420 } : { x: 180 + units * 190, y: 160 });
+      const node = createNode(kind, p.datasheet.Q, draft.nodes);
+      const pos = position ?? nextPfdPosition(draft.nodes, kind);
+      if (site) node.site = site;
       node.position = snap ? { x: Math.round(pos.x / GRID) * GRID, y: Math.round(pos.y / GRID) * GRID } : pos;
       setDraft((g) => ({ ...g, nodes: [...g.nodes, node] }));
       setSelNodes(new Set([node.id]));
@@ -373,20 +348,10 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
     if (!clip.current || !p || !editable) return;
     const src = clip.current;
     setDraft((g) => {
-      const map = new Map<string, string>();
-      const nodes = [...g.nodes];
-      for (const n of src.nodes) {
-        if (!isUnitUnlocked(n.kind, tech)) continue;
-        const fresh = makeNode(n.kind, p.datasheet.Q, nodes);
-        const pos = n.position ?? { x: 200, y: 200 };
-        const added: PNode = { ...fresh, params: { ...n.params }, position: { x: pos.x + 40, y: pos.y + 40 } };
-        map.set(n.id, added.id);
-        nodes.push(added);
-      }
-      const edges = [...g.edges, ...src.edges.map((e) => ({ id: newEdgeId(), from: map.get(e.from)!, to: map.get(e.to)!, ...(e.fromPort ? { fromPort: e.fromPort } : {}) }))];
-      setSelNodes(new Set(map.values()));
-      clip.current = { nodes: src.nodes.map((n) => ({ ...n, position: n.position ? { x: n.position.x + 40, y: n.position.y + 40 } : n.position })), edges: src.edges };
-      return { nodes, edges };
+      const r = pasteNodes(g, src, p.datasheet.Q, (k) => isUnitUnlocked(k, tech));
+      setSelNodes(new Set(r.added));
+      clip.current = r.nextClip;
+      return r.graph;
     });
   }, [p, editable, setDraft, tech]);
 

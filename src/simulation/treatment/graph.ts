@@ -50,6 +50,8 @@ export interface PNode {
   bypass?: boolean;
   /** drawn mirrored (inlet on the right, outlet on the left) — UI only */
   flip?: boolean;
+  /** position on the 3D site plan, metres (x east, z south) and rotation — UI only, separate from the PFD layout */
+  site?: { x: number; z: number; rot: 0 | 90 | 180 | 270 };
   /** instrumentation / redundancy switched on or off (missing = standard set installed) — see instrumentation.ts */
   inst?: Partial<Record<InstKey, boolean>>;
 }
