@@ -1,9 +1,11 @@
+/// <reference types="vite/client" />
 /**
  * Unit models for the 3D site, built from primitives at the real size from dims.ts (C1 palette: concrete grey, steel,
  * yellow handrails, white GRP tanks, coloured water). Local frame: flow along +x, y up, ground at y = 0.
  */
-import { useMemo } from 'react';
+import { Component, Suspense, useMemo, type ReactNode } from 'react';
 import * as THREE from 'three';
+import { useGLTF } from '@react-three/drei';
 import type { Dims } from './dims';
 
 const mat = (color: string, o: Partial<THREE.MeshStandardMaterialParameters> = {}) => new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05, ...o });
@@ -333,8 +335,56 @@ function Terminal({ d, water }: { d: Dims; water: string }) {
   }
 }
 
-/** the model for a unit's shape */
-export function UnitModel({ d, water }: { d: Dims; water: string }) {
+/**
+ * Detailed Meshy models (GLB) for fixed-size skids (art/README.md). Each is scaled uniformly to fit the unit's
+ * footprint and height from dims.ts and set on the ground; if a file is missing or fails, the code-built model shows.
+ */
+export const GLB_MODELS: Partial<Record<string, string>> = {
+  // RO skid pilot (2026-11-28, 30 credits) not used: a dark artefact from the source sprite was baked into the mesh and the
+  // file was 4 MB; the code-built skid reads as well. The GLB is kept in art/source/models/ro.glb. Add entries as 'kind': 'models/x.glb'.
+};
+
+class Fallback extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+function GlbModel({ url, d }: { url: string; d: Dims }) {
+  const { scene } = useGLTF(url);
+  const obj = useMemo(() => {
+    const o = scene.clone(true);
+    const box = new THREE.Box3().setFromObject(o);
+    const size = box.getSize(new THREE.Vector3());
+    const s = Math.min(d.w / Math.max(size.x, 1e-6), d.d / Math.max(size.z, 1e-6), (d.h * 1.4) / Math.max(size.y, 1e-6));
+    o.scale.setScalar(s);
+    const b2 = new THREE.Box3().setFromObject(o);
+    const c = b2.getCenter(new THREE.Vector3());
+    o.position.set(-c.x, -b2.min.y, -c.z);
+    return o;
+  }, [scene, d.w, d.d, d.h]);
+  return <primitive object={obj} />;
+}
+
+/** the model for a unit: its Meshy GLB where one exists, else the code-built shape */
+export function UnitModel({ d, water, kind }: { d: Dims; water: string; kind?: string }) {
+  const glb = kind ? GLB_MODELS[kind] : undefined;
+  const built = <BuiltModel d={d} water={water} />;
+  if (!glb) return built;
+  return (
+    <Fallback fallback={built}>
+      <Suspense fallback={built}>
+        <GlbModel url={`${import.meta.env.BASE_URL}${glb}`} d={d} />
+      </Suspense>
+    </Fallback>
+  );
+}
+
+function BuiltModel({ d, water }: { d: Dims; water: string }) {
   return useMemo(() => {
     switch (d.shape) {
       case 'rectBasin':

@@ -666,6 +666,25 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
                   setSelNodes(new Set());
                   setSelEdges(new Set());
                 }}
+                editable={editable}
+                onEdit={(fn, key) => {
+                  if (editable) setDraft(fn, key);
+                }}
+                onAdd={(kind, site) => addUnit(kind, undefined, site)}
+                onDelete={(nodeIds, edgeIds) => {
+                  if (!editable) return;
+                  if (nodeIds.length) removeNodes(nodeIds);
+                  if (edgeIds.length) {
+                    setDraft((g) => ({ ...g, edges: g.edges.filter((e) => !edgeIds.includes(e.id)) }));
+                    setSelEdges(new Set());
+                  }
+                }}
+                onDuplicate={() => {
+                  if (copySel()) paste();
+                }}
+                onConnect={(from, port, to) => {
+                  if (editable) setDraft((g) => connect(g, from, port, to));
+                }}
               />
             </Suspense>
           </div>

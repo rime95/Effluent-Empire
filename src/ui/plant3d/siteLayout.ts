@@ -34,7 +34,10 @@ export function siteLayout(g: ProcessGraph, Q: number): Placed[] {
     const key = Math.round(a.pos.y / ROW_PX);
     rows.set(key, [...(rows.get(key) ?? []), a]);
   }
-  let z = 0;
+  // with units already placed by the player, unplaced ones (e.g. just added from the palette) go in a strip beyond them
+  const pinned = all.filter((a) => a.n.site);
+  let z = pinned.length ? Math.max(...pinned.map((a) => a.n.site!.z + halfExtents(a.dims, a.n.site!.rot).hz)) + SITE_GAP * 3 : 0;
+  const x0 = pinned.length ? Math.min(...pinned.map((a) => a.n.site!.x - halfExtents(a.dims, a.n.site!.rot).hx)) : 0;
   for (const key of [...rows.keys()].sort((a, b) => a - b)) {
     const row = rows.get(key)!.sort((a, b) => a.pos.x - b.pos.x);
     // split the row into lanes of at most LANE_MAX (a unit longer than a lane gets a lane of its own)
@@ -54,7 +57,7 @@ export function siteLayout(g: ProcessGraph, Q: number): Placed[] {
       const laneZ = z + depth / 2;
       const back = li % 2 === 1;
       const total = lane.reduce((s, a) => s + a.dims.w, 0) + (lane.length - 1) * (SITE_GAP + 1);
-      let x = back ? total : 0;
+      let x = x0 + (back ? total : 0);
       for (const a of lane) {
         const cx = back ? x - a.dims.w / 2 : x + a.dims.w / 2;
         out.push({ node: a.n, dims: a.dims, x: cx, z: laneZ, rot: back ? 180 : 0, placed: false });
@@ -72,4 +75,17 @@ export function siteLayout(g: ProcessGraph, Q: number): Placed[] {
 export function overlaps(a: Placed, b: Placed, clearance = 0): boolean {
   const ea = halfExtents(a.dims, a.rot), eb = halfExtents(b.dims, b.rot);
   return Math.abs(a.x - b.x) < ea.hx + eb.hx + clearance && Math.abs(a.z - b.z) < ea.hz + eb.hz + clearance;
+}
+
+/** snap a site coordinate to the 1 m grid */
+export const snapM = (v: number) => Math.round(v);
+
+/**
+ * Pin the current layout: every unit gets its present site position written into node.site, so moving one unit in
+ * 3D does not reshuffle the auto-placed ones. Returns the graph unchanged if every unit is already pinned.
+ */
+export function pinLayout(g: ProcessGraph, Q: number): ProcessGraph {
+  if (g.nodes.every((n) => n.site)) return g;
+  const at = new Map(siteLayout(g, Q).map((p) => [p.node.id, p]));
+  return { ...g, nodes: g.nodes.map((n) => (n.site ? n : { ...n, site: { x: snapM(at.get(n.id)!.x), z: snapM(at.get(n.id)!.z), rot: at.get(n.id)!.rot } })) };
 }

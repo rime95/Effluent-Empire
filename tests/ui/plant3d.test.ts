@@ -69,3 +69,21 @@ describe('default site plan', () => {
     expect([p.x, p.z, p.rot, p.placed]).toEqual([120, -40, 90, true]);
   });
 });
+
+describe('pinning the layout before a 3D edit', () => {
+  it('writes every unit its current position (nothing moves) and is idempotent', async () => {
+    const { pinLayout } = await import('../../src/ui/plant3d/siteLayout');
+    const e = generateEnquiry(4, 0, 90, { tech: TECH_ORDER, force: { tier: 'mega' } });
+    const g = tierDesign('mega', 'plating', e.trueStream, TECH_ORDER, 4).graph;
+    const before = new Map(siteLayout(g, e.trueStream.Q).map((p) => [p.node.id, p]));
+    const pinned = pinLayout(g, e.trueStream.Q);
+    expect(pinned.nodes.every((n) => n.site)).toBe(true);
+    for (const p of siteLayout(pinned, e.trueStream.Q)) {
+      const b = before.get(p.node.id)!;
+      expect(Math.abs(p.x - b.x)).toBeLessThanOrEqual(0.5);
+      expect(Math.abs(p.z - b.z)).toBeLessThanOrEqual(0.5);
+      expect(p.rot).toBe(b.rot);
+    }
+    expect(pinLayout(pinned, e.trueStream.Q)).toBe(pinned);
+  });
+});

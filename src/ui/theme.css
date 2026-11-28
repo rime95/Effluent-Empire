@@ -397,3 +397,7 @@ body.resizing-y, body.resizing-y * { cursor: row-resize !important; user-select:
 .site3d-bar .tb-status { font-family: var(--mono); font-size: 11px; color: var(--ink-muted); padding: 0 8px; }
 .u3-label { font-family: var(--mono); font-size: 10.5px; font-weight: 600; color: #fff; background: rgba(13, 27, 42, 0.78); border-radius: 4px; padding: 1px 6px; white-space: nowrap; transform: translateY(-50%); }
 .u3-label.sel { background: #00a9c8; color: #04212a; }
+.site3d-bar .tb-sep { width: 1px; align-self: stretch; background: var(--ink-line); margin: 2px 3px; }
+.site3d-bar .tb:disabled { opacity: 0.35; cursor: default; }
+.site3d-msg { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 7; background: rgba(13, 27, 42, 0.92); color: #fff; border: 1px solid #00a9c8; border-radius: 6px; padding: 6px 14px; font-size: 12.5px; max-width: 70%; text-align: center; pointer-events: none; }
+.site3d-msg.bad { border-color: var(--alarm); color: #ffd0c8; }
