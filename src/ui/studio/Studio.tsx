@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
+import { Suspense, lazy, memo, useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { ewAutoSize } from '../../simulation/chemistry/electrowinning';
 import {
   Background,
@@ -45,6 +45,8 @@ import { Splitter } from '../components/Splitter';
 
 const UNIT_ORDER: UnitType[] = ['eq', 'oilSep', 'daf', 'clarifier', 'sandFilter', 'carbon', 'crReduction', 'neutralisation', 'precipitation', 'sulfide', 'aop', 'ionExchange', 'electrowinning', 'coagulation', 'activatedSludge', 'uasb', 'mbr', 'uf', 'ro', 'evaporator', 'thickener', 'filterPress', 'dryer', 'splitter', 'mixer'];
 const GRID = 20;
+/** 3D site view: its own chunk (three.js), loaded the first time the tab opens */
+const Site3D = lazy(() => import('../plant3d/Site3D'));
 /** Short reagent names for the dosing-package labels on the PFD. */
 function shortChem(name: string): string {
   if (/NaOH/.test(name)) return 'NaOH';
@@ -224,7 +226,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
     const t = setTimeout(() => rf.fitView({ padding: 0.25, maxZoom: 1.1, duration: 200 }), 120);
     return () => clearTimeout(t);
   }, [st.preset, L.focus]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [sheet, setSheet] = useState<'pfd' | 'pid'>('pfd');
+  const [sheet, setSheet] = useState<'pfd' | 'pid' | '3d'>('pfd');
   const rfEdges: Edge[] = useMemo(
     () =>
       draft.edges.map((e) => ({
@@ -632,7 +634,42 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
           <button className={sheet === 'pid' ? 'on' : ''} onClick={() => setSheet('pid')} title="Piping & instrumentation diagram — generated from the PFD and the instruments chosen per unit">
             P&amp;ID
           </button>
+          <button className={sheet === '3d' ? 'on' : ''} onClick={() => setSheet('3d')} title="3D site: the plant at real size on its plot — same design as the PFD">
+            3D
+          </button>
         </div>
+        {sheet === '3d' && (
+          <div className="pid-wrap site-wrap">
+            <Suspense fallback={<div className="site3d-loading">Loading 3D site…</div>}>
+              <Site3D
+                graph={draft}
+                sim={sim}
+                Q={p.datasheet.Q}
+                standard={p.enquiry.standard}
+                selNodes={selNodes}
+                selEdges={selEdges}
+                onSelectNode={(id, add) => {
+                  setSelEdges(new Set());
+                  setSelNodes((cur) => {
+                    if (!add) return new Set([id]);
+                    const n = new Set(cur);
+                    if (n.has(id)) n.delete(id);
+                    else n.add(id);
+                    return n;
+                  });
+                }}
+                onSelectEdge={(id) => {
+                  setSelNodes(new Set());
+                  setSelEdges(new Set([id]));
+                }}
+                onClear={() => {
+                  setSelNodes(new Set());
+                  setSelEdges(new Set());
+                }}
+              />
+            </Suspense>
+          </div>
+        )}
         {sheet === 'pid' && (
           <div className="pid-wrap">
             <PidSheet
@@ -646,7 +683,7 @@ function StudioInner({ go }: { go: (s: Screen) => void }) {
             />
           </div>
         )}
-        <div className="studio-toolbar" style={{ display: sheet === 'pid' ? 'none' : undefined }}>
+        <div className="studio-toolbar" style={{ display: sheet !== 'pfd' ? 'none' : undefined }}>
           <button className="tb" onClick={hist.undo} disabled={!editable || !hist.canUndo} title="Undo (Ctrl+Z)">
             ↶
           </button>
